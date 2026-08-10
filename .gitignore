@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+secrets.json
+*.env
+data/*.csv
+data/*.parquet
+data/*.db
+models/*.pkl
+models/*.joblib
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+.cursor/
+write_exp6.py
