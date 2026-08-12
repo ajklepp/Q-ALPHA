@@ -1,0 +1,12 @@
+{
+  "pool": 3322.08,
+  "starting_pool": 3000.0,
+  "deployed": 0.0,
+  "peak_pool": 3000.0,
+  "total_trades": 1,
+  "winning_trades": 0,
+  "open_positions": 0,
+  "tranche3_only": 0,
+  "last_updated": "2026-08-12 01:06:41",
+  "eligible_for_reentry": []
+}

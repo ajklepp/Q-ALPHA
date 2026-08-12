@@ -1,0 +1,44 @@
+{
+  "scan_date": "2026-08-12",
+  "scan_time": "00:56:52",
+  "regime": {
+    "spy_regime": "BULL",
+    "vix_regime": "NORMAL",
+    "spy_price": 770.56,
+    "spy_sma50": 747.8392
+  },
+  "candidates": [
+    {
+      "ticker": "SMCI",
+      "gap_estimate": 0.075633,
+      "pm_vol_ratio": 2.11,
+      "news_catalyst": false,
+      "news_headline": null,
+      "prev_close": 31.6,
+      "premarket_price": 33.99,
+      "rank": 1,
+      "order_plan": {
+        "ticker": "SMCI",
+        "entry_price": 33.99,
+        "stop_price": 31.82,
+        "target_1r": 36.16,
+        "target_2r": 38.33,
+        "target_3r": 40.49,
+        "position_value": 271.92,
+        "shares": 8,
+        "tranche_1_shares": 2,
+        "tranche_2_shares": 2,
+        "tranche_3_shares": 4,
+        "risk_dollars": 17.34,
+        "reward_dollars": 34.68,
+        "rr_ratio": 2.0,
+        "vix_adj": 1.0,
+        "valid": true,
+        "skip_reason": ""
+      },
+      "atr_14": 2.1675
+    }
+  ],
+  "total_candidates": 1,
+  "scan_duration_seconds": 22.01
+}

@@ -5,6 +5,10 @@ __pycache__/
 .env
 secrets.json
 *.env
+.streamlit/secrets.toml
+candidates/pool_state.json
+candidates/paper_trades.json
+candidates/pending_approvals.json
 data/*.csv
 data/*.parquet
 data/*.db
