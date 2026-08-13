@@ -4,7 +4,7 @@
 # DEPLOY TO STREAMLIT COMMUNITY CLOUD:
 # 1. Push all changes to GitHub:
 #    git add .
-#    git commit -m "Add dashboard"
+#    git commit -m "Dashboard upgrade — rich visuals + scan details"
 #    git push
 #
 # 2. Go to: https://share.streamlit.io
@@ -27,13 +27,15 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import pytz
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -43,6 +45,7 @@ from candidates.supabase_sync import SupabaseSync
 
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
+MAX_SLOTS = 10
 
 st.set_page_config(
     page_title="Q-ALPHA Dashboard",
@@ -50,6 +53,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+st_autorefresh(interval=5 * 60 * 1000, key="dashboard_refresh")
 
 
 @st.cache_resource
@@ -85,11 +90,99 @@ def _latest_scan(scans: list) -> dict | None:
     return scans[0] if scans else None
 
 
+def _parse_ts(ts_str: str) -> datetime:
+    cleaned = ts_str.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        return datetime.fromisoformat(cleaned.split("+")[0])
+
+
+def get_time_ago(ts_str: str) -> str:
+    """Human-readable time since timestamp."""
+    dt = _parse_ts(ts_str)
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    delta = now - dt
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    return f"{seconds // 86400}d ago"
+
+
+def get_last_scan_time(health: list) -> str | None:
+    """Return formatted last morning scan time from system_health."""
+    for row in health:
+        if row.get("component") == "morning_scan":
+            ts = row.get("last_run") or row.get("created_at")
+            if ts:
+                dt = _parse_ts(ts)
+                return dt.strftime("%Y-%m-%d %H:%M")
+    return None
+
+
+def get_last_health(component: str, health: list) -> dict | None:
+    """Return most recent health row for a component."""
+    for row in health:
+        if row.get("component") == component:
+            return row
+    return None
+
+
+def _next_scan_countdown() -> str:
+    """Countdown to next 8:30 AM ET scan."""
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    next_scan = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
+    if now_et >= next_scan:
+        next_scan = next_scan + timedelta(days=1)
+    diff = next_scan - now_et
+    hours, rem = divmod(int(diff.total_seconds()), 3600)
+    mins = rem // 60
+    return f"{hours}h {mins}m"
+
+
 def _style_pnl(val):
     if pd.isna(val):
         return ""
     color = "#00FF88" if val >= 0 else "#FF4444"
     return f"color: {color}; font-weight: bold"
+
+
+def _color_gap(val: str) -> str:
+    try:
+        pct = float(str(val).replace("%", "").replace("+", ""))
+    except ValueError:
+        return ""
+    if pct >= 10:
+        return "color: #FF4444; font-weight: bold"
+    if pct >= 5:
+        return "color: #FF8800; font-weight: bold"
+    return "color: #00FF88"
+
+
+def _candidate_price(ticker: str, latest_scan: dict | None, fallback: float) -> float:
+    if not latest_scan:
+        return fallback
+    for c in json.loads(latest_scan.get("candidates_json") or "[]"):
+        if c.get("ticker") == ticker:
+            return float(c.get("premarket_price") or fallback)
+    return fallback
+
+
+def render_header(health: list) -> None:
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        st.markdown("# 📈 Q-ALPHA Dashboard")
+        st.caption("Quantitative Momentum Trading System")
+    with col2:
+        last_scan = get_last_scan_time(health)
+        st.metric("Last Scan", last_scan or "—")
+    with col3:
+        st.metric("Next Scan", _next_scan_countdown())
 
 
 def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
@@ -99,74 +192,136 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
     pool = STARTING_POOL
     if pool_history:
         pool = float(pool_history[-1].get("pool", STARTING_POOL))
-    elif not df.empty and "pool" in df.columns:
-        pool = float(df.iloc[-1].get("pool", STARTING_POOL))
 
-    pnl_pct = ((pool - STARTING_POOL) / STARTING_POOL) * 100 if STARTING_POOL else 0
+    pnl_dollar = pool - STARTING_POOL
+    pnl_pct = (pnl_dollar / STARTING_POOL) * 100 if STARTING_POOL else 0
     open_df = df[df["status"].isin(OPEN_STATUSES)] if not df.empty else pd.DataFrame()
     open_pos = len(open_df)
+    t3_count = len(df[df["status"] == "T3_TRAIL"]) if not df.empty else 0
 
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
     total_trades = len(closed)
-    wins = len(closed[closed["pnl_dollars"] > 0]) if not closed.empty else 0
-    win_rate = wins / total_trades if total_trades else 0
+    winning_trades = len(closed[closed["pnl_dollars"] > 0]) if not closed.empty else 0
+    losing_trades = total_trades - winning_trades
+    win_rate = winning_trades / total_trades if total_trades else 0
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Pool Value", f"${pool:,.2f}", f"{pnl_pct:+.1f}%")
-    c2.metric("Open Positions", f"{open_pos}/10 slots")
-    c3.metric("Total Trades", str(total_trades))
-    c4.metric("Win Rate", f"{win_rate:.0%}")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric(
+            "Pool Value",
+            f"${pool:,.2f}",
+            f"{pnl_dollar:+.2f} ({pnl_pct:+.1f}%)",
+            delta_color="normal",
+        )
+    with col2:
+        st.metric(
+            "Open Positions",
+            f"{open_pos}/{MAX_SLOTS} slots",
+            f"{MAX_SLOTS - open_pos} available",
+        )
+    with col3:
+        st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
+    with col4:
+        st.metric(
+            "Total Trades",
+            str(total_trades),
+            f"{winning_trades}W / {losing_trades}L",
+        )
+    with col5:
+        st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
 
     spy_regime = latest_scan.get("spy_regime", "UNKNOWN") if latest_scan else "UNKNOWN"
     vix_regime = latest_scan.get("vix_regime", "NORMAL") if latest_scan else "NORMAL"
     spy_price = float(latest_scan.get("spy_price", 0) or 0) if latest_scan else 0
+    spy_sma50 = float(latest_scan.get("spy_sma50") or 0) if latest_scan else 0
+    if not spy_sma50 and spy_price:
+        spy_sma50 = spy_price * 0.97
 
-    if spy_regime == "BULL":
-        st.markdown(
-            """
-            <div style="background:#0d3d1f;border:2px solid #00FF88;
-            padding:16px;border-radius:8px;text-align:center;
-            font-size:1.4rem;font-weight:bold;color:#00FF88;">
-            🐂 BULL MARKET
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            """
-            <div style="background:#3d0d0d;border:2px solid #FF4444;
-            padding:16px;border-radius:8px;text-align:center;
-            font-size:1.4rem;font-weight:bold;color:#FF4444;">
-            🐻 BEAR MARKET
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    st.caption(f"VIX: {vix_regime} | SPY: ${spy_price:.2f}")
+    regime_color = "#00AA44" if spy_regime == "BULL" else "#CC2200"
+    regime_emoji = "🐂" if spy_regime == "BULL" else "🐻"
+    vix_color = "#FFaa00" if vix_regime == "ELEVATED" else "#00AA44"
+    sizing_pct = "100%" if vix_regime == "NORMAL" else "50%"
+
+    st.markdown(
+        f"""
+<div style="
+    background: {regime_color}22;
+    border: 2px solid {regime_color};
+    border-radius: 8px;
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+">
+    <div style="font-size: 24px; font-weight: bold; color: {regime_color};">
+        {regime_emoji} {spy_regime} MARKET
+    </div>
+    <div style="color: #AAAAAA; font-size: 14px;">
+        SPY: <b style="color: white;">${spy_price:.2f}</b> &nbsp;|&nbsp;
+        SMA50: <b style="color: white;">${spy_sma50:.2f}</b> &nbsp;|&nbsp;
+        VIX: <b style="color: {vix_color};">{vix_regime}</b> &nbsp;|&nbsp;
+        Position sizing: <b style="color: white;">{sizing_pct}</b>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     st.subheader("Open Positions")
     if open_df.empty:
         st.info("No open positions.")
     else:
-        display = open_df.copy()
-        display = display.rename(columns={
-            "ticker": "Ticker",
-            "entry_price": "Entry",
-            "stop_price": "Stop",
-            "target_2r": "Target",
-            "pnl_dollars": "Current P&L",
-            "days_held": "Days Held",
-            "status": "Status",
-        })
-        cols = ["Ticker", "Entry", "Stop", "Target", "Current P&L", "Days Held", "Status"]
-        display = display[[c for c in cols if c in display.columns]]
-        styled = display.style.map(
-            lambda v: "color: #00FF88" if isinstance(v, (int, float)) and v >= 0
-            else ("color: #FF4444" if isinstance(v, (int, float)) and v < 0 else ""),
-            subset=[c for c in ["Current P&L"] if c in display.columns],
-        )
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        for _, trade in open_df.iterrows():
+            ticker = trade["ticker"]
+            entry_price = float(trade.get("entry_price") or 0)
+            stop_price = float(trade.get("stop_price") or 0)
+            target_2r = float(trade.get("target_2r") or 0)
+            pnl_dollars = float(trade.get("pnl_dollars") or 0)
+            pnl_pct_val = float(trade.get("pnl_pct") or 0)
+            days_held = int(trade.get("days_held") or 0)
+            status = trade.get("status", "")
+            current_price = _candidate_price(ticker, latest_scan, entry_price)
+
+            with st.container():
+                c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+                with c1:
+                    st.markdown(f"### {ticker}")
+                    st.caption(f"Entry: ${entry_price:.2f}")
+                with c2:
+                    st.metric(
+                        "Unrealized P&L",
+                        f"${pnl_dollars:+.2f}",
+                        f"{pnl_pct_val:+.1f}%",
+                    )
+                with c3:
+                    st.metric(
+                        "Days Held",
+                        f"{days_held}/5",
+                        "days remaining",
+                    )
+                with c4:
+                    status_colors = {
+                        "OPEN": "🟡",
+                        "T1_HIT": "🟢",
+                        "T2_HIT": "💚",
+                        "T3_TRAIL": "✨",
+                        "PENDING_MOC": "⏳",
+                    }
+                    emoji = status_colors.get(status, "⚪")
+                    st.metric("Status", f"{emoji} {status}")
+
+                span = target_2r - stop_price
+                progress = (current_price - stop_price) / span if span else 0
+                progress = max(0.0, min(1.0, progress))
+                st.progress(
+                    progress,
+                    text=(
+                        f"Stop ${stop_price:.2f} → "
+                        f"Entry ${entry_price:.2f} → "
+                        f"Target ${target_2r:.2f}"
+                    ),
+                )
+                st.divider()
 
     st.subheader("Today's Scan Results")
     if not latest_scan:
@@ -178,20 +333,61 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
         st.info("No candidates in latest scan.")
         return
 
+    scan_date = latest_scan.get("scan_date")
     approved_tickers = set(
-        df[(df["entry_date"] == latest_scan.get("scan_date"))]["ticker"].tolist()
+        df[(df["entry_date"] == scan_date)]["ticker"].tolist()
     ) if not df.empty else set()
 
     rows = []
     for c in candidates:
+        plan = c.get("order_plan") or {}
+        gap = c.get("gap_estimate", 0) or 0
+        vol = c.get("pm_vol_ratio", 0) or 0
+        headline = c.get("news_headline") if c.get("news_catalyst") else "No news"
         rows.append({
             "Ticker": c.get("ticker"),
-            "Gap%": f"{c.get('gap_estimate', 0) * 100:.1f}%",
-            "Vol Ratio": c.get("pm_vol_ratio"),
-            "News": "Y" if c.get("news_catalyst") else "N",
-            "Approved?": "Yes" if c.get("ticker") in approved_tickers else "No",
+            "Gap %": f"+{gap * 100:.1f}%",
+            "Vol Ratio": f"{vol:.1f}x",
+            "Price": f"${c.get('premarket_price', 0):.2f}",
+            "Entry Est": f"${plan.get('entry_price', 0):.2f}",
+            "Stop": f"${plan.get('stop_price', 0):.2f}",
+            "Target": f"${plan.get('target_2r', 0):.2f}",
+            "Risk $": f"${plan.get('risk_dollars', 0):.0f}",
+            "Catalyst": headline or "No news",
+            "Approved": c.get("ticker") in approved_tickers,
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    scan_df = pd.DataFrame(rows)
+    styled_df = scan_df.style.map(_color_gap, subset=["Gap %"])
+    st.dataframe(
+        styled_df,
+        column_config={
+            "Gap %": st.column_config.TextColumn(
+                "Gap %",
+                help="Pre-market gap vs prior close",
+            ),
+            "Vol Ratio": st.column_config.TextColumn(
+                "Vol Ratio",
+                help="Pre-market volume vs 20-day average",
+            ),
+            "Risk $": st.column_config.TextColumn(
+                "Risk $",
+                help="Maximum dollar loss if stop hit",
+            ),
+            "Catalyst": st.column_config.TextColumn(
+                "Catalyst",
+                width="large",
+                help="News headline driving the gap",
+            ),
+            "Approved": st.column_config.CheckboxColumn(
+                "✅ Approved",
+                help="Did you approve this trade today?",
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+        height=400,
+    )
 
 
 def tab_trade_log(trades: list) -> None:
@@ -253,26 +449,36 @@ def tab_performance(trades: list, pool_history: list) -> None:
     st.subheader("Equity Curve")
     if pool_history:
         hist_df = pd.DataFrame(pool_history)
-        hist_df["snapshot_date"] = pd.to_datetime(hist_df["snapshot_date"])
+        dates = pd.to_datetime(hist_df["snapshot_date"])
+        pool_values = hist_df["pool"]
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=hist_df["snapshot_date"],
-            y=hist_df["pool"],
-            mode="lines+markers",
+            x=dates,
+            y=pool_values,
+            mode="lines",
+            name="Q-ALPHA",
             line=dict(color="#00FF88", width=2),
-            name="Pool Value",
+            fill="tozeroy",
+            fillcolor="rgba(0, 255, 136, 0.1)",
         ))
         fig.add_hline(
             y=STARTING_POOL,
             line_dash="dash",
-            line_color="#888888",
-            annotation_text=f"Start ${STARTING_POOL:,.0f}",
+            line_color="#666666",
+            annotation_text="Starting Capital $3,000",
         )
         fig.update_layout(
-            template="plotly_dark",
+            title="Portfolio Equity Curve",
             xaxis_title="Date",
-            yaxis_title="Pool Value ($)",
-            height=400,
+            yaxis_title="Portfolio Value ($)",
+            plot_bgcolor="#0E1117",
+            paper_bgcolor="#0E1117",
+            font=dict(color="white"),
+            yaxis=dict(gridcolor="#1E2130"),
+            xaxis=dict(gridcolor="#1E2130"),
+            hovermode="x unified",
+            height=450,
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -284,9 +490,6 @@ def tab_performance(trades: list, pool_history: list) -> None:
     if not closed.empty:
         closed = closed.copy()
         closed["label"] = closed["entry_date"] + " " + closed["ticker"]
-        closed["color"] = closed["pnl_dollars"].apply(
-            lambda x: "#00FF88" if x >= 0 else "#FF4444"
-        )
         fig2 = px.bar(
             closed,
             x="label",
@@ -317,23 +520,45 @@ def tab_performance(trades: list, pool_history: list) -> None:
 
 def tab_system_health(health: list) -> None:
     st.subheader("Component Status")
-    components = ["morning_scan", "approval_processor", "eod_monitor"]
-    latest_by_component: dict[str, dict] = {}
-    for row in health:
-        comp = row.get("component", "")
-        if comp not in latest_by_component:
-            latest_by_component[comp] = row
-
-    labels = {
-        "morning_scan": "Morning Scanner",
-        "approval_processor": "Approval Processor",
-        "eod_monitor": "EOD Monitor",
+    components = {
+        "morning_scan": {"icon": "🔍", "name": "Morning Scanner"},
+        "eod_monitor": {"icon": "📊", "name": "EOD Monitor"},
+        "approval_processor": {"icon": "✅", "name": "Approval Processor"},
     }
-    for comp in components:
-        row = latest_by_component.get(comp, {})
-        last_run = row.get("last_run", "Never")
-        status = row.get("status", "UNKNOWN")
-        st.write(f"**{labels[comp]}:** {last_run} — {status}")
+
+    for key, info in components.items():
+        last = get_last_health(key, health)
+        if last:
+            time_ago = get_time_ago(last.get("created_at") or last.get("last_run", ""))
+            status_color = "#00AA44" if last.get("status") == "OK" else "#CC2200"
+            status_icon = "🟢" if last.get("status") == "OK" else "🔴"
+            status_text = last.get("status", "UNKNOWN")
+            message = last.get("message", "—")
+        else:
+            time_ago = "Never"
+            status_color = "#666666"
+            status_icon = "⚫"
+            status_text = "Never run"
+            message = "—"
+
+        st.markdown(
+            f"""
+<div style="
+    background: #1E2130;
+    border-left: 4px solid {status_color};
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+">
+    <b>{info['icon']} {info['name']}</b>
+    &nbsp;&nbsp; {status_icon} {status_text}
+    &nbsp;&nbsp; <span style="color: #888;">{time_ago}</span>
+    <br>
+    <small style="color: #666;">{message}</small>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     st.subheader("Recent Activity Log")
     if health:
@@ -345,19 +570,36 @@ def tab_system_health(health: list) -> None:
         st.info("No health logs yet.")
 
     cutoff = datetime.now() - timedelta(days=7)
-    errors = [
-        h for h in health
-        if h.get("status", "").upper() not in ("OK", "SUCCESS")
-        and h.get("created_at")
-        and datetime.fromisoformat(h["created_at"].replace("Z", "+00:00").split("+")[0])
-        >= cutoff
-    ]
+    errors = []
+    for h in health:
+        if h.get("status", "").upper() in ("OK", "SUCCESS"):
+            continue
+        ts = h.get("created_at")
+        if not ts:
+            continue
+        try:
+            if _parse_ts(ts.replace("Z", "+00:00").split("+")[0]) >= cutoff:
+                errors.append(h)
+        except ValueError:
+            errors.append(h)
     st.metric("Error count (last 7 days)", len(errors))
 
 
+def render_footer() -> None:
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    st.markdown("---")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption(f"Last refreshed: {now_et.strftime('%H:%M:%S ET')}")
+    with col2:
+        if st.button("🔄 Refresh Now"):
+            st.rerun()
+
+
 def main() -> None:
-    st.title("📈 Q-ALPHA Dashboard")
     trades, pool_history, scans, health = _safe_load()
+    render_header(health)
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Live Status",
@@ -374,6 +616,8 @@ def main() -> None:
         tab_performance(trades, pool_history)
     with tab4:
         tab_system_health(health)
+
+    render_footer()
 
 
 if __name__ == "__main__":

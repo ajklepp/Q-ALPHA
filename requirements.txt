@@ -1,7 +1,9 @@
 streamlit
+streamlit-autorefresh
 plotly
 pandas
 supabase
 python-dotenv
 requests
 numpy
+pytz
