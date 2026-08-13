@@ -343,7 +343,10 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
         plan = c.get("order_plan") or {}
         gap = c.get("gap_estimate", 0) or 0
         vol = c.get("pm_vol_ratio", 0) or 0
-        headline = c.get("news_headline") if c.get("news_catalyst") else "No news"
+        catalyst = c.get(
+            "catalyst_summary",
+            c.get("news_headline", "No news"),
+        )
         rows.append({
             "Ticker": c.get("ticker"),
             "Gap %": f"+{gap * 100:.1f}%",
@@ -353,7 +356,7 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
             "Stop": f"${plan.get('stop_price', 0):.2f}",
             "Target": f"${plan.get('target_2r', 0):.2f}",
             "Risk $": f"${plan.get('risk_dollars', 0):.0f}",
-            "Catalyst": headline or "No news",
+            "Catalyst": catalyst,
             "Approved": c.get("ticker") in approved_tickers,
         })
 

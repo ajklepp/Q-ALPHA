@@ -257,14 +257,22 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
     print(f"  After vol ratio filter (≥{VOL_RATIO_MIN:.1f}x): {after_vol} candidates")
 
     candidates: list[dict] = []
+    try:
+        from candidates.catalyst_ai import summarize_catalyst, get_ticker_headlines
+    except ImportError:
+        from catalyst_ai import summarize_catalyst, get_ticker_headlines
+
     for row in vol_rows:
-        has_news, headline = fetch_news(row["ticker"], today_news_gte, api_key)
+        ticker = row["ticker"]
+        headlines = get_ticker_headlines(ticker, api_key)
+        ai_catalyst = summarize_catalyst(ticker, headlines)
         candidates.append({
-            "ticker": row["ticker"],
+            "ticker": ticker,
             "gap_estimate": round(row["gap_pct"], 6),
             "pm_vol_ratio": round(row["pm_vol_ratio"], 2),
-            "news_catalyst": has_news,
-            "news_headline": headline,
+            "catalyst_summary": ai_catalyst,
+            "news_catalyst": len(headlines) > 0,
+            "news_headline": headlines[0] if headlines else None,
             "prev_close": round(row["prev_close"], 4),
             "premarket_price": round(row["premarket_price"], 4),
         })
@@ -400,7 +408,7 @@ def format_telegram_message(scan_date: str, regime: dict, candidates: list) -> s
 
     display = candidates[:5]
     for c in display:
-        headline = c.get("news_headline") or "No news found"
+        headline = c.get("catalyst_summary") or c.get("news_headline") or "No news found"
         plan = c.get("order_plan") or {}
         lines.append(
             f"📈 {c['ticker']} +{c['gap_estimate']:.1%} gap | "

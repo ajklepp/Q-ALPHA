@@ -6,13 +6,15 @@
 #   modal secret create q-alpha-secrets \
 #     POLYGON_API_KEY=your_key \
 #     TELEGRAM_BOT_TOKEN=your_token \
-#     TELEGRAM_CHAT_ID=your_chat_id
+#     TELEGRAM_CHAT_ID=your_chat_id \
+#     OPENROUTER_API_KEY=your_key
 #
 # STEP 1: Create Modal secrets (one time only)
 #   modal secret create q-alpha-secrets \
 #     POLYGON_API_KEY=... \
 #     TELEGRAM_BOT_TOKEN=... \
-#     TELEGRAM_CHAT_ID=...
+#     TELEGRAM_CHAT_ID=... \
+#     OPENROUTER_API_KEY=...
 #
 # STEP 2: Test manually before deploy
 #   modal run candidates/scheduler.py::run_morning_scan
