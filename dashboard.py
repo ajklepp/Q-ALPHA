@@ -154,14 +154,14 @@ def _style_pnl(val):
 
 def _color_gap(val: str) -> str:
     try:
-        pct = float(str(val).replace("%", "").replace("+", ""))
-    except ValueError:
+        pct = float(str(val).replace("%", "").replace("+", "").strip())
+        if pct > 0:
+            return "color: #00FF88; font-weight: bold"
+        if pct < 0:
+            return "color: #FF4444; font-weight: bold"
+        return "color: #AAAAAA"
+    except Exception:
         return ""
-    if pct >= 10:
-        return "color: #FF4444; font-weight: bold"
-    if pct >= 5:
-        return "color: #FF8800; font-weight: bold"
-    return "color: #00FF88"
 
 
 def _candidate_price(ticker: str, latest_scan: dict | None, fallback: float) -> float:

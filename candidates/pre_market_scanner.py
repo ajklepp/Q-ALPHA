@@ -550,7 +550,17 @@ def _queue_pending_approvals(result: dict, saved_pool: dict | None) -> None:
     elif result["total_candidates"] == 0:
         print("  No candidates to approve")
     else:
-        tradable = trader.filter_candidates_for_trading(result["candidates"])
+        candidates = result["candidates"]
+        open_tickers = trader.get_open_full_positions()
+        before_count = len(candidates)
+        candidates = [
+            c for c in candidates
+            if c["ticker"] not in open_tickers
+        ]
+        blocked = before_count - len(candidates)
+        print(f"  Filtered {blocked} tickers already in portfolio")
+        print(f"  {len(candidates)} candidates after portfolio filter")
+        tradable = trader.filter_candidates_for_trading(candidates)
         if not tradable:
             send_telegram(
                 "💤 Q-ALPHA: Signals found but no slots available today.",
@@ -614,17 +624,22 @@ def run_scan() -> dict | None:
     )
     _queue_pending_approvals(result, saved_pool)
 
-    from supabase_sync import sync_to_supabase_safe
+    try:
+        from candidates.supabase_sync import SupabaseSync
 
-    def _sync_scan(sync):
+        sync = SupabaseSync()
         sync.upsert_scan(result)
         sync.log_health(
             "morning_scan",
             "OK",
-            f"{result['total_candidates']} candidates found",
+            f"{len(result['candidates'])} candidates",
         )
+        print("✅ Supabase sync successful")
+    except Exception as e:
+        print(f"❌ Supabase sync FAILED: {e}")
+        import traceback
 
-    sync_to_supabase_safe(_sync_scan)
+        traceback.print_exc()
 
     print(f"\nScan complete: {result['total_candidates']} candidates")
     return result

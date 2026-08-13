@@ -33,9 +33,11 @@ CANDIDATES = ROOT / "candidates"
 
 def _run_modal_cmd(args: list[str]) -> None:
     """Run a modal CLI command from the repo root."""
-    cmd = [sys.executable, "-m", "modal", *args]
+    cmd = [sys.executable, "-m", "modal"] + args
+    env = os.environ.copy()
+    env.pop("MODAL_ENVIRONMENT", None)
     print(f"  $ {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=ROOT, check=True)
+    subprocess.run(cmd, cwd=ROOT, check=True, env=env)
 
 
 def pull_state_from_modal() -> None:
@@ -71,14 +73,17 @@ def push_state_to_modal() -> None:
     _run_modal_cmd([
         "volume", "put", "qalpha-state",
         str(CANDIDATES / "paper_trades.json"), "paper_trades.json",
+        "--force",
     ])
     _run_modal_cmd([
         "volume", "put", "qalpha-state",
         str(CANDIDATES / "pool_state.json"), "pool_state.json",
+        "--force",
     ])
     _run_modal_cmd([
         "volume", "put", "qalpha-state",
         str(CANDIDATES / "pending_approvals.json"), "pending_approvals.json",
+        "--force",
     ])
 
 

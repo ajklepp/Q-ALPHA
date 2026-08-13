@@ -418,14 +418,27 @@ class PaperTrader:
     def _load_trades(self) -> list:
         return self.trades
 
+    def _ticker_already_active(self, ticker: str) -> bool:
+        """
+        Returns True if ticker has a full active position.
+        Returns False if ticker only has T3_TRAIL or no position.
+        """
+        trades = self._load_trades()
+        for trade in trades:
+            if trade.get("ticker") == ticker:
+                if trade.get("status") in ("OPEN", "T1_HIT", "T2_HIT"):
+                    return True
+        return False
+
     def get_open_full_positions(self) -> list:
-        """Returns list of tickers with full open positions
-        (T1 or T2 not yet hit — occupying a slot).
-        T3_TRAIL positions are excluded (slot released)."""
+        """
+        Returns tickers with OPEN/T1_HIT/T2_HIT positions.
+        T3_TRAIL positions NOT included — re-entry is allowed.
+        """
         trades = self._load_trades()
         return [
             t["ticker"] for t in trades
-            if t.get("status") in ("OPEN", "T1_HIT")
+            if t.get("status") in ("OPEN", "T1_HIT", "T2_HIT")
         ]
 
     def get_trades_today_count(self) -> int:
@@ -619,6 +632,17 @@ class PaperTrader:
         if not self.pool.can_open_trade() or self.slots_in_use() >= MAX_OPEN_POSITIONS:
             return None
         if not self.pool.can_open_today(self.get_trades_today_count()):
+            return None
+
+        ticker = candidate["ticker"].upper()
+        if self._ticker_already_active(ticker):
+            print(f"⚠️ {ticker}: already has active position — skipping")
+            load_dotenv()
+            bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+            TelegramClient(bot_token, chat_id).send(
+                f"⏭ {ticker} skipped — already in portfolio"
+            )
             return None
 
         trade = self.create_pending_trade(candidate, plan, atr)

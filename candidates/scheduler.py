@@ -60,6 +60,7 @@ image = (
         "pandas",
         "numpy",
         "python-dotenv",
+        "supabase",
         "tzdata",
     ])
     .add_local_dir(str(CANDIDATES_DIR), remote_path=CANDIDATES_MOUNT)
