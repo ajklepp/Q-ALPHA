@@ -47,16 +47,21 @@ def now_et() -> datetime:
 
 POLYGON_BASE = "https://api.polygon.io"
 GAP_MIN = 0.03
-VOL_RATIO_MIN = 1.0
-PRICE_MIN = 3.0
+GAP_MAX = 0.50
+VOL_RATIO_MIN = 2.0
+PRICE_MIN = 5.0
 PRICE_MAX = 500.0
-MIN_PREV_VOLUME = 100_000
+MIN_PREV_VOLUME = 300_000
+MIN_DOLLAR_VOLUME = 2_000_000  # $2M prev-day dollar volume
 MAX_CANDIDATES = 20
 MAX_TICKER_LEN = 5
 SNAPSHOT_PAGE_LIMIT = 250
 SNAPSHOT_TIMEOUT = 60
 REQUEST_TIMEOUT = 10
 POLYGON_PAGE_SLEEP = 0.12
+UNIVERSE_FILE = "universe.json"
+EXCLUDE_PATTERNS = frozenset({"NBIS", "NBIG", "NBIL"})
+REFERENCE_PAGE_LIMIT = 1000
 
 
 def load_dotenv_if_available():
@@ -159,6 +164,120 @@ def fetch_all_market_snapshots(api_key: str) -> list[dict]:
     return all_snapshots
 
 
+def universe_path() -> Path:
+    """universe.json on Modal volume or local candidates/."""
+    return state_path(UNIVERSE_FILE)
+
+
+def _normalize_universe(data: dict) -> dict:
+    """Migrate legacy string-only ticker lists to {symbol, type, name}."""
+    tickers = data.get("tickers", [])
+    if tickers and isinstance(tickers[0], str):
+        data["tickers"] = [
+            {"symbol": sym.upper(), "type": "CS", "name": ""}
+            for sym in tickers
+        ]
+    return data
+
+
+def get_cs_symbol_set(universe: dict) -> set[str]:
+    """Return uppercase symbols where Polygon type is CS (common stock)."""
+    symbols: set[str] = set()
+    for entry in universe.get("tickers", []):
+        if isinstance(entry, str):
+            symbols.add(entry.upper())
+        elif entry.get("type") == "CS":
+            symbols.add(str(entry.get("symbol", "")).upper())
+    symbols -= EXCLUDE_PATTERNS
+    return symbols
+
+
+def refresh_universe(api_key: str) -> dict:
+    """
+    Fetch active common stocks from Polygon and persist universe.json.
+    GET /v3/reference/tickers?type=CS&market=stocks&active=true
+    """
+    all_entries: list[dict] = []
+    path = "/v3/reference/tickers"
+    params = {
+        "type": "CS",
+        "market": "stocks",
+        "active": "true",
+        "limit": REFERENCE_PAGE_LIMIT,
+    }
+    page = 0
+
+    print("Refreshing universe (CS common stocks only)...")
+    while path:
+        data = polygon_get(path, params, api_key, timeout=REQUEST_TIMEOUT)
+        for row in data.get("results", []):
+            symbol = (row.get("ticker") or "").upper().strip()
+            if not symbol or symbol in EXCLUDE_PATTERNS:
+                continue
+            all_entries.append({
+                "symbol": symbol,
+                "type": row.get("type", "CS"),
+                "name": row.get("name", ""),
+            })
+        page += 1
+        if page % 5 == 0:
+            print(f"  Reference pages: {page} | CS tickers: {len(all_entries)}")
+
+        next_url = data.get("next_url")
+        if not next_url:
+            break
+        path = next_url.replace(POLYGON_BASE, "")
+        params = {}
+        time.sleep(POLYGON_PAGE_SLEEP)
+
+    payload = {
+        "last_updated": now_et().strftime("%Y-%m-%d"),
+        "tickers": all_entries,
+    }
+    out_path = universe_path()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"  Saved {len(all_entries):,} CS tickers → {out_path}")
+    return payload
+
+
+def load_universe_record(api_key: str | None = None) -> dict:
+    """Load universe.json; refresh from Polygon if missing or legacy format."""
+    path = universe_path()
+    if path.exists():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        tickers = raw.get("tickers", [])
+        if api_key and tickers and isinstance(tickers[0], str):
+            print("  Legacy universe detected — refreshing CS list from Polygon...")
+            return refresh_universe(api_key)
+        return _normalize_universe(raw)
+
+    fallback = CANDIDATES_DIR / UNIVERSE_FILE
+    if fallback.exists():
+        raw = json.loads(fallback.read_text(encoding="utf-8"))
+        tickers = raw.get("tickers", [])
+        if api_key and tickers and isinstance(tickers[0], str):
+            print("  Legacy universe detected — refreshing CS list from Polygon...")
+            return refresh_universe(api_key)
+        data = _normalize_universe(raw)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return data
+
+    if api_key:
+        return refresh_universe(api_key)
+    return {"last_updated": "", "tickers": []}
+
+
+def _passes_ticker_hygiene(ticker: str) -> bool:
+    """Reject warrants, units, and overly long symbols."""
+    if "." in ticker:
+        return False
+    if len(ticker) > MAX_TICKER_LEN:
+        return False
+    return True
+
+
 def _snapshot_premarket_price(tdata: dict) -> float | None:
     """Best available pre-market price from snapshot fields."""
     last_trade = tdata.get("lastTrade") or {}
@@ -201,34 +320,24 @@ def _parse_snapshot_row(tdata: dict) -> dict | None:
         "premarket_price": premarket_price,
         "gap_pct": gap_pct,
         "prev_volume": prev_volume,
+        "prev_dollar_volume": prev_volume * prev_close,
         "pm_volume": pm_volume,
         "avg_volume": avg_volume,
     }
 
 
-def _passes_price_volume_ticker_filters(row: dict) -> bool:
-    """Hard filters after gap detection: price, liquidity, ticker hygiene."""
-    ticker = row["ticker"]
-    prev_close = row["prev_close"]
-    if not (PRICE_MIN <= prev_close <= PRICE_MAX):
-        return False
-    if row["prev_volume"] < MIN_PREV_VOLUME:
-        return False
-    if "." in ticker:
-        return False
-    if len(ticker) > MAX_TICKER_LEN:
-        return False
-    return True
-
-
 def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict], dict]:
     """
-    Scan full NYSE + NASDAQ via Polygon snapshot; post-filter for gaps.
+    Scan NYSE + NASDAQ snapshot; apply CS universe + liquidity funnel.
     Returns (top candidates, funnel stats for logging/JSON).
     """
+    universe = load_universe_record(api_key)
+    cs_symbols = get_cs_symbol_set(universe)
+    total_universe = len(cs_symbols)
+    print(f"  Total tickers in universe: {total_universe:,}")
+
     snapshots = fetch_all_market_snapshots(api_key)
     snapshot_count = len(snapshots)
-    print(f"  Snapshot: {snapshot_count:,} tickers returned")
 
     parsed_rows: list[dict] = []
     for tdata in snapshots:
@@ -236,25 +345,50 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
         if row is not None:
             parsed_rows.append(row)
 
-    gap_rows = [r for r in parsed_rows if r["gap_pct"] >= GAP_MIN]
-    after_gap = len(gap_rows)
-    print(f"  After gap filter (≥{GAP_MIN:.0%}): {after_gap} candidates")
+    cs_rows = [
+        r for r in parsed_rows
+        if r["ticker"] in cs_symbols and _passes_ticker_hygiene(r["ticker"])
+    ]
+    n1 = len(cs_rows)
+    print(f"  After type=CS filter: {n1}")
 
-    price_vol_rows = [r for r in gap_rows if _passes_price_volume_ticker_filters(r)]
-    after_price_vol = len(price_vol_rows)
-    print(f"  After price/volume filter: {after_price_vol} candidates")
+    price_rows = [
+        r for r in cs_rows
+        if PRICE_MIN <= r["prev_close"] <= PRICE_MAX
+    ]
+    n2 = len(price_rows)
+    print(f"  After price >= ${PRICE_MIN:.0f}: {n2}")
 
-    vol_rows: list[dict] = []
-    for row in price_vol_rows:
+    prev_vol_rows = [r for r in price_rows if r["prev_volume"] >= MIN_PREV_VOLUME]
+    n3 = len(prev_vol_rows)
+    print(f"  After prev_volume >= {MIN_PREV_VOLUME:,}: {n3}")
+
+    dollar_rows = [
+        r for r in prev_vol_rows
+        if r["prev_dollar_volume"] >= MIN_DOLLAR_VOLUME
+    ]
+    n4 = len(dollar_rows)
+    print(f"  After dollar_volume >= ${MIN_DOLLAR_VOLUME / 1e6:.0f}M: {n4}")
+
+    gap_rows = [
+        r for r in dollar_rows
+        if GAP_MIN <= r["gap_pct"] <= GAP_MAX
+    ]
+    n5 = len(gap_rows)
+    print(f"  After gap {GAP_MIN:.0%}-{GAP_MAX:.0%}: {n5}")
+
+    vol_ratio_rows: list[dict] = []
+    for row in gap_rows:
         avg_vol = row["avg_volume"]
         today_vol = row["pm_volume"]
         vol_ratio = today_vol / avg_vol if avg_vol > 0 else 0.0
         if vol_ratio >= VOL_RATIO_MIN:
             row["pm_vol_ratio"] = vol_ratio
-            vol_rows.append(row)
+            vol_ratio_rows.append(row)
 
-    after_vol = len(vol_rows)
-    print(f"  After vol ratio filter (≥{VOL_RATIO_MIN:.1f}x): {after_vol} candidates")
+    n6 = len(vol_ratio_rows)
+    print(f"  After vol_ratio >= {VOL_RATIO_MIN:.1f}x: {n6}")
+    print(f"  Final candidates: {n6}")
 
     candidates: list[dict] = []
     try:
@@ -262,7 +396,7 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
     except ImportError:
         from catalyst_ai import summarize_catalyst, get_ticker_headlines
 
-    for row in vol_rows:
+    for row in vol_ratio_rows:
         ticker = row["ticker"]
         headlines = get_ticker_headlines(ticker, api_key)
         ai_catalyst = summarize_catalyst(ticker, headlines)
@@ -283,14 +417,17 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
     for i, candidate in enumerate(final_candidates, 1):
         candidate["rank"] = i
 
-    print(f"  Final candidates: {len(final_candidates)}")
-
     funnel = {
+        "universe_cs_count": total_universe,
         "snapshot_count": snapshot_count,
-        "after_gap_filter": after_gap,
-        "after_price_volume_filter": after_price_vol,
-        "after_vol_ratio_filter": after_vol,
-        "final_candidates": len(final_candidates),
+        "after_cs_filter": n1,
+        "after_price_filter": n2,
+        "after_prev_volume_filter": n3,
+        "after_dollar_volume_filter": n4,
+        "after_gap_filter": n5,
+        "after_vol_ratio_filter": n6,
+        "final_candidates": n6,
+        "returned_candidates": len(final_candidates),
     }
     return final_candidates, funnel
 
@@ -401,7 +538,7 @@ def format_telegram_message(scan_date: str, regime: dict, candidates: list) -> s
 
     lines.append(f"🔍 Q-ALPHA MORNING SCAN — {scan_date}")
     lines.append(
-        f"Universe: Full NYSE+NASDAQ | Regime: {regime['spy_regime']} | "
+        f"Universe: CS common stock | Regime: {regime['spy_regime']} | "
         f"VIX: {regime['vix_regime']}"
     )
     lines.append("─────────────────────")
@@ -450,7 +587,7 @@ def run_scan_core(
     scan_time = now_et_dt.strftime("%H:%M:%S")
     today_news_gte = scan_date
 
-    print("Scanning full NYSE + NASDAQ (~8,000 tickers)")
+    print("Scanning CS universe via full market snapshot")
     print("STEP 1: Fetching full market snapshot...")
     candidates, funnel = get_all_gap_candidates(api_key, today_news_gte)
 

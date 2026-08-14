@@ -35,7 +35,7 @@
 #   8:30 AM EDT — run_morning_scan        ("30 12 * * 1-5")
 #   9:25 AM EDT — local_approval_runner   ("25 13 * * 1-5", Windows Task Scheduler)
 #   4:15 PM EDT — run_eod_monitor         ("15 20 * * 1-5")
-#   6:00 AM EDT Mon — universe refresh    ("0 10 * * 1", if scheduled locally)
+#   6:00 AM EDT Mon — run_universe_refresh   ("0 10 * * 1", CS ticker list)
 # =============================================================================
 from __future__ import annotations
 
@@ -80,6 +80,35 @@ def _prepare_modal_imports() -> None:
     """Ensure candidate modules resolve state to /state/ volume."""
     if CANDIDATES_MOUNT not in sys.path:
         sys.path.insert(0, CANDIDATES_MOUNT)
+
+
+@app.function(
+    image=image,
+    schedule=modal.Cron("0 10 * * 1"),
+    secrets=[qalpha_secrets],
+    volumes={VOLUME_PATH: volume},
+    timeout=1800,
+    memory=1024,
+)
+def run_universe_refresh():
+    """
+    6:00 AM EDT Monday — refresh CS ticker universe from Polygon.
+    """
+    import os
+
+    os.environ["MODAL_ENVIRONMENT"] = "1"
+    _prepare_modal_imports()
+    from pre_market_scanner import load_dotenv_if_available, refresh_universe
+
+    load_dotenv_if_available()
+    api_key = os.environ.get("POLYGON_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("POLYGON_API_KEY not set")
+
+    try:
+        refresh_universe(api_key)
+    finally:
+        _commit_state()
 
 
 @app.function(
@@ -147,6 +176,7 @@ def main():
     print("Q-Alpha scheduler deployed via: modal deploy candidates/scheduler.py")
     print("Manual runs:")
     print("  modal run candidates/scheduler.py::run_morning_scan")
+    print("  modal run candidates/scheduler.py::run_universe_refresh")
     print("  modal run candidates/scheduler.py::run_eod_monitor")
     print("Local approval (9:25 AM ET, TWS required):")
     print("  python candidates/local_approval_runner.py")
