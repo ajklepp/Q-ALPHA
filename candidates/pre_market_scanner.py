@@ -48,7 +48,8 @@ def now_et() -> datetime:
 POLYGON_BASE = "https://api.polygon.io"
 GAP_MIN = 0.03
 GAP_MAX = 0.50
-VOL_RATIO_MIN = 2.0
+MIN_VOL_RATIO = 1.5  # will raise back to 2.0 after testing
+EXPECTED_PM_VOL_PCT = 0.10  # pre-market ~10% of avg daily volume
 PRICE_MIN = 5.0
 PRICE_MAX = 500.0
 MIN_PREV_VOLUME = 300_000
@@ -326,6 +327,78 @@ def _parse_snapshot_row(tdata: dict) -> dict | None:
     }
 
 
+def score_candidate(candidate: dict) -> float:
+    """
+    Score each candidate 0-100 based on signal quality.
+    Higher = better setup. Used to rank candidates.
+    """
+    score = 0.0
+
+    gap = candidate.get("gap_estimate", 0)
+    vol_ratio = candidate.get("pm_vol_ratio", 0)
+    price = candidate.get("prev_close", 0)
+    has_news = candidate.get("news_catalyst", False)
+    dollar_vol = candidate.get("prev_dollar_volume", 0)
+
+    # COMPONENT 1: Gap size (0-25 points)
+    # Sweet spot is 3-12%. Penalize huge gaps (exhaustion risk)
+    if 0.03 <= gap <= 0.06:
+        score += 25
+    elif 0.06 < gap <= 0.10:
+        score += 20
+    elif 0.10 < gap <= 0.15:
+        score += 12
+    elif 0.15 < gap <= 0.25:
+        score += 6
+    elif gap > 0.25:
+        score += 2
+
+    # COMPONENT 2: Volume ratio (0-30 points)
+    # Higher pre-market volume = more institutional interest
+    if vol_ratio >= 10.0:
+        score += 30
+    elif vol_ratio >= 7.0:
+        score += 25
+    elif vol_ratio >= 5.0:
+        score += 20
+    elif vol_ratio >= 3.0:
+        score += 14
+    elif vol_ratio >= 2.0:
+        score += 8
+    elif vol_ratio >= 1.5:
+        score += 4
+
+    # COMPONENT 3: Price sweet spot (0-20 points)
+    # $5-$50 is ideal for our position size and liquidity
+    if 5 <= price <= 20:
+        score += 20
+    elif 20 < price <= 50:
+        score += 18
+    elif 50 < price <= 100:
+        score += 12
+    elif 100 < price <= 200:
+        score += 8
+    elif price > 200:
+        score += 4
+
+    # COMPONENT 4: News catalyst (0-15 points)
+    if has_news:
+        score += 15
+
+    # COMPONENT 5: Dollar volume liquidity (0-10 points)
+    # More dollar volume = cleaner fills, less slippage
+    if dollar_vol >= 20_000_000:
+        score += 10
+    elif dollar_vol >= 10_000_000:
+        score += 8
+    elif dollar_vol >= 5_000_000:
+        score += 6
+    elif dollar_vol >= 2_000_000:
+        score += 4
+
+    return round(score, 1)
+
+
 def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict], dict]:
     """
     Scan NYSE + NASDAQ snapshot; apply CS universe + liquidity funnel.
@@ -379,15 +452,19 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
 
     vol_ratio_rows: list[dict] = []
     for row in gap_rows:
-        avg_vol = row["avg_volume"]
-        today_vol = row["pm_volume"]
-        vol_ratio = today_vol / avg_vol if avg_vol > 0 else 0.0
-        if vol_ratio >= VOL_RATIO_MIN:
-            row["pm_vol_ratio"] = vol_ratio
+        premarket_vol = row["pm_volume"]
+        avg_daily_vol = row["avg_volume"]
+        expected_pm_vol = avg_daily_vol * EXPECTED_PM_VOL_PCT
+        if expected_pm_vol > 0:
+            pm_vol_ratio = premarket_vol / expected_pm_vol
+        else:
+            pm_vol_ratio = 0.0
+        if pm_vol_ratio >= MIN_VOL_RATIO:
+            row["pm_vol_ratio"] = pm_vol_ratio
             vol_ratio_rows.append(row)
 
     n6 = len(vol_ratio_rows)
-    print(f"  After vol_ratio >= {VOL_RATIO_MIN:.1f}x: {n6}")
+    print(f"  After pm_vol_ratio >= {MIN_VOL_RATIO}x: {n6}")
     print(f"  Final candidates: {n6}")
 
     candidates: list[dict] = []
@@ -409,10 +486,28 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
             "news_headline": headlines[0] if headlines else None,
             "prev_close": round(row["prev_close"], 4),
             "premarket_price": round(row["premarket_price"], 4),
+            "prev_dollar_volume": round(row["prev_dollar_volume"], 2),
         })
         time.sleep(POLYGON_PAGE_SLEEP)
 
-    candidates.sort(key=lambda x: x["gap_estimate"], reverse=True)
+    for c in candidates:
+        c["quality_score"] = score_candidate(c)
+
+    candidates = sorted(
+        candidates,
+        key=lambda x: x["quality_score"],
+        reverse=True,
+    )
+
+    print("\nCandidate Rankings:")
+    for i, c in enumerate(candidates[:10]):
+        print(
+            f"  #{i + 1} {c['ticker']:6s} "
+            f"gap={c['gap_estimate']:+.1%} "
+            f"vol={c['pm_vol_ratio']:.1f}x "
+            f"score={c['quality_score']:.0f}/100"
+        )
+
     final_candidates = candidates[:MAX_CANDIDATES]
     for i, candidate in enumerate(final_candidates, 1):
         candidate["rank"] = i
@@ -549,7 +644,8 @@ def format_telegram_message(scan_date: str, regime: dict, candidates: list) -> s
         plan = c.get("order_plan") or {}
         lines.append(
             f"📈 {c['ticker']} +{c['gap_estimate']:.1%} gap | "
-            f"Vol: {c['pm_vol_ratio']:.1f}x"
+            f"PM Vol: {c['pm_vol_ratio']:.1f}x | "
+            f"Score: {c.get('quality_score', 0):.0f}/100"
         )
         if plan.get("valid"):
             lines.append(
@@ -654,7 +750,8 @@ def run_scan_core(
     print(f"  Candidates: {len(candidates)}")
     for c in candidates[:10]:
         print(f"    #{c['rank']} {c['ticker']} gap={c['gap_estimate']:.1%} "
-              f"vol={c['pm_vol_ratio']:.1f}x "
+              f"PM Vol={c['pm_vol_ratio']:.1f}x "
+              f"score={c.get('quality_score', 0):.0f}/100 "
               f"news={'Y' if c['news_catalyst'] else 'N'}")
     print(f"  Duration: {payload['scan_duration_seconds']:.1f}s")
 

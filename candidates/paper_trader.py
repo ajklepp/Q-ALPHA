@@ -546,6 +546,7 @@ class PaperTrader:
         """Build per-ticker Telegram approval message."""
         plan = candidate["order_plan"]
         ticker = candidate["ticker"]
+        score = candidate.get("quality_score", 0)
         gap = candidate["gap_estimate"]
         vol = candidate["pm_vol_ratio"]
         headline = candidate.get("news_headline") or "No news catalyst found"
@@ -562,7 +563,7 @@ class PaperTrader:
         t3 = plan["tranche_3_shares"]
 
         lines = [
-            f"🚨 Q-ALPHA TRADE SIGNAL — {ticker}",
+            f"🚨 Q-ALPHA TRADE SIGNAL — {ticker} [Score: {score:.0f}/100]",
             f"Entry ~${entry:.2f} | Stop ${stop:.2f} | Target ${t2:.2f}",
             f"Shares: {plan['shares']} | Risk: ${total_risk:.0f} | R/R: {plan['rr_ratio']:.1f}x",
             "",
@@ -600,6 +601,7 @@ class PaperTrader:
                     "news_headline": c.get("news_headline"),
                     "prev_close": c.get("prev_close"),
                     "premarket_price": c.get("premarket_price"),
+                    "quality_score": c.get("quality_score"),
                     "status": "PENDING",
                 }
                 for c in valid

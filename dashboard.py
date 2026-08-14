@@ -349,6 +349,7 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
         )
         rows.append({
             "Ticker": c.get("ticker"),
+            "Score": f"{c.get('quality_score', 0):.0f}",
             "Gap %": f"+{gap * 100:.1f}%",
             "Vol Ratio": f"{vol:.1f}x",
             "Price": f"${c.get('premarket_price', 0):.2f}",
@@ -365,6 +366,10 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
     st.dataframe(
         styled_df,
         column_config={
+            "Score": st.column_config.TextColumn(
+                "Score",
+                help="Composite signal quality (0-100)",
+            ),
             "Gap %": st.column_config.TextColumn(
                 "Gap %",
                 help="Pre-market gap vs prior close",
