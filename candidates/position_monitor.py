@@ -31,6 +31,7 @@ from paper_trader import (
     load_dotenv,
 )
 from position_sizer import (
+    DEFAULT_STARTING_POOL,
     MAX_OPEN_POSITIONS,
     PoolManager,
     get_atr14,
@@ -64,6 +65,33 @@ class MonitorEvent:
     event_type: str
     pnl: float = 0.0
     detail: str = ""
+
+
+def recalculate_pool_from_trades(pool_mgr: PoolManager, all_trades: list[dict]) -> None:
+    """
+    Rebuild pool cash and deployed capital from the trade ledger.
+    Fixes drift when incremental pool updates get out of sync.
+    """
+    starting_pool = float(pool_mgr.state.get("starting_pool", DEFAULT_STARTING_POOL))
+    active_statuses = ("OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL")
+
+    realized_pnl = sum(
+        t.get("pnl_dollars", 0) for t in all_trades
+        if t.get("status") == "CLOSED"
+    )
+    deployed = sum(
+        t.get("position_value", 0) for t in all_trades
+        if t.get("status") in active_statuses
+    )
+    pool = starting_pool + realized_pnl - deployed
+
+    pool_mgr.state["pool"] = round(pool, 2)
+    pool_mgr.state["deployed"] = round(deployed, 2)
+
+    print(f"Pool recalculated: ${pool:.2f}")
+    print(f"  Starting: ${starting_pool:,.2f}")
+    print(f"  Realized P&L: ${realized_pnl:+.2f}")
+    print(f"  Deployed: ${deployed:.2f}")
 
 
 class PositionMonitor:
@@ -256,6 +284,7 @@ class PositionMonitor:
         self.update_reentry_eligible()
 
         if not self.test_mode:
+            recalculate_pool_from_trades(self.pool, self.trader.trades)
             self.trader.save()
             self.pool.save_state()
 

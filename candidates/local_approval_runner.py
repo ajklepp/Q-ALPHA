@@ -62,6 +62,22 @@ def run_local_approval() -> None:
     os.environ["MODAL_ENVIRONMENT"] = "0"
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
+
+    pending_path = CANDIDATES / "pending_approvals.json"
+    if pending_path.exists():
+        import json
+        from datetime import datetime, timezone
+
+        data = json.loads(pending_path.read_text(encoding="utf-8"))
+        expires_raw = data.get("expires", "")
+        if expires_raw:
+            expiry = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+            now_utc = datetime.now(timezone.utc)
+            if now_utc > expiry:
+                print(f"  WARNING: approvals expired at {expires_raw} (now {now_utc.isoformat()})")
+            else:
+                print(f"  Approval window open until {expires_raw}")
+
     from candidates.paper_trader import run_approval_processor
 
     run_approval_processor()

@@ -31,7 +31,10 @@ HALT_POOL = 2000.0
 WARN_POOL = 2500.0
 ATR_FALLBACK_PCT = 0.03
 ATR_LOOKBACK_DAYS = 14
-ATR_FETCH_CALENDAR_DAYS = 30
+ATR_FETCH_CALENDAR_DAYS = 20
+ATR_STOP_MULTIPLIER = 1.5
+MAX_STOP_PCT = 0.08  # never more than 8% stop
+MIN_STOP_PCT = 0.02  # never less than 2% stop
 
 
 def now_et() -> datetime:
@@ -207,6 +210,16 @@ class OrderPlan:
     skip_reason: str = ""
 
 
+def compute_stop_distance(entry: float, atr_14: float) -> float:
+    """
+    ATR stop distance with min/max pct guards.
+    Uses 1.5× ATR (Option D) capped at 8% and floored at 2% of entry.
+    """
+    stop_distance = min(ATR_STOP_MULTIPLIER * atr_14, entry * MAX_STOP_PCT)
+    stop_distance = max(stop_distance, entry * MIN_STOP_PCT)
+    return stop_distance
+
+
 class PositionSizer:
     """Convert a signal + pool state into an executable order plan."""
 
@@ -216,7 +229,8 @@ class PositionSizer:
         base_size = pool.position_size() * vix_adj
         entry_est = signal.premarket_price
 
-        stop = entry_est - (1.0 * signal.atr_14)
+        stop_distance = compute_stop_distance(entry_est, signal.atr_14)
+        stop = entry_est - stop_distance
         t1 = entry_est + (1.0 * signal.atr_14)
         t2 = entry_est + (2.0 * signal.atr_14)
         t3 = entry_est + (3.0 * signal.atr_14)
@@ -236,7 +250,7 @@ class PositionSizer:
                 skip_reason="Position too small for 1 share",
             )
 
-        risk_per_share = entry_est - stop
+        risk_per_share = stop_distance
         total_risk = shares * risk_per_share
 
         if total_risk > pool.pool * MAX_RISK_PCT:
@@ -285,6 +299,7 @@ def get_atr14(
 ) -> float:
     """
     Fetch daily bars from Polygon and compute 14-day average true range.
+    Excludes today's bar so gap-day volatility does not inflate ATR.
     Falls back to 3% of prev_close on error.
     """
     fallback = (prev_close or 10.0) * ATR_FALLBACK_PCT
@@ -306,8 +321,11 @@ def get_atr14(
         )
         resp.raise_for_status()
         bars = resp.json().get("results", [])
-        if len(bars) < ATR_LOOKBACK_DAYS + 1:
+        if len(bars) < ATR_LOOKBACK_DAYS + 2:
             return fallback
+
+        # Exclude today's gap day — use only prior sessions for ATR
+        bars = bars[:-1]
 
         true_ranges = []
         for i in range(1, len(bars)):

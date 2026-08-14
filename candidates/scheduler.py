@@ -31,10 +31,11 @@
 #   modal app list          ← should show qalpha-scheduler
 #   modal app logs qalpha-scheduler
 #
-# Cron times (UTC) — ET approximate:
-#   8:30 AM ET  — run_morning_scan   (13:30 UTC, find signals, send alerts)
-#   9:25 AM ET  — local_approval_runner.py on Windows (IBKR + Telegram)
-#   4:15 PM ET  — run_eod_monitor    (21:15 UTC, bracket checks, EOD report)
+# Cron times (UTC) — EDT (UTC-4, summer). Add 1 hour for EST (winter):
+#   8:30 AM EDT — run_morning_scan        ("30 12 * * 1-5")
+#   9:25 AM EDT — local_approval_runner   ("25 13 * * 1-5", Windows Task Scheduler)
+#   4:15 PM EDT — run_eod_monitor         ("15 20 * * 1-5")
+#   6:00 AM EDT Mon — universe refresh    ("0 10 * * 1", if scheduled locally)
 # =============================================================================
 from __future__ import annotations
 
@@ -64,6 +65,7 @@ image = (
         "python-dotenv",
         "supabase",
         "tzdata",
+        "pytz",
     ])
     .add_local_dir(str(CANDIDATES_DIR), remote_path=CANDIDATES_MOUNT)
 )
@@ -82,7 +84,7 @@ def _prepare_modal_imports() -> None:
 
 @app.function(
     image=image,
-    schedule=modal.Cron("30 13 * * 1-5"),
+    schedule=modal.Cron("30 12 * * 1-5"),
     secrets=[qalpha_secrets],
     volumes={VOLUME_PATH: volume},
     timeout=600,
@@ -95,9 +97,18 @@ def run_morning_scan():
     Exits immediately — no waiting for human replies.
     """
     import os
+    from datetime import datetime
+
+    import pytz
 
     os.environ["MODAL_ENVIRONMENT"] = "1"
     _prepare_modal_imports()
+
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    print(f"Scanner started: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print(f"Expected: 8:30 AM ET — Actual: {now_et.strftime('%H:%M %Z')}")
+
     from pre_market_scanner import run_scan
 
     try:
@@ -108,7 +119,7 @@ def run_morning_scan():
 
 @app.function(
     image=image,
-    schedule=modal.Cron("15 21 * * 1-5"),
+    schedule=modal.Cron("15 20 * * 1-5"),
     secrets=[qalpha_secrets],
     volumes={VOLUME_PATH: volume},
     timeout=600,

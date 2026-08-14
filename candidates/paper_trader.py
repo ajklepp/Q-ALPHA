@@ -23,6 +23,7 @@ from position_sizer import (
     MAX_OPEN_POSITIONS,
     MAX_TRADES_PER_DAY,
     PoolManager,
+    compute_stop_distance,
     get_atr14,
     now_et,
 )
@@ -178,9 +179,10 @@ class PaperTrade:
 
 def recalculate_brackets(entry_price: float, atr_14: float) -> dict[str, float]:
     """Rebuild stop and targets from actual MOC entry."""
+    stop_distance = compute_stop_distance(entry_price, atr_14)
     return {
         "entry_price": round(entry_price, 2),
-        "stop_price": round(entry_price - atr_14, 2),
+        "stop_price": round(entry_price - stop_distance, 2),
         "target_1r": round(entry_price + atr_14, 2),
         "target_2r": round(entry_price + 2 * atr_14, 2),
         "target_3r": round(entry_price + 3 * atr_14, 2),
@@ -565,7 +567,7 @@ class PaperTrader:
             f"Shares: {plan['shares']} | Risk: ${total_risk:.0f} | R/R: {plan['rr_ratio']:.1f}x",
             "",
             f"Reply: YES {ticker} or NO {ticker}",
-            "⏱ Expires at market open (9:30 AM)",
+            "⏱ Expires 9:45 AM ET (15 min after open)",
         ]
         return "\n".join(lines)
 
@@ -587,7 +589,7 @@ class PaperTrader:
 
         payload = {
             "date": scan_date,
-            "expires": f"{scan_date}T09:30:00",
+            "expires": f"{scan_date}T13:45:00Z",
             "candidates": [
                 {
                     "ticker": c["ticker"],
@@ -707,6 +709,8 @@ def run_approval_processor() -> None:
     9:25 AM job: read pending_approvals.json, check Telegram once, log trades.
     No polling loops — completes in seconds.
     """
+    from datetime import datetime, timezone
+
     from state_paths import is_trading_day
 
     if not is_trading_day():
@@ -728,6 +732,26 @@ def run_approval_processor() -> None:
     if not pending:
         print("No pending approvals")
         return
+
+    expires_raw = data.get("expires", "")
+    if expires_raw:
+        expiry = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > expiry:
+            print(f"  Approvals expired at {expires_raw} — skipping all")
+            trader = load_paper_trader()
+            tg = TelegramClient(bot_token, chat_id)
+            for candidate in pending:
+                ticker = candidate["ticker"].upper()
+                plan = candidate["order_plan"]
+                trader.log_skip(ticker, plan, "expired", "approval window closed")
+                candidate["status"] = "EXPIRED"
+                tg.send(f"⏱ {ticker} expired (past 9:45 AM ET)")
+                print(f"  {ticker}: EXPIRED")
+            data["processed_at"] = now_et().strftime("%Y-%m-%d %H:%M:%S")
+            pending_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            trader.pool.save_state()
+            print("Approval processor complete (all expired)")
+            return
 
     print("=" * 55)
     print("  Q-ALPHA | Approval Processor")

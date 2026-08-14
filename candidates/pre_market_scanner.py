@@ -579,7 +579,7 @@ def _queue_pending_approvals(result: dict, saved_pool: dict | None) -> None:
             sent = trader.queue_pending_approvals(
                 tradable, result["scan_date"], bot_token, chat_id,
             )
-            print(f"  Queued {sent} alert(s) — replies processed at 9:25 AM")
+            print(f"  Queued {sent} alert(s) — replies at 9:25 AM, expire 9:45 AM ET")
 
 
 def run_scan() -> dict | None:
