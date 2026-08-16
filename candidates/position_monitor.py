@@ -55,6 +55,7 @@ image = (
 
 polygon_secret = modal.Secret.from_name("polygon-api-key")
 MAX_HOLD_DAYS = 5
+MANAGED_TRADE_SOURCES = frozenset({"telegram_yes", "autonomous_agent"})
 
 
 @dataclass
@@ -269,7 +270,7 @@ class PositionMonitor:
         open_trades = [
             t for t in self.trader.trades
             if t.get("status") in ("OPEN", "T1_HIT", "T3_TRAIL", "PENDING_MOC")
-            and t.get("approved_by") == "telegram_yes"
+            and t.get("approved_by") in MANAGED_TRADE_SOURCES
         ]
 
         if not open_trades:
@@ -410,7 +411,7 @@ def run_monitor() -> dict | None:
                 data = json.loads(trades_path.read_text(encoding="utf-8"))
                 all_trades = data.get("trades", [])
             for trade in all_trades:
-                if trade.get("approved_by") == "telegram_yes":
+                if trade.get("approved_by") in MANAGED_TRADE_SOURCES:
                     sync.upsert_trade(trade)
             pool_state = result.get("pool", {})
             sync.upsert_pool_snapshot(pool_state)
