@@ -7,3 +7,5 @@ python-dotenv
 requests
 numpy
 pytz
+ib_insync
+yfinance
