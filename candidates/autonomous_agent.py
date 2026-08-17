@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -875,6 +876,94 @@ def sync_to_modal() -> None:
             print(f"Sync failed for {local_path.name}: {exc}")
 
 
+SPY_SMA_PERIOD = 50            # SMA length for the regime filter
+SPY_HISTORY_DURATION = "60 D"  # always covers SPY_SMA_PERIOD trading days
+SPY_SNAPSHOT_WAIT = 2          # seconds to let a TWS snapshot arrive
+
+
+def _valid_price(value: object) -> bool:
+    """
+    True only for a real, positive price.
+
+    ib_insync fills unsubscribed ticker fields with float('nan'), and nan is
+    truthy, so `ticker.last or ticker.close or 0` yields nan rather than 0 and
+    every nan comparison is False. That is what silently produced BEAR on a
+    bull day, so nan must be rejected explicitly.
+    """
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return False
+    return price > 0 and not math.isnan(price)
+
+
+def fetch_regime_from_tws(ib: IB) -> dict | None:
+    """
+    SPY regime from the TWS snapshot plus daily bars.
+
+    Returns None -- never a regime -- when the snapshot or history is unusable,
+    so the caller falls back instead of trading a guess.
+    """
+    spy_contract = Stock("SPY", "SMART", "USD")
+    ib.qualifyContracts(spy_contract)
+    spy_ticker = ib.reqMktData(spy_contract, "", False, False)
+    ib.sleep(SPY_SNAPSHOT_WAIT)
+    snapshot = spy_ticker.last if _valid_price(spy_ticker.last) else spy_ticker.close
+    ib.cancelMktData(spy_contract)
+
+    if not _valid_price(snapshot):
+        print("  TWS SPY snapshot unusable (no live data subscription?)")
+        return None
+
+    spy_bars = ib.reqHistoricalData(
+        spy_contract, "", SPY_HISTORY_DURATION, "1 day", "TRADES", True,
+        keepUpToDate=False,
+    )
+    closes = [b.close for b in spy_bars if _valid_price(b.close)]
+    if len(closes) < SPY_SMA_PERIOD:
+        print(f"  TWS SPY history too short: {len(closes)} bars "
+              f"(need {SPY_SMA_PERIOD})")
+        return None
+
+    spy_price = float(snapshot)
+    spy_sma50 = sum(closes[-SPY_SMA_PERIOD:]) / SPY_SMA_PERIOD
+    return {
+        "spy_regime": "BULL" if spy_price > spy_sma50 else "BEAR",
+        "vix_regime": "NORMAL",
+        "spy_price": spy_price,
+        "spy_sma50": spy_sma50,
+        "source": "TWS",
+    }
+
+
+def fetch_regime_from_polygon() -> dict | None:
+    """
+    Authoritative fallback via pre_market_scanner.fetch_spy_regime(), which
+    raises on insufficient history instead of defaulting to a regime.
+
+    Imported lazily because pre_market_scanner imports modal at module scope;
+    the agent should not pay that cost on the normal TWS path.
+    """
+    api_key = os.environ.get("POLYGON_API_KEY", "")
+    if not api_key:
+        print("  Polygon fallback unavailable: POLYGON_API_KEY not set")
+        return None
+    try:
+        from pre_market_scanner import fetch_spy_regime
+
+        regime_data = dict(fetch_spy_regime(api_key))
+    except Exception as exc:
+        print(f"  Polygon regime fallback failed: {exc}")
+        return None
+
+    if not _valid_price(regime_data.get("spy_price")):
+        print("  Polygon fallback returned no usable SPY price")
+        return None
+
+    regime_data["source"] = "Polygon fallback"
+    return regime_data
+
+
 def main() -> None:
     """Orchestrate all five autonomous agent phases."""
     now_et = datetime.now(ET)
@@ -901,28 +990,25 @@ def main() -> None:
         return
 
     try:
-        spy_contract = Stock("SPY", "SMART", "USD")
-        ib.qualifyContracts(spy_contract)
-        spy_ticker = ib.reqMktData(spy_contract, "", False, False)
-        ib.sleep(2)
-        spy_price = spy_ticker.last or spy_ticker.close or 0
-        ib.cancelMktData(spy_contract)
+        regime_data = fetch_regime_from_tws(ib)
+        if regime_data is None:
+            print("Falling back to Polygon for SPY regime...")
+            regime_data = fetch_regime_from_polygon()
 
-        spy_bars = ib.reqHistoricalData(
-            spy_contract,
-            "",
-            "60 D",
-            "1 day",
-            "TRADES",
-            True,
-            keepUpToDate=False,
+        if regime_data is None:
+            msg = ("⚠️ Q-ALPHA: SPY regime data unavailable — "
+                   "trading halted for safety, manual check needed")
+            print(msg)
+            send_telegram(msg)
+            return
+
+        regime = regime_data["spy_regime"]
+        vix = regime_data.get("vix_regime", "NORMAL")
+        print(
+            f"Regime: {regime} | SPY: ${regime_data['spy_price']:.2f} "
+            f"vs SMA50: ${regime_data['spy_sma50']:.2f} | "
+            f"VIX: {vix} | source: {regime_data['source']}"
         )
-        spy_closes = [b.close for b in spy_bars]
-        spy_sma50 = sum(spy_closes[-50:]) / 50 if len(spy_closes) >= 50 else spy_price
-        regime = "BULL" if spy_price > spy_sma50 else "BEAR"
-        vix = "NORMAL"
-
-        print(f"Regime: {regime} | SPY: ${spy_price:.2f} vs SMA50: ${spy_sma50:.2f}")
 
         print(f"\n{'─' * 40}")
         print("PHASE 1: PRE-MARKET SCAN")
