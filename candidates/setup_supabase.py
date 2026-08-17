@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS trades (
     days_held INT DEFAULT 0,
     execution_mode TEXT,
     ibkr_order_id INT,
+    current_price FLOAT,
+    r_multiple FLOAT,
+    dist_to_stop FLOAT,
+    dist_to_target FLOAT,
+    last_updated TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE (ticker, entry_date)
 );

@@ -36,6 +36,7 @@
 #   9:25 AM EDT — local_approval_runner   ("25 13 * * 1-5", Windows Task Scheduler)
 #   4:15 PM EDT — run_eod_monitor         ("15 20 * * 1-5")
 #   6:00 AM EDT Mon — run_universe_refresh   ("0 10 * * 1", CS ticker list)
+#   Every 30m 9:30-4:00 PM EDT — run_intraday_monitor ("*/30 13-20 * * 1-5")
 # =============================================================================
 from __future__ import annotations
 
@@ -148,6 +149,41 @@ def run_morning_scan():
 
 @app.function(
     image=image,
+    schedule=modal.Cron("*/30 13-20 * * 1-5"),
+    secrets=[qalpha_secrets],
+    volumes={VOLUME_PATH: volume},
+    timeout=120,
+    memory=512,
+)
+def run_intraday_monitor():
+    """
+    Every 30 min between 9:30 AM - 4:00 PM EDT (weekdays).
+    Fetches live prices, updates Supabase for dashboard.
+    """
+    import os
+    from datetime import datetime, time as dtime
+
+    import pytz
+
+    os.environ["MODAL_ENVIRONMENT"] = "1"
+    _prepare_modal_imports()
+
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+
+    if not (dtime(9, 30) <= now_et.time() <= dtime(16, 0)):
+        print(f"Outside market hours: {now_et.strftime('%H:%M ET')}")
+        return
+
+    print(f"Intraday monitor started: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+    from intraday_monitor import run_intraday_monitor as intraday_monitor_run
+
+    intraday_monitor_run()
+
+
+@app.function(
+    image=image,
     schedule=modal.Cron("15 20 * * 1-5"),
     secrets=[qalpha_secrets],
     volumes={VOLUME_PATH: volume},
@@ -177,6 +213,7 @@ def main():
     print("Manual runs:")
     print("  modal run candidates/scheduler.py::run_morning_scan")
     print("  modal run candidates/scheduler.py::run_universe_refresh")
+    print("  modal run candidates/scheduler.py::run_intraday_monitor")
     print("  modal run candidates/scheduler.py::run_eod_monitor")
     print("Local approval (9:25 AM ET, TWS required):")
     print("  python candidates/local_approval_runner.py")

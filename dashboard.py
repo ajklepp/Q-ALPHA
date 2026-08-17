@@ -84,7 +84,10 @@ def _trades_df(trades: list) -> pd.DataFrame:
     if not trades:
         return pd.DataFrame()
     df = pd.DataFrame(trades)
-    for col in ("entry_price", "stop_price", "target_2r", "pnl_dollars", "pnl_pct"):
+    for col in (
+        "entry_price", "stop_price", "target_2r", "pnl_dollars", "pnl_pct",
+        "current_price", "r_multiple", "dist_to_stop", "dist_to_target",
+    ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -182,6 +185,16 @@ def render_header() -> None:
     with col1:
         st.markdown("# 📈 Q-ALPHA Dashboard")
         st.caption("Quantitative Momentum Trading System")
+        try:
+            last_intraday = get_sync().get_last_health("intraday_monitor")
+            if last_intraday and last_intraday.get("last_run"):
+                ts = last_intraday["last_run"]
+                st.caption(
+                    f"📡 Live data updated: {ts[11:16]} ET "
+                    f"(every 30 min during market hours)"
+                )
+        except Exception:
+            pass
     with col2:
         st.metric("Version", f"v{SYSTEM_VERSION}")
     with col3:
@@ -283,49 +296,69 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
             target_2r = float(trade.get("target_2r") or 0)
             pnl_dollars = float(trade.get("pnl_dollars") or 0)
             pnl_pct_val = float(trade.get("pnl_pct") or 0)
-            days_held = int(trade.get("days_held") or 0)
-            status = trade.get("status", "")
-            current_price = _candidate_price(ticker, latest_scan, entry_price)
+            current_price = float(
+                trade.get("current_price")
+                or _candidate_price(ticker, latest_scan, entry_price)
+            )
+            r_mult = float(trade.get("r_multiple") or 0)
+            dist_stop = float(trade.get("dist_to_stop") or 0)
+            updated = trade.get("last_updated") or ""
 
             with st.container():
-                c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
-                with c1:
-                    st.markdown(f"### {ticker}")
-                    st.caption(f"Entry: ${entry_price:.2f}")
-                with c2:
-                    st.metric(
-                        "Unrealized P&L",
-                        f"${pnl_dollars:+.2f}",
-                        f"{pnl_pct_val:+.1f}%",
-                    )
-                with c3:
-                    st.metric(
-                        "Days Held",
-                        f"{days_held}/5",
-                        "days remaining",
-                    )
-                with c4:
-                    status_colors = {
-                        "OPEN": "🟡",
-                        "T1_HIT": "🟢",
-                        "T2_HIT": "💚",
-                        "T3_TRAIL": "✨",
-                        "PENDING_MOC": "⏳",
-                    }
-                    emoji = status_colors.get(status, "⚪")
-                    st.metric("Status", f"{emoji} {status}")
+                col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1.5, 1.5, 2])
 
-                span = target_2r - stop_price
-                progress = (current_price - stop_price) / span if span else 0
-                progress = max(0.0, min(1.0, progress))
-                st.progress(
-                    progress,
-                    text=(
-                        f"Stop ${stop_price:.2f} → "
-                        f"Entry ${entry_price:.2f} → "
-                        f"Target ${target_2r:.2f}"
-                    ),
-                )
+                with col1:
+                    st.metric(
+                        ticker,
+                        f"${current_price:.2f}",
+                        f"{pnl_pct_val:+.1%}",
+                    )
+
+                with col2:
+                    st.metric(
+                        "P&L",
+                        f"${pnl_dollars:+.2f}",
+                        f"{r_mult:+.2f}R",
+                    )
+
+                with col3:
+                    stop_color = (
+                        "🔴" if dist_stop < 0.02
+                        else "🟡" if dist_stop < 0.05
+                        else "🟢"
+                    )
+                    st.metric(
+                        "Stop",
+                        f"${stop_price:.2f}",
+                        f"{stop_color} {dist_stop:.1%} away",
+                    )
+
+                with col4:
+                    to_go = (
+                        (target_2r - current_price) / current_price
+                        if current_price > 0 else 0.0
+                    )
+                    st.metric(
+                        "Target",
+                        f"${target_2r:.2f}",
+                        f"{to_go:.1%} to go",
+                    )
+
+                with col5:
+                    if target_2r > stop_price:
+                        progress = (current_price - stop_price) / (target_2r - stop_price)
+                        progress = max(0.0, min(1.0, progress))
+                        st.progress(
+                            progress,
+                            text=(
+                                f"Stop ${stop_price:.2f} ──── "
+                                f"${current_price:.2f} ──── "
+                                f"Target ${target_2r:.2f}"
+                            ),
+                        )
+                    if updated:
+                        st.caption(f"Updated: {updated[11:16]} ET")
+
                 st.divider()
 
     st.subheader("Today's Scan Results")

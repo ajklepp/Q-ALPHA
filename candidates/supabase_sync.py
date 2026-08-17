@@ -64,6 +64,11 @@ TRADE_FIELDS = (
     "days_held",
     "execution_mode",
     "ibkr_order_id",
+    "current_price",
+    "r_multiple",
+    "dist_to_stop",
+    "dist_to_target",
+    "last_updated",
 )
 
 
@@ -156,6 +161,19 @@ class SupabaseSync:
             .execute()
         )
         return result.data or []
+
+    def get_last_health(self, component: str) -> dict | None:
+        """Most recent health record for a component."""
+        result = (
+            self.client.table("system_health")
+            .select("*")
+            .eq("component", component)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
 
     def save_daily_review(self, review: dict) -> None:
         """Save daily review from Cursor automation."""
