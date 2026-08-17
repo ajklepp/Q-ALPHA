@@ -5,6 +5,10 @@ Usage:
     pip install supabase psycopg2-binary python-dotenv
     python candidates/setup_supabase.py
 
+Every statement below is CREATE TABLE IF NOT EXISTS, which is a no-op against
+a table that already exists. Adding a column here does NOT reach an existing
+database -- pair it with an ALTER TABLE migration in candidates/sql/.
+
 Requires .env:
     SUPABASE_URL
     SUPABASE_SECRET_KEY
@@ -62,11 +66,11 @@ CREATE TABLE IF NOT EXISTS trades (
     days_held INT DEFAULT 0,
     execution_mode TEXT,
     ibkr_order_id INT,
-    current_price FLOAT,
-    r_multiple FLOAT,
-    dist_to_stop FLOAT,
-    dist_to_target FLOAT,
-    last_updated TEXT,
+    current_price NUMERIC,
+    r_multiple NUMERIC,
+    dist_to_stop NUMERIC,
+    dist_to_target NUMERIC,
+    last_updated TIMESTAMPTZ,
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE (ticker, entry_date)
 );
