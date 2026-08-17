@@ -47,7 +47,7 @@ STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
 SYSTEM_VERSION = "1.0.0"
-SYSTEM_START_DATE = "2026-08-12"  # first live scan date
+SYSTEM_START_DATE = "2026-08-18"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 
