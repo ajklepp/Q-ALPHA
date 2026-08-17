@@ -157,6 +157,24 @@ class SupabaseSync:
         )
         return result.data or []
 
+    def save_daily_review(self, review: dict) -> None:
+        """Save daily review from Cursor automation."""
+        self.client.table("daily_reviews").upsert(
+            review,
+            on_conflict="review_date",
+        ).execute()
+
+    def get_daily_reviews(self, limit: int = 30) -> list:
+        """Fetch recent daily session reviews."""
+        result = (
+            self.client.table("daily_reviews")
+            .select("*")
+            .order("review_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
 
 def sync_to_supabase_safe(callback) -> None:
     """Run a sync callback; never raise if Supabase is unavailable."""

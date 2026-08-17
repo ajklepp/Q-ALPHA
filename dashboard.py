@@ -46,6 +46,10 @@ from candidates.supabase_sync import SupabaseSync
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
+SYSTEM_VERSION = "1.0.0"
+SYSTEM_START_DATE = "2026-08-12"  # first live scan date
+SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
+DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 
 st.set_page_config(
     page_title="Q-ALPHA Dashboard",
@@ -54,7 +58,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-st_autorefresh(interval=5 * 60 * 1000, key="dashboard_refresh")
+st_autorefresh(interval=5 * 60 * 1000, key="main_refresh")
 
 
 @st.cache_resource
@@ -173,15 +177,16 @@ def _candidate_price(ticker: str, latest_scan: dict | None, fallback: float) -> 
     return fallback
 
 
-def render_header(health: list) -> None:
-    col1, col2, col3 = st.columns([2, 1, 1])
+def render_header() -> None:
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.markdown("# 📈 Q-ALPHA Dashboard")
         st.caption("Quantitative Momentum Trading System")
     with col2:
-        last_scan = get_last_scan_time(health)
-        st.metric("Last Scan", last_scan or "—")
+        st.metric("Version", f"v{SYSTEM_VERSION}")
     with col3:
+        st.metric("Days Running", f"{DAYS_RUNNING}d")
+    with col4:
         st.metric("Next Scan", _next_scan_countdown())
 
 
@@ -593,27 +598,78 @@ def tab_system_health(health: list) -> None:
     st.metric("Error count (last 7 days)", len(errors))
 
 
+def tab_daily_reviews() -> None:
+    """Daily AI session reviews from Supabase."""
+    st.header("📓 Daily Trade Reviews")
+    st.caption("AI analysis of each trading session")
+
+    try:
+        reviews = get_sync().get_daily_reviews()
+    except Exception as exc:
+        st.error(f"Could not load reviews: {exc}")
+        return
+
+    if not reviews:
+        st.info(
+            "No reviews yet. First review appears after "
+            "the first trading session."
+        )
+        return
+
+    dates = [r["review_date"] for r in reviews]
+    selected = st.selectbox("Select date:", dates)
+    review = next(r for r in reviews if r["review_date"] == selected)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Entered", review.get("entered_count", 0))
+    with col2:
+        st.metric("Skipped", review.get("skipped_count", 0))
+    with col3:
+        pnl = float(review.get("pnl", 0) or 0)
+        st.metric("P&L", f"${pnl:+.2f}", delta_color="normal")
+    with col4:
+        st.metric("Win Rate", f"{float(review.get('win_rate', 0) or 0):.0%}")
+
+    st.divider()
+    st.markdown(review.get("full_markdown", "Review not available"))
+
+    suggestion = review.get("improvement_suggestion", "")
+    if suggestion:
+        st.info(f"💡 **Tomorrow's Improvement:**\n{suggestion}")
+
+
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
-    st.markdown("---")
-    col1, col2 = st.columns([3, 1])
+    st.divider()
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
-        st.caption(f"Last refreshed: {now_et.strftime('%H:%M:%S ET')}")
+        st.caption(
+            f"🔄 Auto-refreshes every 5 min | "
+            f"Last updated: {now_et.strftime('%H:%M:%S ET')}"
+        )
     with col2:
+        st.caption(
+            f"v{SYSTEM_VERSION} | "
+            f"Running {DAYS_RUNNING} days | "
+            f"© Q-ALPHA 2026"
+        )
+    with col3:
         if st.button("🔄 Refresh Now"):
             st.rerun()
 
 
 def main() -> None:
     trades, pool_history, scans, health = _safe_load()
-    render_header(health)
+    render_header()
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
+        "📓 Daily Reviews",
     ])
 
     with tab1:
@@ -624,6 +680,8 @@ def main() -> None:
         tab_performance(trades, pool_history)
     with tab4:
         tab_system_health(health)
+    with tab5:
+        tab_daily_reviews()
 
     render_footer()
 
