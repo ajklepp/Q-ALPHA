@@ -1,6 +1,6 @@
 # Q-ALPHA SYSTEM HANDOFF
 ## Complete State Document — v1.0.0
-### Day 1: 2026-08-18
+### Day 1: 2026-08-17
 
 ---
 
@@ -347,7 +347,7 @@ what's failed, and what's next:
 [paste Q_ALPHA_HANDOFF.md contents]
 
 Today is Day X of v1.0.0 autonomous operation.
-The system has been running since 2026-08-18.
+The system has been running since 2026-08-17.
 
 Current focus: [describe what you're working on]
 ```
@@ -445,4 +445,4 @@ Tabs:
 
 *Document generated: 2026-08-17*
 *System version: v1.0.0*
-*Day 1: 2026-08-18*
+*Day 1: 2026-08-17*
