@@ -19,3 +19,6 @@ models/*.joblib
 Thumbs.db
 .cursor/
 write_exp6.py
+
+candidates/entry_study/*.jsonl
+candidates/entry_study/rollup.csv
