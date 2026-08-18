@@ -18,6 +18,8 @@ CANDIDATES_DIR = Path(__file__).resolve().parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
+from universe_filter import passes_universe_safety_gate
+
 
 class IBKRConnector:
     """TWS connection and bracket order placement for Q-Alpha order plans."""
@@ -76,6 +78,10 @@ class IBKRConnector:
         from ib_insync import LimitOrder, MarketOrder, Stock, StopOrder
 
         ticker = order_plan["ticker"]
+        # Final backstop: callers are expected to have gated already, but no
+        # order reaches TWS without clearing the tradable-universe check.
+        if not passes_universe_safety_gate(ticker):
+            raise ValueError(f"{ticker} refused by universe safety gate")
         shares = int(order_plan["shares"])
         stop = float(order_plan["stop_price"])
         target_2r = float(order_plan["target_2r"])

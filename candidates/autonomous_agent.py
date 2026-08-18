@@ -49,6 +49,11 @@ if str(ROOT) not in sys.path:
 from paper_trader import PaperTrade, PaperTradesStore
 from position_sizer import PoolManager
 from state_paths import CANDIDATES_DIR as _CANDIDATES_DIR, is_trading_day, state_path
+from universe_filter import (
+    EXCLUDE_SYMBOLS,
+    is_leveraged_or_fund,
+    passes_universe_safety_gate,
+)
 
 load_dotenv(ROOT / ".env")
 
@@ -91,7 +96,13 @@ def send_telegram(message: str) -> None:
 
 
 def load_universe() -> list[str]:
-    """Load CS ticker symbols from universe.json."""
+    """
+    Load tradable CS ticker symbols from universe.json.
+
+    Denied symbols and fund/derivative names are removed here so they are never
+    even quoted. Legacy string-only universes carry no name, so the deny list is
+    the only defense until refresh_universe() rebuilds the file.
+    """
     universe_path = _CANDIDATES_DIR / "universe.json"
     if not universe_path.exists():
         print("universe.json not found — cannot scan")
@@ -107,8 +118,13 @@ def load_universe() -> list[str]:
             t["symbol"].upper()
             for t in tickers
             if t.get("type", "CS") == "CS" and t.get("symbol")
+            and t["symbol"].upper() not in EXCLUDE_SYMBOLS
+            and not is_leveraged_or_fund(str(t.get("name", "") or ""))
         ]
-    return [str(t).upper() for t in tickers]
+    return [
+        str(t).upper() for t in tickers
+        if str(t).upper() not in EXCLUDE_SYMBOLS
+    ]
 
 
 def score_candidate(c: dict) -> float:
@@ -504,6 +520,9 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
     """
     Monitor candidates 9:30-11:00 AM; enter on confirmed gap+VWAP+volume setup.
     Places DAY bracket orders via IBKR.
+
+    Every candidate clears the universe safety gate BEFORE any market-data
+    subscription, so a blocked symbol is never watched and never retried.
     """
     pool = PoolManager(state_path=state_path("pool_state.json"))
 
@@ -511,6 +530,22 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
     skipped: list[dict] = []
     decided: set[str] = set()
     open_tickers = _get_open_tickers_today()
+
+    gated: list[dict] = []
+    for c in candidates:
+        if passes_universe_safety_gate(c["ticker"]):
+            gated.append(c)
+        else:
+            skipped.append({
+                "ticker": c["ticker"],
+                "reason": "failed universe safety gate",
+                "price": c.get("last_price", 0.0),
+            })
+    if len(gated) != len(candidates):
+        blocked = [s["ticker"] for s in skipped]
+        send_telegram("🚫 Blocked (not tradable common stock): "
+                      + ", ".join(blocked))
+        candidates = gated
 
     candidate_tracker = {
         c["ticker"]: {

@@ -17,6 +17,11 @@ from pathlib import Path
 import modal
 
 from state_paths import CANDIDATES_DIR, is_trading_day, state_path
+from universe_filter import (
+    EXCLUDE_SYMBOLS,
+    UNIVERSE_FILE,
+    is_leveraged_or_fund,
+)
 
 app = modal.App("q-alpha-premarket-scanner")
 
@@ -30,6 +35,10 @@ image = (
     .add_local_file(
         local_path=str(CANDIDATES_DIR / "paper_trader.py"),
         remote_path="/root/candidates/paper_trader.py",
+    )
+    .add_local_file(
+        local_path=str(CANDIDATES_DIR / "universe_filter.py"),
+        remote_path="/root/candidates/universe_filter.py",
     )
 )
 
@@ -60,9 +69,9 @@ SNAPSHOT_PAGE_LIMIT = 250
 SNAPSHOT_TIMEOUT = 60
 REQUEST_TIMEOUT = 10
 POLYGON_PAGE_SLEEP = 0.12
-UNIVERSE_FILE = "universe.json"
-EXCLUDE_PATTERNS = frozenset({"NBIS", "NBIG", "NBIL"})
 REFERENCE_PAGE_LIMIT = 1000
+# Cap the per-refresh listing of rejected fund names so a Modal log stays readable
+FUND_DROP_LOG_LIMIT = 25
 
 
 def load_dotenv_if_available():
@@ -182,21 +191,35 @@ def _normalize_universe(data: dict) -> dict:
 
 
 def get_cs_symbol_set(universe: dict) -> set[str]:
-    """Return uppercase symbols where Polygon type is CS (common stock)."""
+    """
+    Uppercase tradable symbols: Polygon type CS, not denied, name not a fund.
+
+    Applied at SCAN time as well as at universe-build time, so a universe.json
+    written before this filter existed — or a legacy string-only file whose rows
+    carry no name at all — still cannot leak a denied symbol into a scan.
+    """
     symbols: set[str] = set()
     for entry in universe.get("tickers", []):
         if isinstance(entry, str):
             symbols.add(entry.upper())
-        elif entry.get("type") == "CS":
-            symbols.add(str(entry.get("symbol", "")).upper())
-    symbols -= EXCLUDE_PATTERNS
-    return symbols
+            continue
+        if entry.get("type") != "CS":
+            continue
+        if is_leveraged_or_fund(str(entry.get("name", "") or "")):
+            continue
+        symbols.add(str(entry.get("symbol", "")).upper())
+    return symbols - EXCLUDE_SYMBOLS
 
 
 def refresh_universe(api_key: str) -> dict:
     """
     Fetch active common stocks from Polygon and persist universe.json.
     GET /v3/reference/tickers?type=CS&market=stocks&active=true
+
+    Polygon's type=CS classification is not sufficient on its own — leveraged
+    wrappers such as NEBX/NBIG/NBIL reached the tradable universe through it in
+    Week 1 — so every row is also checked against the symbol deny list and the
+    security-name fund filter before it is persisted.
     """
     all_entries: list[dict] = []
     path = "/v3/reference/tickers"
@@ -207,18 +230,30 @@ def refresh_universe(api_key: str) -> dict:
         "limit": REFERENCE_PAGE_LIMIT,
     }
     page = 0
+    dropped_denied = 0
+    dropped_fund_name = 0
+    dropped_examples: list[str] = []
 
     print("Refreshing universe (CS common stocks only)...")
     while path:
         data = polygon_get(path, params, api_key, timeout=REQUEST_TIMEOUT)
         for row in data.get("results", []):
             symbol = (row.get("ticker") or "").upper().strip()
-            if not symbol or symbol in EXCLUDE_PATTERNS:
+            if not symbol:
+                continue
+            if symbol in EXCLUDE_SYMBOLS:
+                dropped_denied += 1
+                continue
+            name = row.get("name", "") or ""
+            if is_leveraged_or_fund(name):
+                dropped_fund_name += 1
+                if len(dropped_examples) < FUND_DROP_LOG_LIMIT:
+                    dropped_examples.append(f"{symbol} — {name}")
                 continue
             all_entries.append({
                 "symbol": symbol,
                 "type": row.get("type", "CS"),
-                "name": row.get("name", ""),
+                "name": name,
             })
         page += 1
         if page % 5 == 0:
@@ -230,6 +265,13 @@ def refresh_universe(api_key: str) -> dict:
         path = next_url.replace(POLYGON_BASE, "")
         params = {}
         time.sleep(POLYGON_PAGE_SLEEP)
+
+    print(f"  Dropped {dropped_denied} symbol(s) in EXCLUDE_SYMBOLS")
+    print(f"  Dropped {dropped_fund_name} row(s) with fund/derivative names")
+    for example in dropped_examples:
+        print(f"    fund name: {example}")
+    if dropped_fund_name > len(dropped_examples):
+        print(f"    ... {dropped_fund_name - len(dropped_examples)} more not shown")
 
     payload = {
         "last_updated": now_et().strftime("%Y-%m-%d"),
@@ -420,7 +462,9 @@ def get_all_gap_candidates(api_key: str, today_news_gte: str) -> tuple[list[dict
 
     cs_rows = [
         r for r in parsed_rows
-        if r["ticker"] in cs_symbols and _passes_ticker_hygiene(r["ticker"])
+        if r["ticker"] in cs_symbols
+        and r["ticker"] not in EXCLUDE_SYMBOLS
+        and _passes_ticker_hygiene(r["ticker"])
     ]
     n1 = len(cs_rows)
     print(f"  After type=CS filter: {n1}")

@@ -51,6 +51,12 @@ image = (
         local_path=str(CANDIDATES_DIR / "paper_trader.py"),
         remote_path="/root/candidates/paper_trader.py",
     )
+    # paper_trader imports universe_filter at module scope, so this image would
+    # fail to import without it.
+    .add_local_file(
+        local_path=str(CANDIDATES_DIR / "universe_filter.py"),
+        remote_path="/root/candidates/universe_filter.py",
+    )
 )
 
 polygon_secret = modal.Secret.from_name("polygon-api-key")

@@ -1,0 +1,203 @@
+"""
+Q-Alpha universe safety filters.
+
+Single source of truth for "is this symbol a $5-$50 US common stock, or is it a
+fund / derivative product we must never trade?".
+
+Deliberately dependency-free (stdlib + state_paths only — no modal, no requests)
+so every layer can import it cheaply: the Modal scanner, the local autonomous
+agent, the Telegram approval processor, and the IBKR connector.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+CANDIDATES_DIR = Path(__file__).resolve().parent
+if str(CANDIDATES_DIR) not in sys.path:
+    sys.path.insert(0, str(CANDIDATES_DIR))
+
+from state_paths import state_path
+
+UNIVERSE_FILE = "universe.json"
+
+# ── Hand-maintained deny list ───────────────────────────────────────────────
+# Symbols that must never be traded regardless of what Polygon reports about
+# them. This is the emergency lever: add ONE SYMBOL PER LINE with a comment
+# naming the product, then re-run refresh_universe().
+EXCLUDE_SYMBOLS = frozenset({
+    "NEBX",  # Defiance Daily Target 2X Long NBIS ETF
+    "NBIG",  # GraniteShares 2x Long NBIS Daily ETF
+    "NBIL",  # T-Rex 2X Long Nebius Daily Target ETF
+    "NBIS",  # Nebius Group N.V. — denied by mandate (root of the 2X wrappers)
+})
+
+# ── Name-based fund detection ───────────────────────────────────────────────
+# STRONG tokens: one of these words in a security name is proof the instrument
+# is not an operating company. Verified against 300 real universe names plus 61
+# look-alike common stocks with zero false positives.
+FUND_NAME_TOKENS = frozenset({
+    "ETF", "ETFS", "ETN", "ETNS", "ETP", "ETPS",
+    "FUND", "FUNDS",
+    "LEVERAGED", "INVERSE", "ULTRAPRO", "ULTRASHORT",
+    "WARRANT", "WARRANTS",
+    "DEPOSITARY",
+    "ACQUISITION", "ACQUISITIONS",  # pre-merger SPAC shells, units, warrants
+    # Issuer brands that only ever appear on fund/derivative products. Asset
+    # managers that are themselves tradable common stocks (Invesco/IVZ,
+    # WisdomTree/WT, BlackRock/BLK, Franklin/BEN, Virtus/VRTS) are deliberately
+    # ABSENT — their products always carry ETF/ETN/Fund/a multiplier anyway.
+    "DIREXION", "PROSHARES", "GRANITESHARES", "VELOCITYSHARES",
+    "ETRACS", "IPATH", "IPATHA", "MICROSECTORS", "SPDR", "XTRACKERS",
+    "YIELDMAX", "ROUNDHILL", "TRADR", "DEFIANCE", "KURV",
+})
+
+# STRONG phrases: patterns that are only safe as multi-word matches. A bare
+# TRUST / PREFERRED / UNIT would ban Northern Trust (NTRS), Preferred Bank
+# (PFBC) and Unit Corporation (UNT), so the fund meaning is pinned down by the
+# neighbouring word instead.
+FUND_NAME_PHRASES = (
+    "EXCHANGE TRADED", "EXCHANGE-TRADED",
+    "CLOSED END", "CLOSED-END",
+    "ROYALTY TRUST", "GRANTOR TRUST", "UNIT INVESTMENT TRUST",
+    "BITCOIN TRUST", "ETHEREUM TRUST", "BULLION TRUST",
+    "COMMODITY TRUST", "CURRENCY TRUST", "TERM TRUST",
+    "PHYSICAL GOLD", "PHYSICAL SILVER",
+    "PREFERRED STOCK", "PREFERRED SHARE", "CUMULATIVE PREFERRED",
+    "PERPETUAL PREFERRED", "DEPOSITARY SHARE",
+    "SUBORDINATED NOTES", "LINKED NOTES",
+    "GLOBAL X", "T-REX", "LEVERAGE SHARES",
+)
+
+# WEAK hints: genuine fund words that also occur in genuine company names
+# (Ultra Clean Holdings, Northern Trust, Unit Corp, Daily Journal, Target Corp,
+# Preferred Bank, Index Industries). One hint proves nothing. Two hints in one
+# name has never occurred in a legitimate operating company we tested.
+WEAK_FUND_HINTS = frozenset({
+    "TRUST", "SHARES", "UNIT", "UNITS", "INDEX", "PORTFOLIO",
+    "ULTRA", "BULL", "BEAR", "DAILY", "LONG", "SHORT", "TARGET",
+    "PREFERRED", "MUTUAL", "LEVERAGE", "HEDGED", "TRACKING",
+})
+MIN_WEAK_HINTS_TO_REJECT = 2  # 2 weak hints = fund; 1 = probably a real company
+
+# Leverage multiplier in any form: 2X, 3x, -1X, 1.5X. Generalised from the
+# literal "2X"/"3X"/"-1X" strings so a future 4X or 1.75X product is caught too.
+LEVERAGE_MULTIPLIER_RE = re.compile(r"(?<![A-Z0-9])-?\d+(?:\.\d+)?X\b")
+
+# Issuer families whose brand ends in "Shares" (iShares, ProShares,
+# GraniteShares, LeverageShares...). BANCSHARES is excluded because dozens of
+# bank holding companies are named "<Something> Bancshares, Inc." (HOMB, IBOC,
+# SBSI, HBAN, SHBI).
+ISSUER_SHARES_RE = re.compile(r"\b(?!BANCSHARES\b)[A-Z]+SHARES\b")
+
+_WORD_RE = re.compile(r"[A-Z0-9]+")
+
+# Cached (mtime, entries) so an entry loop pays one universe.json read.
+_universe_cache: tuple[float, list[dict]] | None = None
+
+
+def is_leveraged_or_fund(name: str) -> bool:
+    """
+    True when a Polygon security NAME describes a fund or derivative product.
+
+    Name-based rather than symbol-based because the ticker of the next leveraged
+    wrapper is unknowable, while its name always advertises what it is. An empty
+    name returns False — there is nothing to judge — which is exactly why the
+    symbol deny list and the CS-universe membership check exist alongside it.
+    """
+    if not name:
+        return False
+    upper = name.upper()
+    if LEVERAGE_MULTIPLIER_RE.search(upper):
+        return True
+    if ISSUER_SHARES_RE.search(upper):
+        return True
+    if any(phrase in upper for phrase in FUND_NAME_PHRASES):
+        return True
+    words = set(_WORD_RE.findall(upper))
+    if words & FUND_NAME_TOKENS:
+        return True
+    return len(words & WEAK_FUND_HINTS) >= MIN_WEAK_HINTS_TO_REJECT
+
+
+def load_universe_entries() -> list[dict]:
+    """
+    Read universe.json and return normalized {symbol, type, name} rows.
+
+    Never calls Polygon — a gate must be cheap enough to run before every order.
+    Legacy string-only universes are migrated in memory to type "CS" with an
+    empty name, matching pre_market_scanner._normalize_universe().
+    """
+    global _universe_cache
+    path = state_path(UNIVERSE_FILE)
+    if not path.exists():
+        path = CANDIDATES_DIR / UNIVERSE_FILE
+    if not path.exists():
+        return []
+
+    mtime = path.stat().st_mtime
+    if _universe_cache is not None and _universe_cache[0] == mtime:
+        return _universe_cache[1]
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    entries: list[dict] = []
+    for entry in raw.get("tickers", []):
+        if isinstance(entry, str):
+            entries.append({"symbol": entry.upper(), "type": "CS", "name": ""})
+        else:
+            entries.append({
+                "symbol": str(entry.get("symbol", "")).upper(),
+                "type": entry.get("type", "CS"),
+                "name": str(entry.get("name", "") or ""),
+            })
+    _universe_cache = (mtime, entries)
+    return entries
+
+
+def cs_universe_symbols() -> set[str]:
+    """Tradable symbols: Polygon type CS, not denied, name not a fund product."""
+    return {
+        entry["symbol"] for entry in load_universe_entries()
+        if entry["type"] == "CS"
+        and entry["symbol"]
+        and entry["symbol"] not in EXCLUDE_SYMBOLS
+        and not is_leveraged_or_fund(entry["name"])
+    }
+
+
+def universe_name(symbol: str) -> str:
+    """Polygon name for a symbol, or "" when the universe has no name for it."""
+    symbol = (symbol or "").upper().strip()
+    for entry in load_universe_entries():
+        if entry["symbol"] == symbol:
+            return entry["name"]
+    return ""
+
+
+def passes_universe_safety_gate(ticker: str) -> bool:
+    """
+    Last check before an order is approved or placed anywhere in Q-Alpha.
+
+    Refuses the trade unless the ticker is in the current CS universe, is absent
+    from EXCLUDE_SYMBOLS, and has a name that is not a fund/derivative product.
+    Fails CLOSED: an unreadable or empty universe.json blocks trading instead of
+    waving everything through, because a silent pass is precisely how NEBX got
+    filled in Week 1.
+    """
+    symbol = (ticker or "").upper().strip()
+    if not symbol or symbol in EXCLUDE_SYMBOLS:
+        print(f"BLOCKED: {symbol or ticker} failed universe safety gate")
+        return False
+
+    symbols = cs_universe_symbols()
+    if not symbols:
+        print("  universe.json missing or empty — refusing all entries")
+        print(f"BLOCKED: {symbol} failed universe safety gate")
+        return False
+
+    if symbol not in symbols or is_leveraged_or_fund(universe_name(symbol)):
+        print(f"BLOCKED: {symbol} failed universe safety gate")
+        return False
+    return True

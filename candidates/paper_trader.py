@@ -19,6 +19,7 @@ from state_paths import CANDIDATES_DIR, state_path
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
+from universe_filter import passes_universe_safety_gate
 from position_sizer import (
     MAX_OPEN_POSITIONS,
     MAX_TRADES_PER_DAY,
@@ -626,7 +627,17 @@ class PaperTrader:
         candidate: dict,
         api_key: str,
     ) -> PaperTrade | None:
-        """Create funded PENDING_MOC trade after user approval."""
+        """
+        Create funded PENDING_MOC trade after user approval.
+
+        The universe safety gate runs FIRST — before the ATR fetch, before pool
+        capital is reserved, and before any IBKR call — because this is the
+        function through which NEBX/NBIG/NBIL reached TWS in Week 1.
+        """
+        ticker = candidate["ticker"].upper()
+        if not passes_universe_safety_gate(ticker):
+            return None
+
         plan = candidate["order_plan"]
         atr = candidate.get("atr_14") or get_atr14(
             candidate["ticker"],
@@ -638,7 +649,6 @@ class PaperTrader:
         if not self.pool.can_open_today(self.get_trades_today_count()):
             return None
 
-        ticker = candidate["ticker"].upper()
         if self._ticker_already_active(ticker):
             print(f"⚠️ {ticker}: already has active position — skipping")
             load_dotenv()
@@ -771,6 +781,15 @@ def run_approval_processor() -> None:
         decision = replies.get(ticker)
 
         if decision == "APPROVED":
+            if not passes_universe_safety_gate(ticker):
+                trader.log_skip(
+                    ticker, plan, "universe_gate",
+                    "failed universe safety gate",
+                )
+                candidate["status"] = "BLOCKED"
+                tg.send(f"🚫 {ticker} BLOCKED — not a tradable common stock")
+                print(f"  {ticker}: BLOCKED by universe safety gate")
+                continue
             trade = trader.approve_trade(candidate, api_key)
             if trade:
                 candidate["status"] = "APPROVED"
