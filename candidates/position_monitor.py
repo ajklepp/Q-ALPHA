@@ -202,6 +202,57 @@ class PositionMonitor:
             )
             return trade
 
+        # ── MFE tracking (all modes) ─────────────────────────────────────
+        # Record how far the trade ran in our favor (in R) before exit, so
+        # the 2R-vs-trailing-stop question can be answered from real data.
+        risk_per_share = trade.entry_price - trade.stop_price
+        if risk_per_share > 0:
+            fav_r = (today_high - trade.entry_price) / risk_per_share
+            if fav_r > trade.mfe_r:
+                trade.mfe_r = round(fav_r, 3)
+                trade.mfe_price = round(today_high, 2)
+
+        # ── Step 3: SINGLE-BRACKET (2R) exit ─────────────────────────────
+        # Books MUST equal broker. TWS holds one 100% stop + one 100% limit
+        # at 2R, so the ledger exits 100% at target_2r here. No partial
+        # scale-out, no T3 trail -> no books-vs-broker divergence, no
+        # phantom STOP-HIT reports.
+        if getattr(trade, "bracket_mode", "single_2r") == "single_2r":
+            if trade.status == "OPEN" and today_high >= trade.target_2r \
+                    and trade.remaining_shares > 0:
+                exit_px = trade.target_2r
+                proceeds = trade.remaining_shares * exit_px
+                pnl_delta = trade.remaining_shares * (exit_px - trade.entry_price)
+                trade.tranche_1_exit = exit_px
+                trade.remaining_t1 = 0
+                trade.remaining_t2 = 0
+                trade.remaining_t3 = 0
+                trade.status = "CLOSED"
+                trade.exit_reason = "TARGET_2R"
+                trade.pnl_dollars, trade.pnl_pct = calculate_trade_pnl(trade)
+                self.pool.close_tranche(proceeds, is_final_tranche=True)
+                if trade.pnl_dollars > 0:
+                    self.pool.record_win()
+                self._record_event(trade, "TARGET_2R", pnl_delta)
+                return trade
+            # single-bracket: skip the legacy tranche branches entirely
+            if trade.days_held >= MAX_HOLD_DAYS and trade.status == "OPEN":
+                exit_px = today_close
+                proceeds = trade.remaining_shares * exit_px
+                pnl_delta = trade.remaining_shares * (exit_px - trade.entry_price)
+                trade.tranche_1_exit = exit_px
+                trade.remaining_t1 = 0
+                trade.remaining_t2 = 0
+                trade.remaining_t3 = 0
+                trade.status = "CLOSED"
+                trade.exit_reason = "TIME"
+                trade.pnl_dollars, trade.pnl_pct = calculate_trade_pnl(trade)
+                self.pool.close_tranche(proceeds, is_final_tranche=True)
+                if trade.pnl_dollars > 0:
+                    self.pool.record_win()
+                self._record_event(trade, "TIME", pnl_delta)
+            return trade
+
         # Step 3a: T1 hit
         if trade.status == "OPEN" and trade.remaining_t1 > 0:
             if today_high >= trade.target_1r:

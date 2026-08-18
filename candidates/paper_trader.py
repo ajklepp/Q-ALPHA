@@ -156,6 +156,14 @@ class PaperTrade:
     ibkr_order_id: int | None = None
     ibkr_status: str = ""
     execution_mode: str = ""
+    # Single-bracket (2R) model: 100% of shares exit at target_2r or stop.
+    # tranche fields retained for schema compat but t2/t3 stay 0.
+    bracket_mode: str = "single_2r"
+    # Maximum Favorable Excursion in R multiples -- highest the trade ran
+    # in our favor before exit. Logged so exit strategy (2R vs trail) can
+    # be chosen empirically from real data, not intuition.
+    mfe_r: float = 0.0
+    mfe_price: float = 0.0
 
     def __post_init__(self):
         if self.remaining_t1 == 0 and self.shares_t1:

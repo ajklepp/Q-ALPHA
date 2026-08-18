@@ -914,9 +914,15 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                 pool_size = pool.position_size()
                 shares = max(6, int(pool_size / current_price))
 
-                t1_shares = int(shares * 0.33)
-                t2_shares = int(shares * 0.33)
-                t3_shares = shares - t1_shares - t2_shares
+                # SINGLE-BRACKET (2R) MODEL -- books must equal broker.
+                # The broker (_place_intraday_bracket) sends ONE 100% buy,
+                # ONE 100% stop, and ONE 100% limit at 2R. So the ledger
+                # must also hold 100% in a single tranche that exits at 2R.
+                # T1 carries 100%; the monitor exits T1 at target_2r.
+                # T2/T3 stay ZERO so no phantom scale-out or trail exists.
+                t1_shares = shares
+                t2_shares = 0
+                t3_shares = 0
 
                 stop_price = round(current_price - structure_stop_dist, 2)
                 risk_ps = current_price - stop_price
@@ -972,6 +978,7 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                         ibkr_order_id=result.get("parent_id"),
                         ibkr_status="SUBMITTED",
                         execution_mode="IBKR_PAPER",
+                        bracket_mode="single_2r",
                     )
                     trade_dict = trade.to_dict()
                     trade_dict["entry_reason"] = entry_reason
