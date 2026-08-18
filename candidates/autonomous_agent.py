@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 import traceback
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime
 from pathlib import Path
 
 import pytz
@@ -88,14 +88,18 @@ IB_MSGS_PER_TICKER = 2       # reqMktData + cancelMktData, one of each per ticke
 IB_SETTLE_MARGIN_SEC = 0.5   # slack for TWS round-trip before fields are read
 MIN_BATCH_SETTLE_SEC = 3     # never less patient than the flat sleep this replaces
 
-# ── Opening-candle capture window (watch_and_enter) ─────────────────────────
-# The structure stop is measured off the first ~60s of the real-time bar
-# subscription, so that subscription must start at the 9:30 open. main() only
-# re-checks the clock every 10s before calling watch_and_enter, and the universe
-# gate costs another moment, so a punctual start legitimately lands a few
-# seconds past 9:30:00. Beyond this grace window most of the first-minute slice
-# falls outside the opening candle and the stop no longer describes the open.
-OPEN_CAPTURE_GRACE_SEC = 30
+# ── Opening-candle capture (watch_and_enter) ────────────────────────────────
+# The structure stop, broke_structure and not_dumping all describe the FIRST
+# MINUTE OF THE SESSION. Bars are therefore selected by timestamp relative to
+# the 9:30 open, never by position in the subscription, so that the subscription
+# can start early (see subscribe_realtime_bars) without dragging pre-market bars
+# into the opening candle.
+REALTIME_BAR_SEC = 5                      # reqRealTimeBars supports 5s bars only
+BARS_PER_MINUTE = 60 // REALTIME_BAR_SEC  # 12 five-second bars == one minute of tape
+PRE_OPEN_POLL_SEC = 5                     # clock re-check interval while waiting for the bell
+# One full bar period plus slack: the 9:30:00 bar is only published once its
+# five seconds have elapsed, so capture cannot be judged before then.
+OPEN_BAR_SETTLE_SEC = REALTIME_BAR_SEC + 2
 
 
 def send_telegram(message: str) -> None:
@@ -577,10 +581,100 @@ def save_trade(trade_dict: dict) -> None:
     print(f"Trade saved: {trade_dict['ticker']}")
 
 
-def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
+def session_open_dt(day: date | None = None) -> datetime:
+    """
+    Timezone-aware 9:30 ET session open for `day` (default today).
+
+    Built with ET.localize() and NOT datetime.combine(...).replace(tzinfo=ET):
+    a pytz zone object carries a table of historical offsets and replace() picks
+    the first entry, which for America/New_York is LMT (-04:56). That silently
+    shifts every open-relative comparison by about four minutes.
+    """
+    return ET.localize(datetime.combine(day or date.today(), ENTRY_OPEN))
+
+
+def bars_since_open(raw_bars: list, open_dt: datetime) -> list:
+    """
+    The subset of a real-time bar list belonging to the regular session.
+
+    ib_insync builds RealTimeBar.time with datetime.fromtimestamp(t, utc), so it
+    is a tz-aware UTC datetime marking the START of the bar, and comparing it to
+    an ET-localized open is valid across zones. Selecting by timestamp — rather
+    than by raw_bars[:12] — is what lets the subscription start before the bell
+    without the pre-market tape being mistaken for the opening candle.
+    """
+    return [b for b in raw_bars if b.time >= open_dt]
+
+
+def earliest_bar_time(rt_bars: dict) -> datetime | None:
+    """
+    Timestamp of the oldest bar across every subscription, or None if empty.
+
+    This is the evidence that the subscription predated the bell: one bar at or
+    before the open proves the feed was live when the session started, so no
+    ticker's opening candle can have been missed. Every scan candidate cleared
+    MIN_PM_VOL_RATIO and therefore traded pre-market, so on a punctual run this
+    is always a pre-market bar.
+    """
+    times = [
+        bars[0].time
+        for bars, _contract in rt_bars.values()
+        if len(bars) > 0
+    ]
+    return min(times) if times else None
+
+
+def subscribe_realtime_bars(ib: IB, candidates: list[dict]) -> dict:
+    """
+    Open 5-second real-time bar subscriptions for the candidate list.
+
+    Called BEFORE the pre-open wait, so bars are already flowing when the bell
+    rings and the 9:30:00 bar is never missed. useRTH=False is required: with
+    regular-trading-hours filtering on, TWS would deliver nothing until 9:30 and
+    pre-subscribing would buy nothing.
+
+    The universe safety gate is applied here as well as in watch_and_enter, so a
+    blocked symbol is never subscribed even though watch_and_enter is what
+    reports and skips it.
+
+    Returns {ticker: (RealTimeBarList, Stock)}.
+    """
+    print(f"\nSubscribing to real-time bars for {len(candidates)} tickers...")
+    rt_bars: dict[str, tuple[object, Stock]] = {}
+    for c in candidates:
+        if not passes_universe_safety_gate(c["ticker"]):
+            continue
+        try:
+            contract = Stock(c["ticker"], "SMART", "USD")
+            ib.qualifyContracts(contract)
+            bars = ib.reqRealTimeBars(
+                contract, REALTIME_BAR_SEC, "TRADES", False,
+            )
+            rt_bars[c["ticker"]] = (bars, contract)
+            print(f"  Subscribed: {c['ticker']}")
+        except Exception as exc:
+            print(f"  Failed {c['ticker']}: {exc}")
+    return rt_bars
+
+
+def cancel_realtime_bars(ib: IB, rt_bars: dict) -> None:
+    """Release every real-time bar subscription; never raises."""
+    for _ticker, (bars, _contract) in rt_bars.items():
+        try:
+            ib.cancelRealTimeBars(bars)
+        except Exception:
+            pass
+
+
+def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None) -> dict:
     """
     Monitor candidates 9:30-11:00 AM; enter on confirmed gap+VWAP+volume setup.
     Places DAY bracket orders via IBKR.
+
+    `rt_bars` is the mapping returned by subscribe_realtime_bars(), which main()
+    calls before the pre-open wait so the opening bar is captured. When omitted
+    the subscription is opened here instead, which is correct but can only see
+    the tape from this moment on.
 
     Every candidate clears the universe safety gate BEFORE any market-data
     subscription, so a blocked symbol is never watched and never retried.
@@ -625,27 +719,46 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
         for c in candidates
     }
 
-    # first_candle_low/high and open_price come from the START OF THE
-    # SUBSCRIPTION (raw_bars[:12], raw_bars[0]), not the start of the session. If
-    # the scan overruns and we subscribe well after 9:30 those describe an
-    # arbitrary post-open minute, which silently misprices the structure stop and
-    # the broke_structure / not_dumping / hard_dump checks. Refusing costs one day
-    # of opportunity; entering costs a wrong stop on every position — so refuse.
-    now_et = datetime.now(ET)
-    open_capture_deadline = ET.localize(
-        datetime.combine(now_et.date(), ENTRY_OPEN)
-    ) + timedelta(seconds=OPEN_CAPTURE_GRACE_SEC)
+    if not candidate_tracker:
+        print("No candidates left to watch after the universe safety gate.")
+        return {"entered": entered, "skipped": skipped, "tracker": candidate_tracker}
 
-    if now_et >= open_capture_deadline:
+    if rt_bars is None:
+        rt_bars = subscribe_realtime_bars(ib, candidates)
+    else:
+        # A symbol blocked by the gate above must not be watched even if it was
+        # subscribed before the gate ran.
+        rt_bars = {t: v for t, v in rt_bars.items() if t in candidate_tracker}
+
+    session_open = session_open_dt()
+
+    print("\nWaiting for market open (9:30 AM)...")
+    while datetime.now(ET).time() < ENTRY_OPEN:
+        ib.sleep(PRE_OPEN_POLL_SEC)
+    ib.sleep(OPEN_BAR_SETTLE_SEC)
+
+    # The opening candle is selected by timestamp, so the only way to miss it is
+    # for the feed itself to have started after the bell. One bar at or before
+    # the open proves it did not. Without that proof the structure stop would be
+    # measured off an arbitrary post-open minute, silently mispricing the stop
+    # and the broke_structure / not_dumping / hard_dump checks. Refusing costs
+    # one day of opportunity; entering costs a wrong stop on every position.
+    earliest = earliest_bar_time(rt_bars)
+    if earliest is None or earliest > session_open:
+        now_et = datetime.now(ET)
         reason = "opening candle missed — structure stop would be invalid"
+        first_bar = (
+            "no real-time bars arrived at all"
+            if earliest is None
+            else f"first bar is {earliest.astimezone(ET).strftime('%H:%M:%S')} ET"
+        )
         msg = (
             f"🚫 Q-ALPHA: NO ENTRIES TODAY\n"
-            f"Watcher reached the open at {now_et.strftime('%H:%M:%S')} ET, more "
-            f"than {OPEN_CAPTURE_GRACE_SEC}s after the "
-            f"{ENTRY_OPEN.strftime('%H:%M')} open.\n"
+            f"Real-time feed started after the {ENTRY_OPEN.strftime('%H:%M')} "
+            f"open ({first_bar}).\n"
             f"The opening candle was never captured, so the structure stop would "
-            f"be invalid. Skipping {len(candidates)} candidate(s) rather than "
-            f"entering on a mispriced stop."
+            f"be invalid. Skipping {len(candidate_tracker)} candidate(s) rather "
+            f"than entering on a mispriced stop."
         )
         print(msg)
         send_telegram(msg)
@@ -660,28 +773,11 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
                 "reason": reason,
                 "price": track["candidate"].get("last_price", 0.0),
             })
+        cancel_realtime_bars(ib, rt_bars)
         return {"entered": entered, "skipped": skipped, "tracker": candidate_tracker}
-
-    print(f"\nSubscribing to real-time bars for {len(candidates)} tickers...")
-    rt_bars: dict[str, tuple[object, Stock]] = {}
-    for c in candidates:
-        try:
-            contract = Stock(c["ticker"], "SMART", "USD")
-            ib.qualifyContracts(contract)
-            bars = ib.reqRealTimeBars(contract, 5, "TRADES", False)
-            rt_bars[c["ticker"]] = (bars, contract)
-            print(f"  Subscribed: {c['ticker']}")
-        except Exception as exc:
-            print(f"  Failed {c['ticker']}: {exc}")
-
-    print("\nWaiting for market open (9:30 AM)...")
 
     while True:
         now_et = datetime.now(ET)
-
-        if now_et.time() < ENTRY_OPEN:
-            ib.sleep(5)
-            continue
 
         if now_et.time() >= ENTRY_CLOSE:
             print("\nEntry window closed at 11:00 AM")
@@ -710,16 +806,23 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
                 continue
 
             raw_bars = list(bars_obj)
-            if len(raw_bars) < 4:
+            session_bars = bars_since_open(raw_bars, session_open)
+
+            # Nothing may be judged until a full opening minute of SESSION bars
+            # exists: first_candle_low/high describe that minute, and this also
+            # keeps the min()/max() below off an empty sequence in the first
+            # seconds after the bell, when raw_bars holds only pre-market tape.
+            if len(session_bars) < BARS_PER_MINUTE:
                 continue
 
-            recent = raw_bars[-12:]
-            all_bars = raw_bars
-            if not recent:
-                continue
+            recent = raw_bars[-BARS_PER_MINUTE:]
+            # VWAP is session VWAP. raw_bars now reaches back into the pre-market
+            # because the subscription starts before the bell, so it must not be
+            # used here.
+            all_bars = session_bars
 
             current_price = recent[-1].close
-            open_price = raw_bars[0].open
+            open_price = session_bars[0].open_
             prev_close = track["candidate"]["prev_close"]
 
             track["final_price"] = current_price
@@ -732,12 +835,15 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
             else:
                 vwap = current_price
 
-            up_bars = [b for b in recent if b.close >= b.open]
-            dn_bars = [b for b in recent if b.close < b.open]
+            # ib_insync names the dataclass field open_, not open; b.open raises.
+            up_bars = [b for b in recent if b.close >= b.open_]
+            dn_bars = [b for b in recent if b.close < b.open_]
             up_vol = sum(b.volume for b in up_bars)
             dn_vol = sum(b.volume for b in dn_bars)
 
-            first_min = raw_bars[:12] if len(raw_bars) >= 12 else raw_bars
+            # The opening candle: the first minute AT OR AFTER 9:30, guaranteed
+            # to be BARS_PER_MINUTE long by the session-bar guard above.
+            first_min = session_bars[:BARS_PER_MINUTE]
             first_candle_low = min(b.low for b in first_min)
             first_candle_high = max(b.high for b in first_min)
 
@@ -749,10 +855,7 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
 
             gap_filled = current_price < prev_close * 1.005
             hard_dump = current_price < open_price * 0.95
-            broke_structure = (
-                len(raw_bars) >= 12
-                and current_price < first_candle_low * 0.99
-            )
+            broke_structure = current_price < first_candle_low * 0.99
 
             structure_stop_dist = max(
                 current_price * 0.02,
@@ -906,11 +1009,7 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
 
         ib.sleep(30)
 
-    for _ticker, (bars, _contract) in rt_bars.items():
-        try:
-            ib.cancelRealTimeBars(bars)
-        except Exception:
-            pass
+    cancel_realtime_bars(ib, rt_bars)
 
     return {"entered": entered, "skipped": skipped, "tracker": candidate_tracker}
 
@@ -1158,11 +1257,13 @@ def main() -> None:
 
         send_premarket_summary(candidates, regime, vix)
 
+        # Subscribe BEFORE the pre-open wait, so the 9:30:00 bar is already in
+        # the list when watch_and_enter selects the opening candle. ib.sleep()
+        # below runs the event loop, which is what lets those bars accumulate.
+        rt_bars = subscribe_realtime_bars(ib, candidates)
+
         while datetime.now(ET).time() < ENTRY_OPEN:
-            remaining = (
-                datetime.combine(date.today(), ENTRY_OPEN).replace(tzinfo=ET)
-                - datetime.now(ET)
-            )
+            remaining = session_open_dt() - datetime.now(ET)
             print(
                 f"Market opens in {int(remaining.total_seconds() // 60)}m "
                 f"{int(remaining.total_seconds() % 60)}s..."
@@ -1172,7 +1273,7 @@ def main() -> None:
         print(f"\n{'─' * 40}")
         print("PHASE 3: MARKET OPEN WATCHER")
         print(f"{'─' * 40}")
-        result = watch_and_enter(ib, candidates)
+        result = watch_and_enter(ib, candidates, rt_bars)
 
         print(f"\n{'─' * 40}")
         print("PHASE 4: SESSION RECAP")
