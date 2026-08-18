@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 import traceback
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 
 import pytz
@@ -75,6 +75,27 @@ MIN_DOLLAR_VOL = 2_000_000
 TOP_N_CANDIDATES = 10
 EXPECTED_PM_VOL_PCT = 0.10
 IBKR_BATCH_SIZE = 80
+
+# ── IBKR message-throttle budget (scan_premarket) ───────────────────────────
+# ib_insync 0.9.86 self-throttles OUTBOUND API messages: Client.MaxRequests
+# messages per Client.RequestsInterval second. Excess messages are parked in
+# Client._msgQ and are only drained while the asyncio event loop runs — which,
+# in this synchronous script, means only inside ib.sleep(). So the sleep that
+# follows a batch has to be long enough to pay for that batch's own messages,
+# or the queue carries a permanent backlog into every later batch.
+IB_MAX_MSGS_PER_SEC = 45     # ib_insync Client.MaxRequests per RequestsInterval
+IB_MSGS_PER_TICKER = 2       # reqMktData + cancelMktData, one of each per ticker
+IB_SETTLE_MARGIN_SEC = 0.5   # slack for TWS round-trip before fields are read
+MIN_BATCH_SETTLE_SEC = 3     # never less patient than the flat sleep this replaces
+
+# ── Opening-candle capture window (watch_and_enter) ─────────────────────────
+# The structure stop is measured off the first ~60s of the real-time bar
+# subscription, so that subscription must start at the 9:30 open. main() only
+# re-checks the clock every 10s before calling watch_and_enter, and the universe
+# gate costs another moment, so a punctual start legitimately lands a few
+# seconds past 9:30:00. Beyond this grace window most of the first-minute slice
+# falls outside the opening candle and the stop no longer describes the open.
+OPEN_CAPTURE_GRACE_SEC = 30
 
 
 def send_telegram(message: str) -> None:
@@ -275,10 +296,31 @@ def get_news_catalyst(ticker: str) -> tuple[bool, str]:
         return True, f"📰 News: {headlines[0][:80]}"
 
 
+def _batch_settle_seconds(batch_size: int) -> float:
+    """
+    Seconds of event-loop time needed to flush one scan batch's API messages.
+
+    Derived from the message budget rather than guessed: each ticker costs
+    IB_MSGS_PER_TICKER messages and ib_insync releases only
+    IB_MAX_MSGS_PER_SEC of them per second, so an 80-ticker batch needs about
+    3.6s just to reach TWS. A flat 3s under-drained by ~25 messages per batch,
+    the backlog compounded, and from batch 2 onward the tail of every batch was
+    read before its subscription existed — those tickers returned nan and were
+    dropped with no log line. Floored at MIN_BATCH_SETTLE_SEC so this is never
+    less patient than the sleep it replaces.
+    """
+    required = (IB_MSGS_PER_TICKER * batch_size) / IB_MAX_MSGS_PER_SEC
+    return max(MIN_BATCH_SETTLE_SEC, round(required + IB_SETTLE_MARGIN_SEC, 1))
+
+
 def scan_premarket(ib: IB) -> list[dict]:
     """
     Scan universe for gap candidates using IBKR live data.
     Runs 9:20-9:29 AM. Returns top N ranked candidates.
+
+    Tickers whose quote never arrived are counted and reported instead of being
+    silently discarded, because a throttled scan and a genuinely quiet market
+    otherwise produce identical output.
     """
     universe = load_universe()
     if not universe:
@@ -293,6 +335,8 @@ def scan_premarket(ib: IB) -> list[dict]:
     )
 
     candidates: list[dict] = []
+    requested = 0   # market-data subscriptions actually issued to TWS
+    no_quote = 0    # subscriptions that never produced a usable price
 
     for i in range(0, len(universe), IBKR_BATCH_SIZE):
         batch = universe[i : i + IBKR_BATCH_SIZE]
@@ -306,17 +350,25 @@ def scan_premarket(ib: IB) -> list[dict]:
             except Exception:
                 continue
 
-        ib.sleep(3)
+        requested += len(subs)
+        ib.sleep(_batch_settle_seconds(len(batch)))
 
         for symbol, ticker, contract in subs:
             try:
-                last = ticker.last or ticker.close or 0
-                prev_close = ticker.close or 0
+                last = ticker.last if _valid_price(ticker.last) else ticker.close
+                prev_close = ticker.close
                 volume = ticker.volume or 0
                 avg_vol = ticker.avVolume or 1
 
-                if prev_close <= 0 or last <= 0:
+                # nan is truthy, so the old `ticker.last or ticker.close or 0`
+                # produced nan for a starved subscription, every downstream
+                # comparison was False and the ticker vanished unlogged.
+                if not _valid_price(last) or not _valid_price(prev_close):
+                    no_quote += 1
                     continue
+
+                last = float(last)
+                prev_close = float(prev_close)
 
                 gap_pct = (last - prev_close) / prev_close
 
@@ -358,6 +410,14 @@ def scan_premarket(ib: IB) -> list[dict]:
                 except Exception:
                     pass
 
+    if no_quote:
+        print(
+            f"\n⚠️  No quote data: {no_quote}/{requested} tickers skipped "
+            f"(TWS throttle backlog or missing market-data permission)"
+        )
+    else:
+        print(f"\nQuote data received for all {requested} requested tickers")
+
     if not candidates:
         print("No candidates passed filters")
         return []
@@ -379,6 +439,7 @@ def scan_premarket(ib: IB) -> list[dict]:
     print(f"SCAN RESULTS — {datetime.now(ET).strftime('%H:%M ET')}")
     print(f"{'=' * 50}")
     print(f"Universe:          {len(universe)}")
+    print(f"No quote data:     {no_quote}/{requested}")
     print(f"After all filters: {len(candidates)}")
     print(f"Top {TOP_N_CANDIDATES} candidates:")
     for idx, c in enumerate(top):
@@ -523,6 +584,10 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
 
     Every candidate clears the universe safety gate BEFORE any market-data
     subscription, so a blocked symbol is never watched and never retried.
+
+    Returns {"entered": [...], "skipped": [...], "tracker": {...}} on every path,
+    including the early return taken when the opening candle was missed, because
+    main() feeds the result straight into send_session_recap().
     """
     pool = PoolManager(state_path=state_path("pool_state.json"))
 
@@ -559,6 +624,43 @@ def watch_and_enter(ib: IB, candidates: list[dict]) -> dict:
         }
         for c in candidates
     }
+
+    # first_candle_low/high and open_price come from the START OF THE
+    # SUBSCRIPTION (raw_bars[:12], raw_bars[0]), not the start of the session. If
+    # the scan overruns and we subscribe well after 9:30 those describe an
+    # arbitrary post-open minute, which silently misprices the structure stop and
+    # the broke_structure / not_dumping / hard_dump checks. Refusing costs one day
+    # of opportunity; entering costs a wrong stop on every position — so refuse.
+    now_et = datetime.now(ET)
+    open_capture_deadline = ET.localize(
+        datetime.combine(now_et.date(), ENTRY_OPEN)
+    ) + timedelta(seconds=OPEN_CAPTURE_GRACE_SEC)
+
+    if now_et >= open_capture_deadline:
+        reason = "opening candle missed — structure stop would be invalid"
+        msg = (
+            f"🚫 Q-ALPHA: NO ENTRIES TODAY\n"
+            f"Watcher reached the open at {now_et.strftime('%H:%M:%S')} ET, more "
+            f"than {OPEN_CAPTURE_GRACE_SEC}s after the "
+            f"{ENTRY_OPEN.strftime('%H:%M')} open.\n"
+            f"The opening candle was never captured, so the structure stop would "
+            f"be invalid. Skipping {len(candidates)} candidate(s) rather than "
+            f"entering on a mispriced stop."
+        )
+        print(msg)
+        send_telegram(msg)
+        for ticker, track in candidate_tracker.items():
+            track.update(
+                decision="skipped",
+                decision_time=now_et.isoformat(),
+                decision_reason=reason,
+            )
+            skipped.append({
+                "ticker": ticker,
+                "reason": reason,
+                "price": track["candidate"].get("last_price", 0.0),
+            })
+        return {"entered": entered, "skipped": skipped, "tracker": candidate_tracker}
 
     print(f"\nSubscribing to real-time bars for {len(candidates)} tickers...")
     rt_bars: dict[str, tuple[object, Stock]] = {}
