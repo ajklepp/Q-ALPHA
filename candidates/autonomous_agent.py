@@ -76,6 +76,15 @@ TOP_N_CANDIDATES = 10
 EXPECTED_PM_VOL_PCT = 0.10
 IBKR_BATCH_SIZE = 80
 
+# -- Candidate source -------------------------------------------------------
+# When True, the day's watchlist comes from full_market_scan (Polygon, the
+# ENTIRE US market, name-aware ban filter, N-day RVOL) instead of the 300-name
+# static universe scanned over TWS. The old TWS scan_premarket() is kept as an
+# instant fallback: set QALPHA_USE_FULL_MARKET_SCAN=0 to revert. The live
+# 9:30+ entry logic (watch_and_enter) is IDENTICAL either way -- only the
+# SOURCE of the watchlist changes. full_market_scan is read-only (no orders).
+USE_FULL_MARKET_SCAN = os.environ.get("QALPHA_USE_FULL_MARKET_SCAN", "1") != "0"
+
 # ── IBKR message-throttle budget (scan_premarket) ───────────────────────────
 # ib_insync 0.9.86 self-throttles OUTBOUND API messages: Client.MaxRequests
 # messages per Client.RequestsInterval second. Excess messages are parked in
@@ -519,7 +528,7 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
         tif="GTC",
         transmit=False,
     )
-    ib.placeOrder(contract, stop_loss)
+    stop_loss_trade = ib.placeOrder(contract, stop_loss)
 
     take_profit = LimitOrder(
         action="SELL",
@@ -529,8 +538,39 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
         tif="GTC",
         transmit=True,
     )
-    ib.placeOrder(contract, take_profit)
-    ib.sleep(1)
+    take_profit_trade = ib.placeOrder(contract, take_profit)
+    ib.sleep(2)  # let TWS acknowledge all three legs
+
+    # --- Verbose bracket-event logging (first real IBKR bracket test) -------
+    def _ostat(tr):
+        try:
+            return tr.orderStatus.status
+        except Exception:
+            return "UNKNOWN"
+    parent_status = _ostat(parent_trade)
+    stop_status = _ostat(stop_loss_trade)
+    target_status = _ostat(take_profit_trade)
+    print(
+        f"  [BRACKET] {ticker}: parent={parent_status} "
+        f"stop={stop_status}@${round(stop,2)} target={target_status}@${round(target_2r,2)} "
+        f"shares={shares}"
+    )
+
+    # --- Option B: ALERT-ONLY protective-stop verification ------------------
+    # If the entry fills but the protective STOP is not working, a live
+    # position would be unprotected. For this first live test we do NOT
+    # auto-flatten (untested order code on untested bracket code); we send a
+    # LOUD Telegram alert so it can be handled manually in TWS. Auto-flatten
+    # is a follow-up once brackets are proven.
+    healthy = {"PreSubmitted", "Submitted", "Filled"}
+    if parent_status == "Filled" and stop_status not in healthy:
+        alert = (
+            f"\ud83d\udea8 Q-ALPHA: {ticker} ENTRY FILLED but STOP status="
+            f"{stop_status} (not working). Position may be UNPROTECTED - "
+            f"check TWS and place a manual stop @ ${round(stop,2)} now."
+        )
+        print(alert)
+        send_telegram(alert)
 
     return {
         "ticker": ticker,
@@ -539,6 +579,9 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
         "stop": stop,
         "target": target_2r,
         "status": "SUBMITTED",
+        "parent_status": parent_status,
+        "stop_status": stop_status,
+        "target_status": target_status,
         "paper": True,
     }
 
@@ -1256,7 +1299,22 @@ def main() -> None:
         print(f"\n{'─' * 40}")
         print("PHASE 1: PRE-MARKET SCAN")
         print(f"{'─' * 40}")
-        candidates = scan_premarket(ib)
+        if USE_FULL_MARKET_SCAN:
+            print("Candidate source: full_market_scan (Polygon full US market)")
+            try:
+                from full_market_scan import scan_for_agent
+                candidates = scan_for_agent(TOP_N_CANDIDATES)
+            except Exception as exc:
+                # Loud fail + fall back to the TWS 300-name scan rather than
+                # silently trading nothing (same fail-loud rule as regime).
+                msg = (f"\u26a0\ufe0f Q-ALPHA: full_market_scan failed ({exc}); "
+                       f"falling back to TWS 300-name scan")
+                print(msg)
+                send_telegram(msg)
+                candidates = scan_premarket(ib)
+        else:
+            print("Candidate source: TWS 300-name scan_premarket")
+            candidates = scan_premarket(ib)
 
         if not candidates:
             send_telegram(f"💤 Q-ALPHA: No gap candidates today.\nRegime: {regime}")
