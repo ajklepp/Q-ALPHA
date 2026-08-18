@@ -391,11 +391,22 @@ def append_rollup(day: str, rows: list[dict]) -> None:
     header = ["date", "rule", "n_candidates", "n_entered", "entry_rate",
               "avg_r", "expectancy_r", "win_rate", "n_target", "n_stop",
               "n_time", "avg_mfe_r", "avg_entry_time"]
-    new = not ROLLUP_CSV.exists()
-    with ROLLUP_CSV.open("a", newline="", encoding="utf-8") as fh:
+    # De-dup by date: read existing rows and drop any for THIS day, so
+    # re-running a date REPLACES its rows instead of appending duplicates
+    # (which would double-count that day in the multi-week analysis).
+    existing_rows: list[list[str]] = []
+    if ROLLUP_CSV.exists():
+        with ROLLUP_CSV.open("r", newline="", encoding="utf-8") as fh:
+            all_rows = list(csv.reader(fh))
+        if all_rows:
+            first = all_rows[0]
+            body = all_rows[1:] if (first and first[0] == "date") else all_rows
+            existing_rows = [r for r in body if not (r and r[0] == day)]
+    with ROLLUP_CSV.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        if new:
-            w.writerow(header)
+        w.writerow(header)
+        for r in existing_rows:
+            w.writerow(r)
         for rule in RULES:
             rs = by_rule.get(rule, [])
             entered = [r for r in rs if r.get("entered")]
