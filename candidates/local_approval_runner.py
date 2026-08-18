@@ -74,9 +74,21 @@ def run_local_approval() -> None:
             expiry = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
             now_utc = datetime.now(timezone.utc)
             if now_utc > expiry:
-                print(f"  WARNING: approvals expired at {expires_raw} (now {now_utc.isoformat()})")
-            else:
-                print(f"  Approval window open until {expires_raw}")
+                print(
+                    f"  REJECTED: approvals expired at {expires_raw} "
+                    f"(now {now_utc.isoformat()}). Refusing to process stale "
+                    f"approvals to prevent phantom orders."
+                )
+                return
+            print(f"  Approval window open until {expires_raw}")
+        else:
+            print("  REJECTED: pending_approvals.json has no 'expires' field. Refusing to process.")
+            return
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            print("  No pending candidates to process. Nothing to do.")
+            return
 
     from candidates.paper_trader import run_approval_processor
 
