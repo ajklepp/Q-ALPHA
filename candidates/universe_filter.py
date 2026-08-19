@@ -22,6 +22,13 @@ if str(CANDIDATES_DIR) not in sys.path:
 from state_paths import state_path
 
 UNIVERSE_FILE = "universe.json"
+# Scanner CS universe (Polygon type=CS, ~4.7k names). The order gate must use
+# this file, not the old 300-name universe.json, or every full-market candidate
+# fails membership even when it is a real common stock.
+FULL_CS_UNIVERSE_CACHE = CANDIDATES_DIR / "full_scan" / "cs_universe_cache.json"
+
+# Cached (mtime, {SYMBOL: {name, exchange}}) for the full CS universe cache.
+_full_cs_cache: tuple[float, dict[str, dict]] | None = None
 
 # ── Hand-maintained deny list ───────────────────────────────────────────────
 # Symbols that must never be traded regardless of what Polygon reports about
@@ -176,28 +183,71 @@ def universe_name(symbol: str) -> str:
     return ""
 
 
+def load_full_cs_universe() -> dict[str, dict]:
+    """
+    {SYMBOL: {name, exchange}} from full_market_scan's CS universe cache.
+
+    Same source the scanner used to admit the candidate. Never reads
+    universe.json. Empty dict if the cache is missing or unreadable.
+    """
+    global _full_cs_cache
+    path = FULL_CS_UNIVERSE_CACHE
+    if not path.exists():
+        return {}
+    mtime = path.stat().st_mtime
+    if _full_cs_cache is not None and _full_cs_cache[0] == mtime:
+        return _full_cs_cache[1]
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    universe: dict[str, dict] = {}
+    if isinstance(raw, dict):
+        for sym, meta in raw.items():
+            key = str(sym or "").upper()
+            if not key:
+                continue
+            if isinstance(meta, dict):
+                universe[key] = meta
+            else:
+                universe[key] = {"name": "", "exchange": ""}
+    _full_cs_cache = (mtime, universe)
+    return universe
+
+
 def passes_universe_safety_gate(ticker: str) -> bool:
     """
-    Last check before an order is approved or placed anywhere in Q-Alpha.
+    Last check before an order is placed anywhere in Q-Alpha.
 
-    Refuses the trade unless the ticker is in the current CS universe, is absent
-    from EXCLUDE_SYMBOLS, and has a name that is not a fund/derivative product.
-    Fails CLOSED: an unreadable or empty universe.json blocks trading instead of
-    waving everything through, because a silent pass is precisely how NEBX got
-    filled in Week 1.
+    Blocks leveraged ETFs / funds / deny-list names using the SAME rules as
+    full_market_scan (EXCLUDE_SYMBOLS + is_leveraged_or_fund). Does NOT require
+    membership in the old 300-name universe.json — that check rejected every
+    full-market CS candidate (NVAX, AG, PPC, ...).
+
+    Name comes from the scanner CS cache. If the name is missing, membership
+    in that cache is the fallback (fail closed if the cache is empty).
     """
     symbol = (ticker or "").upper().strip()
     if not symbol or symbol in EXCLUDE_SYMBOLS:
         print(f"BLOCKED: {symbol or ticker} failed universe safety gate")
         return False
 
-    symbols = cs_universe_symbols()
-    if not symbols:
-        print("  universe.json missing or empty — refusing all entries")
+    cs_universe = load_full_cs_universe()
+    meta = cs_universe.get(symbol) or {}
+    name = str(meta.get("name") or "")
+
+    if name:
+        if is_leveraged_or_fund(name):
+            print(f"BLOCKED: {symbol} failed universe safety gate")
+            return False
+        return True
+
+    if not cs_universe:
+        print("  full CS universe cache missing or empty — refusing all entries")
         print(f"BLOCKED: {symbol} failed universe safety gate")
         return False
 
-    if symbol not in symbols or is_leveraged_or_fund(universe_name(symbol)):
+    if symbol not in cs_universe:
         print(f"BLOCKED: {symbol} failed universe safety gate")
         return False
     return True
