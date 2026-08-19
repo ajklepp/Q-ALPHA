@@ -85,6 +85,14 @@ IBKR_BATCH_SIZE = 80
 # SOURCE of the watchlist changes. full_market_scan is read-only (no orders).
 USE_FULL_MARKET_SCAN = os.environ.get("QALPHA_USE_FULL_MARKET_SCAN", "1") != "0"
 
+# -- Execution mode ---------------------------------------------------------
+# When True, scanned candidates go straight to watch_and_enter. No Telegram
+# YES and no pending_approvals.json. When False, the agent sends the watchlist
+# and exits so the legacy local_approval_runner.py / pending_approvals.json
+# path can place orders after a human YES. Risk controls in watch_and_enter
+# (MAX_TRADES_DAY, universe safety gate, single-bracket 2R) are unchanged.
+AUTO_APPROVE = True
+
 # ── IBKR message-throttle budget (scan_premarket) ───────────────────────────
 # ib_insync 0.9.86 self-throttles OUTBOUND API messages: Client.MaxRequests
 # messages per Client.RequestsInterval second. Excess messages are parked in
@@ -1321,6 +1329,24 @@ def main() -> None:
             return
 
         send_premarket_summary(candidates, regime, vix)
+
+        if not AUTO_APPROVE:
+            print(
+                "AUTO_APPROVE=False — advisory mode. Watchlist sent via Telegram; "
+                "not entering. Use candidates/local_approval_runner.py and "
+                "pending_approvals.json for the manual path."
+            )
+            send_telegram(
+                f"ℹ️ Q-ALPHA ADVISORY MODE\n"
+                f"{len(candidates)} candidate(s) on the watchlist.\n"
+                f"No auto-entry. Set AUTO_APPROVE=True to trade unattended."
+            )
+            return
+
+        print(
+            "AUTO_APPROVE=True — fully autonomous. "
+            "Skipping pending_approvals.json; proceeding to watch/enter."
+        )
 
         # Subscribe BEFORE the pre-open wait, so the 9:30:00 bar is already in
         # the list when watch_and_enter selects the opening candle. ib.sleep()
