@@ -32,3 +32,4 @@ candidates/full_scan/
 candidates/_fullscan_preview.json
 candidates/full_scan/
 candidates/cs_universe*.json
+candidates/session_tracker_*.json
