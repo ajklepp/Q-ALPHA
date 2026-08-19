@@ -25,3 +25,10 @@ candidates/entry_study/rollup.csv
 
 *.log
 candidates/*.log
+
+candidates/_fullscan_preview.json
+candidates/full_scan/
+
+candidates/_fullscan_preview.json
+candidates/full_scan/
+candidates/cs_universe*.json
