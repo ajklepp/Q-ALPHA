@@ -19,16 +19,19 @@ Filter stack (all must pass):
      (closes the SOXS / NEBX leveraged-ETF hole — snapshot alone has no name)
   2. Opening gap in [MIN_GAP_PCT, MAX_GAP_PCT]
   3. Reference price in [MIN_PRICE, MAX_PRICE]
-  4. Dollar volume today >= MIN_DOLLAR_VOL                 (liquidity)
-  5. Relative volume >= MIN_RVOL, where
-        RVOL = today_volume / avg(volume over last N trading days)
-     N-day average (not just yesterday) so a single quiet/heavy day cannot
-     distort the baseline.
+  4. PRIOR-DAY dollar volume >= MIN_DOLLAR_VOL             (liquidity)
+     Uses yesterday's tape, NOT today's accumulating volume. At 9:20 AM
+     today_vol is near-zero, so a today-$vol floor always returns 0 names.
+  5. Pre-market relative volume >= MIN_PM_VOL_RATIO, where
+        PM_RVOL = volume_so_far / (N-day_avg_vol * EXPECTED_PM_VOL_PCT)
+     Same model as autonomous_agent / pre_market_scanner. Full-day RVOL
+     (today / N-day avg) is impossible before the open and was the silent
+     "no candidates" failure mode for many mornings.
 
-Empirical-tuning note: MIN_RVOL and MIN_DOLLAR_VOL are the thresholds whose
-"right" value is unknown and MUST be set from data. Every passing candidate is
-logged with raw gap_pct, dollar_vol and rvol so entry_study.py can correlate
-them against realized R and tell us where the thresholds belong.
+Empirical-tuning note: MIN_PM_VOL_RATIO and MIN_DOLLAR_VOL are the thresholds
+whose "right" value is unknown and MUST be set from data. Every passing
+candidate is logged with raw gap_pct, dollar_vol and pm_vol_ratio so
+entry_study.py can correlate them against realized R.
 """
 from __future__ import annotations
 
@@ -55,10 +58,17 @@ MIN_GAP_PCT = 0.03
 MAX_GAP_PCT = 0.50
 MIN_PRICE = 5.00
 MAX_PRICE = 50.00
-MIN_RVOL = 1.5                  # today vol / N-day avg vol — LOG & tune from R
-MIN_DOLLAR_VOL = 10_000_000     # liquidity floor; tune from R
+# Liquidity = PRIOR day dollar volume (agent / pre_market_scanner use $2M).
+# Never use today's accumulating $vol at 9:20 — that filter always zeros out.
+MIN_DOLLAR_VOL = 2_000_000
+# Pre-market volume model (NOT full-day RVOL). Expected PM share of a normal
+# day is ~10%; require 1.5x that as confirmation the gap has real interest.
+EXPECTED_PM_VOL_PCT = 0.10
+MIN_PM_VOL_RATIO = 1.5
 RVOL_LOOKBACK_DAYS = 5          # N-day average volume baseline (smooths quiet/heavy days)
 TOP_N_CANDIDATES = 10
+# Kept as an alias so older logs / callers reading MIN_RVOL still make sense.
+MIN_RVOL = MIN_PM_VOL_RATIO
 
 POLYGON_BASE = "https://api.polygon.io"
 OUTPUT_DIR = CANDIDATES_DIR / "full_scan"
@@ -174,24 +184,56 @@ def fetch_full_market_snapshot(api_key: str) -> list[dict]:
 
 
 def _reference_price(t: dict) -> float | None:
+    """
+    Best live/reference price for gap + filters.
+
+    Pre-market (9:20) the regular-session day bar is often empty, so lastTrade
+    and the latest minute bar must come before day.close. Falling back to
+    prevDay.close would fabricate a 0% gap and silently drop real gappers.
+    """
     day = t.get("day") or {}
     minute = t.get("min") or {}
-    for v in (day.get("c"), minute.get("c"), (t.get("prevDay") or {}).get("c")):
+    last_trade = t.get("lastTrade") or {}
+    for v in (last_trade.get("p"), day.get("o"), minute.get("c"), day.get("c")):
         if v:
-            return float(v)
+            try:
+                price = float(v)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                return price
     return None
 
 
 def _opening_gap(t: dict) -> float | None:
+    """(ref_price - prev_close) / prev_close using pre-market-aware ref price."""
     prev = (t.get("prevDay") or {}).get("c")
     if not prev:
         return None
-    day = t.get("day") or {}
-    minute = t.get("min") or {}
-    ref = day.get("o") or minute.get("c") or day.get("c")
+    ref = _reference_price(t)
     if not ref:
         return None
     return (float(ref) - float(prev)) / float(prev)
+
+
+def _volume_so_far(t: dict) -> float:
+    """
+    Shares traded so far today (pre-market + session).
+
+    Prefer day.v; fall back to min.av (Polygon's accumulated daily volume on
+    the latest minute bar), which is often the only non-zero field at 9:20.
+    """
+    day = t.get("day") or {}
+    minute = t.get("min") or {}
+    for v in (day.get("v"), minute.get("av"), minute.get("v")):
+        if v:
+            try:
+                vol = float(v)
+            except (TypeError, ValueError):
+                continue
+            if vol > 0:
+                return vol
+    return 0.0
 
 
 def scan(api_key: str) -> tuple[list[dict], dict]:
@@ -210,8 +252,8 @@ def scan(api_key: str) -> tuple[list[dict], dict]:
     for t in snapshot:
         ticker = (t.get("ticker") or "").upper()
         prev = t.get("prevDay") or {}
-        day = t.get("day") or {}
         prev_close = prev.get("c")
+        prev_volume = float(prev.get("v") or 0)
         ref_price = _reference_price(t)
         gap = _opening_gap(t)
         if not ticker or not prev_close or ref_price is None or gap is None:
@@ -230,9 +272,9 @@ def scan(api_key: str) -> tuple[list[dict], dict]:
             stats["dropped_price"] += 1
             continue
 
-        today_vol = float(day.get("v") or 0)
-        dollar_vol = ref_price * today_vol
-        if dollar_vol < MIN_DOLLAR_VOL:
+        # Liquidity = PRIOR day. Today's $vol at 9:20 is near zero by definition.
+        prev_dollar_vol = float(prev_close) * prev_volume
+        if prev_dollar_vol < MIN_DOLLAR_VOL:
             stats["dropped_dollar_vol"] += 1
             continue
 
@@ -240,8 +282,11 @@ def scan(api_key: str) -> tuple[list[dict], dict]:
         if not base:
             stats["dropped_no_avgvol"] += 1
             continue
-        rvol = today_vol / base
-        if rvol < MIN_RVOL:
+
+        today_vol = _volume_so_far(t)
+        expected_pm_vol = base * EXPECTED_PM_VOL_PCT
+        pm_vol_ratio = today_vol / expected_pm_vol if expected_pm_vol > 0 else 0.0
+        if pm_vol_ratio < MIN_PM_VOL_RATIO:
             stats["dropped_rvol"] += 1
             continue
 
@@ -254,14 +299,15 @@ def scan(api_key: str) -> tuple[list[dict], dict]:
             "gap_pct": round(gap * 100, 3),
             "today_vol": int(today_vol),
             "avg_vol_ndays": int(base),
-            "dollar_vol": int(dollar_vol),
-            "rvol": round(rvol, 2),
+            "dollar_vol": int(prev_dollar_vol),
+            "rvol": round(pm_vol_ratio, 2),   # pre-market vol ratio (legacy key)
+            "pm_vol_ratio": round(pm_vol_ratio, 2),
             "todays_change_pct": round(float(t.get("todaysChangePerc") or 0), 3),
         })
         stats["passed"] += 1
 
-    # Rank: composite of gap and rvol (both normalized, capped so one runaway
-    # value cannot dominate). RVOL capped at 20x for ranking sanity.
+    # Rank: composite of gap and pm_vol_ratio (both normalized, capped so one
+    # runaway value cannot dominate). PM ratio capped at 20x for ranking sanity.
     if candidates:
         max_gap = max(c["gap_pct"] for c in candidates) or 1
         for c in candidates:
@@ -309,7 +355,7 @@ def scan_for_agent(top_n: int = TOP_N_CANDIDATES) -> list[dict]:
             "last_price": c["ref_price"],
             "prev_close": c["prev_close"],
             "gap_pct": round(c["gap_pct"] / 100.0, 4),   # agent expects a fraction
-            "pm_vol_ratio": c["rvol"],
+            "pm_vol_ratio": c.get("pm_vol_ratio", c["rvol"]),
             "avg_volume": c["avg_vol_ndays"],
             "dollar_volume": c["dollar_vol"],
             "news_catalyst": False,        # news layer added later, per plan
@@ -342,8 +388,12 @@ def main() -> None:
         "constants": {
             "MIN_GAP_PCT": MIN_GAP_PCT, "MAX_GAP_PCT": MAX_GAP_PCT,
             "MIN_PRICE": MIN_PRICE, "MAX_PRICE": MAX_PRICE,
-            "MIN_RVOL": MIN_RVOL, "MIN_DOLLAR_VOL": MIN_DOLLAR_VOL,
+            "MIN_DOLLAR_VOL": MIN_DOLLAR_VOL,
+            "MIN_PM_VOL_RATIO": MIN_PM_VOL_RATIO,
+            "EXPECTED_PM_VOL_PCT": EXPECTED_PM_VOL_PCT,
             "RVOL_LOOKBACK_DAYS": RVOL_LOOKBACK_DAYS,
+            "liquidity": "prior_day_dollar_vol",
+            "volume_model": "pm_vol / (nday_avg * EXPECTED_PM_VOL_PCT)",
         },
         "stats": stats, "candidates_all": candidates, "top_n": top,
     }, indent=2), encoding="utf-8")
