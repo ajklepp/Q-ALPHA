@@ -1,6 +1,13 @@
 # =============================================================================
 # Q-ALPHA STREAMLIT DASHBOARD
 # =============================================================================
+# LOCAL LAUNCH (DETACHED — never block Cursor / agents):
+#   .\start_dashboard.ps1          # returns immediately; URL http://localhost:8501
+#   .\stop_dashboard.ps1           # kills whatever owns port 8501
+#
+# Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
+# Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
+#
 # DEPLOY TO STREAMLIT COMMUNITY CLOUD:
 # 1. Push all changes to GitHub:
 #    git add .

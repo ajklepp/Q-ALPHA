@@ -26,8 +26,15 @@ python -m modal volume get qalpha-state pending_approvals.json -
 
 # 2. Confirm git is clean and pushed
 git status   # -> "up to date with origin/main", "working tree clean"
+
+# 3. Dashboard (OPTIONAL — DETACHED only; never foreground-block)
+.\start_dashboard.ps1          # returns immediately → http://localhost:8501
+# .\stop_dashboard.ps1         # when done
 ```
 
+**Rule:** never run `streamlit run dashboard.py` (or any long-running server) as a
+foreground command you wait on. Use `.\start_dashboard.ps1` / `.\stop_dashboard.ps1`.
+Foreground Streamlit freezes Cursor because the process never exits.
 ---
 
 ## 👀 During the day — what healthy looks like on Telegram

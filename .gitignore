@@ -25,6 +25,8 @@ candidates/entry_study/rollup.csv
 
 *.log
 candidates/*.log
+candidates/dashboard_stdout.log
+candidates/dashboard_stderr.log
 
 candidates/_fullscan_preview.json
 candidates/full_scan/
