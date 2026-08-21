@@ -1314,6 +1314,44 @@ def fetch_regime_from_polygon() -> dict | None:
     return regime_data
 
 
+def _generate_watchlist_profiles(candidates: list[dict]) -> None:
+    """
+    Build profiles/<TICKER>_profile.json for each watchlist name after scan.
+
+    Informational only for the dashboard Profiles page / R:R flags.
+    Failures are logged and skipped — NEVER abort the trading session.
+    """
+    tickers = [
+        str(c.get("ticker") or "").upper()
+        for c in candidates
+        if c.get("ticker")
+    ]
+    if not tickers:
+        return
+
+    try:
+        from ticker_profiler import build_ticker_profile, save_profile_json
+    except Exception as exc:
+        print(f"  ⚠️ ticker_profiler unavailable (non-fatal): {exc}")
+        return
+
+    print(f"\nBuilding setup profiles for {len(tickers)} watchlist ticker(s)...")
+    print("  (dashboard reads these; trading continues even if profiling fails)")
+    for ticker in tickers:
+        try:
+            print(f"  Profiling {ticker}...")
+            profile = build_ticker_profile(ticker)
+            save_profile_json(profile)
+            n = profile.get("n_analogs_measured", 0)
+            conf = profile.get("confidence", "?")
+            rr_warn = (profile.get("outcomes") or {}).get("rr_warning")
+            flag = " ⚠️ R:R unfavorable" if rr_warn else ""
+            print(f"    ✓ {ticker}: {n} analogs, confidence={conf}{flag}")
+        except Exception as exc:
+            print(f"  ⚠️ Profile {ticker} failed (non-fatal): {exc}")
+            traceback.print_exc()
+
+
 def main() -> None:
     """Orchestrate all five autonomous agent phases."""
     now_et = datetime.now(ET)
@@ -1396,6 +1434,11 @@ def main() -> None:
             print(f"  Supabase watchlist synced ({len(candidates)} names, {scan_day})")
         except Exception as exc:
             print(f"  ⚠️ Supabase watchlist sync failed (non-fatal): {exc}")
+
+        # Precompute MAE/MFE setup profiles for the dashboard Profiles page.
+        # Runs between scan (~9:20) and the entry window — NEVER raises into
+        # the trading path (per-ticker try/except inside).
+        _generate_watchlist_profiles(candidates)
 
         if not AUTO_APPROVE:
             print(

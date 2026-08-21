@@ -48,6 +48,7 @@ if str(ROOT) not in sys.path:
 
 from candidates.supabase_sync import SupabaseSync
 from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
+from dashboard_shared import profile_rr_unfavorable
 
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
@@ -364,7 +365,7 @@ def _style_watchlist(df: pd.DataFrame):
         **{"text-align": "right"},
     )
     styled = styled.set_properties(
-        subset=[c for c in ("Ticker", "Status") if c in df.columns],
+        subset=[c for c in ("Ticker", "Status", "R:R") if c in df.columns],
         **{"text-align": "left"},
     )
     styled = styled.set_table_styles(
@@ -615,9 +616,11 @@ def tab_live_status(trades: list, pool_history: list) -> None:
             ticker = str(r.get("ticker") or "").upper()
             trade = trades_today.get(ticker)
             fills = _trade_fill_columns(trade)
+            rr_flag = "⚠️" if profile_rr_unfavorable(ticker) else ""
             wl_rows.append({
                 "Rank": int(r.get("rank") or 0),
                 "Ticker": ticker,
+                "R:R": rr_flag,
                 "Gap %": f"+{gap_pct_display:.1f}%",
                 "Vol Ratio": f"{vol_f:.1f}x",
                 "Score": f"{score_f:.0f}",
@@ -636,6 +639,14 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                     "Rank", width="small", format="%d",
                 ),
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "R:R": st.column_config.TextColumn(
+                    "R:R",
+                    help=(
+                        "⚠️ = profile reward:risk unfavorable "
+                        "(target < 1.5× safe-max stop). Details on Ticker Profiles."
+                    ),
+                    width="small",
+                ),
                 "Gap %": st.column_config.TextColumn(
                     "Gap %", help="Pre-market gap vs prior close", width="small",
                 ),

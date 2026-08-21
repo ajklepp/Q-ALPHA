@@ -23,8 +23,10 @@ if str(CANDIDATES_DIR) not in sys.path:
 from candidates.supabase_sync import SupabaseSync  # noqa: E402
 
 PROFILES_DIR = ROOT / "profiles"
-SYSTEM_VERSION = "1.3.0"
+SYSTEM_VERSION = "1.3.1"
 _SUPABASE_SYNC_API = "watchlist-v2"
+# Match ticker_profiler.RR_WARN_THRESHOLD — target / safe_max_stop
+RR_WARN_THRESHOLD = 1.5
 
 
 def et_today() -> str:
@@ -73,6 +75,27 @@ def load_profile(ticker: str) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def profile_rr_unfavorable(ticker: str) -> bool:
+    """
+    True when cached profile has unfavorable reward:risk
+    (target < RR_WARN_THRESHOLD × safe_max_stop), for main-watchlist ⚠️ flag.
+    Missing profile → False (no false alarms).
+    """
+    profile = load_profile(ticker)
+    if not profile:
+        return False
+    outcomes = profile.get("outcomes") or {}
+    if outcomes.get("rr_warning"):
+        return True
+    rr = outcomes.get("reward_risk")
+    try:
+        if rr is not None and float(rr) < RR_WARN_THRESHOLD:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
 
 
 def list_cached_profile_tickers() -> list[str]:
