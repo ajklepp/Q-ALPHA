@@ -46,13 +46,15 @@ from candidates.supabase_sync import SupabaseSync
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
-SYSTEM_VERSION = "1.1.1"
+SYSTEM_VERSION = "1.2.0"
 SYSTEM_START_DATE = "2026-08-17"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
 # otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
-_SUPABASE_SYNC_API = "watchlist-v1"
+_SUPABASE_SYNC_API = "watchlist-v2"
+# Agent entry window closes at 11:00 ET — after that, no-trade = Skipped.
+ENTRY_WINDOW_CLOSE = dtime(11, 0)
 
 st.set_page_config(
     page_title="Q-ALPHA Dashboard",
@@ -190,6 +192,133 @@ def _color_gap(val: str) -> str:
         return "color: #AAAAAA"
     except Exception:
         return ""
+
+
+def _format_watchlist_day(day: str) -> str:
+    """ISO date → 'Aug 20, 2026' for the watchlist subheader."""
+    try:
+        return datetime.strptime(day, "%Y-%m-%d").strftime("%b %d, %Y")
+    except ValueError:
+        return day
+
+
+def _trades_for_day(trades: list, day: str) -> dict[str, dict]:
+    """
+    Map ticker → trade for entry_date == day.
+    Prefers the already-loaded trades list; falls back to get_todays_trades()
+    and local paper_trades.json when that list is empty.
+    """
+    by_ticker: dict[str, dict] = {}
+    for t in trades:
+        if str(t.get("entry_date") or "") != day:
+            continue
+        ticker = str(t.get("ticker") or "").upper()
+        if ticker:
+            by_ticker[ticker] = t
+
+    if not by_ticker:
+        try:
+            for t in get_sync().get_todays_trades(day):
+                ticker = str(t.get("ticker") or "").upper()
+                if ticker:
+                    by_ticker[ticker] = t
+        except Exception:
+            pass
+
+    if not by_ticker:
+        local_path = ROOT / "candidates" / "paper_trades.json"
+        if local_path.exists():
+            try:
+                import json
+                payload = json.loads(local_path.read_text(encoding="utf-8"))
+                for t in payload.get("trades") or []:
+                    if str(t.get("entry_date") or "") != day:
+                        continue
+                    ticker = str(t.get("ticker") or "").upper()
+                    if ticker:
+                        by_ticker[ticker] = t
+            except Exception:
+                pass
+
+    return by_ticker
+
+
+def _candidate_status(trade: dict | None, now_et: datetime) -> str:
+    """
+    Lifecycle label for a watchlist ticker today.
+    Watching / Skipped before|after 11:00 ET when no trade; otherwise
+    In Trade / Closed / Stopped from the trades row.
+    """
+    if trade is None:
+        if now_et.time() < ENTRY_WINDOW_CLOSE:
+            return "👀 Watching"
+        return "— Skipped"
+
+    status = str(trade.get("status") or "").upper()
+    entry = float(trade.get("entry_price") or 0)
+
+    if status in OPEN_STATUSES or status in {"OPEN", "PENDING"}:
+        return f"🟢 In Trade (entry ${entry:.2f})"
+
+    exit_reason = str(trade.get("exit_reason") or "").upper()
+    pnl = float(trade.get("pnl_dollars") or 0)
+    try:
+        r_mult = float(trade["r_multiple"]) if trade.get("r_multiple") is not None else None
+    except (TypeError, ValueError):
+        r_mult = None
+
+    is_stop = "STOP" in exit_reason
+    is_target = "TARGET" in exit_reason
+    if r_mult is None:
+        if is_stop:
+            r_mult = -1.0
+        elif is_target:
+            r_mult = 2.0
+        else:
+            r_mult = 1.0 if pnl > 0 else (-1.0 if pnl < 0 else 0.0)
+
+    if is_stop or (not is_target and pnl < 0):
+        return f"🔴 Stopped {r_mult:.0f}r (${pnl:+.0f})"
+    return f"✅ Closed {r_mult:+.0f}r (${pnl:+.0f})"
+
+
+def _style_watchlist(df: pd.DataFrame):
+    """Gap% green/red; numeric columns right-aligned; subtle header feel."""
+    def _gap_cell(val: str) -> str:
+        return _color_gap(val)
+
+    styled = df.style.map(_gap_cell, subset=["Gap %"])
+    styled = styled.set_properties(
+        subset=["Gap %", "Vol Ratio", "Score", "Rank"],
+        **{"text-align": "right"},
+    )
+    styled = styled.set_properties(
+        subset=["Ticker", "Status"],
+        **{"text-align": "left"},
+    )
+    styled = styled.set_table_styles(
+        [
+            {
+                "selector": "th",
+                "props": [
+                    ("background-color", "#1E2130"),
+                    ("color", "#AAAAAA"),
+                    ("font-weight", "600"),
+                    ("text-align", "left"),
+                    ("border-bottom", "1px solid #2A2F3A"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("padding", "8px 12px"),
+                    ("border-bottom", "1px solid #1A1D27"),
+                ],
+            },
+        ],
+        overwrite=False,
+    )
+    return styled
 
 
 def render_header() -> None:
@@ -380,14 +509,17 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
     st.subheader("Today's Watchlist")
     if watch_load_err:
-        st.caption(f"Watchlist table unavailable: {watch_load_err}")
+        st.caption(f"Watchlist unavailable: {watch_load_err}")
 
     if watch_rows:
         regime_label = watch_rows[0].get("regime") or "—"
-        st.caption(
-            f"{len(watch_rows)} candidates · {today} · regime {regime_label} "
-            f"(live Supabase watchlist · single source of truth)"
+        et_now = datetime.now(pytz.timezone("America/New_York"))
+        trades_today = _trades_for_day(trades, today)
+        st.markdown(
+            f"**{len(watch_rows)} candidates · {_format_watchlist_day(today)} "
+            f"· {regime_label} regime**"
         )
+
         wl_rows = []
         for r in watch_rows:
             gap = r.get("gap_pct")
@@ -406,34 +538,44 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 score_f = float(score) if score is not None else 0.0
             except (TypeError, ValueError):
                 score_f = 0.0
+            ticker = str(r.get("ticker") or "").upper()
             wl_rows.append({
-                "Rank": r.get("rank"),
-                "Ticker": r.get("ticker"),
+                "Rank": int(r.get("rank") or 0),
+                "Ticker": ticker,
                 "Gap %": f"+{gap_pct_display:.1f}%",
                 "Vol Ratio": f"{vol_f:.1f}x",
                 "Score": f"{score_f:.0f}",
-                "Regime": r.get("regime") or "—",
+                "Status": _candidate_status(trades_today.get(ticker), et_now),
             })
+
         wl_df = pd.DataFrame(wl_rows)
         st.dataframe(
-            wl_df.style.map(_color_gap, subset=["Gap %"]),
+            _style_watchlist(wl_df),
             column_config={
-                "Rank": st.column_config.NumberColumn("Rank", width="small"),
-                "Ticker": st.column_config.TextColumn("Ticker"),
+                "Rank": st.column_config.NumberColumn(
+                    "Rank", width="small", format="%d",
+                ),
+                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                 "Gap %": st.column_config.TextColumn(
-                    "Gap %", help="Pre-market gap vs prior close",
+                    "Gap %", help="Pre-market gap vs prior close", width="small",
                 ),
                 "Vol Ratio": st.column_config.TextColumn(
-                    "Vol Ratio", help="Pre-market volume vs expected baseline",
+                    "Vol Ratio",
+                    help="Pre-market volume vs expected baseline",
+                    width="small",
                 ),
                 "Score": st.column_config.TextColumn(
-                    "Score", help="Composite signal quality (0-100)",
+                    "Score", help="Composite signal quality (0-100)", width="small",
                 ),
-                "Regime": st.column_config.TextColumn("Regime"),
+                "Status": st.column_config.TextColumn(
+                    "Status",
+                    help="Trade lifecycle for today (watching → entered → closed)",
+                    width="large",
+                ),
             },
             hide_index=True,
             use_container_width=True,
-            height=min(420, 48 + 36 * max(len(wl_rows), 1)),
+            height=min(460, 56 + 38 * max(len(wl_rows), 1)),
         )
     else:
         st.info(

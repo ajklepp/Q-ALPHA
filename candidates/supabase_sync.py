@@ -207,6 +207,20 @@ class SupabaseSync:
         result = self.client.table("trades").select("*").execute()
         return result.data or []
 
+    def get_todays_trades(self, entry_date: str | None = None) -> list:
+        """
+        Trades whose entry_date matches the given day (default: today).
+        Used by the dashboard to join watchlist tickers → live Status.
+        """
+        day = entry_date or date.today().isoformat()
+        result = (
+            self.client.table("trades")
+            .select("*")
+            .eq("entry_date", day)
+            .execute()
+        )
+        return result.data or []
+
     def get_pool_history(self) -> list:
         result = (
             self.client.table("pool_snapshots")
