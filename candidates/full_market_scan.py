@@ -236,7 +236,13 @@ def _volume_so_far(t: dict) -> float:
     return 0.0
 
 
-def scan(api_key: str) -> tuple[list[dict], dict]:
+def scan_market(api_key: str) -> tuple[list[dict], dict]:
+    """
+    Canonical full-market gap scan. Module constants (MIN_GAP_PCT, MIN_PRICE,
+    MIN_DOLLAR_VOL, MIN_PM_VOL_RATIO, TOP_N_CANDIDATES, ...) are the single
+    source of truth for thresholds. Standalone CLI and the agent both go
+    through this function — never fork the filter stack.
+    """
     cs_universe = build_cs_universe(api_key)
     avg_vol = build_avg_volume(api_key, RVOL_LOOKBACK_DAYS)
     snapshot = fetch_full_market_snapshot(api_key)
@@ -321,20 +327,23 @@ def scan(api_key: str) -> tuple[list[dict], dict]:
     return candidates, stats
 
 
+# Back-compat alias — prefer scan_market() in new code.
+scan = scan_market
+
+
 def scan_for_agent(top_n: int = TOP_N_CANDIDATES) -> list[dict]:
     """
-    Agent-facing entry point. Runs the full-market scan and returns candidates
-    in the EXACT dict shape autonomous_agent.scan_premarket() produces, so they
-    drop straight into send_premarket_summary / subscribe_realtime_bars /
-    watch_and_enter with no downstream changes.
+    Thin wrapper over scan_market(). Identical filter stack and module-constant
+    defaults as the standalone CLI (main). ONLY reshapes returned candidates
+    into the dict shape watch_and_enter / send_premarket_summary expect.
 
-    watch_and_enter only reads ticker / prev_close / quality_score from each
-    candidate (it recomputes entry, stop, target and shares live from the 9:30
-    bars), but we populate the full shape so the Telegram summary and logging
-    render correctly. Read-only: no orders, no IBKR, no state mutation.
+    Does NOT apply any additional gap / rvol / dollar-vol / news filtering.
+    News catalyst is deferred: news_required effectively False (news_catalyst
+    always False here). Read-only: no orders, no IBKR, no state mutation.
     """
     api_key = _load_polygon_key()
-    candidates, stats = scan(api_key)
+    # Same call as main() — no threshold overrides.
+    candidates, stats = scan_market(api_key)
     top = candidates[:top_n]
 
     # Persist the raw scan so entry_study.py can correlate rvol / dollar_vol /
@@ -344,10 +353,12 @@ def scan_for_agent(top_n: int = TOP_N_CANDIDATES) -> list[dict]:
     (OUTPUT_DIR / f"scan_{date_str}.json").write_text(json.dumps({
         "scan_date": date_str,
         "scan_time_et": datetime.now(ET).strftime("%H:%M:%S"),
-        "source": "full_market_scan.scan_for_agent",
+        "generated_by": "full_market_scan.scan_for_agent()",
+        "source": "full_market_scan.scan_market()",
         "stats": stats, "candidates_all": candidates, "top_n": top,
     }, indent=2), encoding="utf-8")
 
+    # Reshape only — no re-filtering.
     agent_candidates: list[dict] = []
     for c in top:
         agent_candidates.append({
@@ -358,13 +369,13 @@ def scan_for_agent(top_n: int = TOP_N_CANDIDATES) -> list[dict]:
             "pm_vol_ratio": c.get("pm_vol_ratio", c["rvol"]),
             "avg_volume": c["avg_vol_ndays"],
             "dollar_volume": c["dollar_vol"],
-            "news_catalyst": False,        # news layer added later, per plan
+            "news_catalyst": False,        # news deferred; never filter on this
             "news_summary": "",
             "quality_score": round(c["rank_score"] * 100.0, 1),
         })
 
     print(
-        f"  full_market_scan -> {len(agent_candidates)} candidates "
+        f"  full_market_scan.scan_for_agent -> {len(agent_candidates)} candidates "
         f"(from {stats['passed']} passing / {stats['total_tickers']} tickers)"
     )
     return agent_candidates
@@ -377,7 +388,7 @@ def main() -> None:
     date_str = now.strftime("%Y-%m-%d")
 
     t0 = time.time()
-    candidates, stats = scan(api_key)
+    candidates, stats = scan_market(api_key)
     elapsed = time.time() - t0
 
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -385,6 +396,8 @@ def main() -> None:
     log_path = OUTPUT_DIR / f"scan_{date_str}.json"
     log_path.write_text(json.dumps({
         "scan_date": date_str, "scan_time_et": now.strftime("%H:%M:%S"),
+        "generated_by": "full_market_scan.scan_market()",
+        "source": "full_market_scan.scan_market()",
         "constants": {
             "MIN_GAP_PCT": MIN_GAP_PCT, "MAX_GAP_PCT": MAX_GAP_PCT,
             "MIN_PRICE": MIN_PRICE, "MAX_PRICE": MAX_PRICE,
