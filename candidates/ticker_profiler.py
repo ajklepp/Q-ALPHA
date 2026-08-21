@@ -1,12 +1,14 @@
 """
 Q-ALPHA ticker_profiler — analog finder + MAE/MFE profile (read-only).
 
-Commit 1: find historical "analog" gap days (gap>3% + unusual vol), weighted
-by recency + gentle magnitude-similarity.
+Commit 1: find historical "analog" gap days (gap>3% + unusual vol) inside a
+2-year lookback. The 2-year window IS the recency filter — analogs are
+EQUAL-WEIGHTED by default (optional gentle similarity tilt is off).
 
 Commit 2: for each analog, pull Polygon 1-min RTH bars, measure MAE/MFE from
-a ~9:33 ET entry proxy, aggregate weighted/unweighted percentiles, and DERIVE
-informational tier stops + target. NO order wiring — research/measurement only.
+a ~9:33 ET entry proxy, aggregate equal-weight percentiles, derive
+informational tier stops + target, plus win-rate / conditional winner-MFE /
+failure-MAE / R:R warning. NO order wiring — research/measurement only.
 """
 from __future__ import annotations
 
@@ -29,22 +31,20 @@ POLYGON_BASE = "https://api.polygon.io"
 ET = ZoneInfo("America/New_York")
 
 # ── Tunable parameters (retune without rewriting logic) ─────────────────────
-HISTORY_CALENDAR_DAYS = 365 * 2 + 30          # ~2 years (+ cushion for weekends)
+HISTORY_CALENDAR_DAYS = 365 * 2 + 30          # ~2 years (= the recency filter)
 VOLUME_BASELINE_DAYS = 5                      # trailing avg vol window (excl. day)
 MIN_GAP_PCT = 0.03                            # >3% open gap vs prior close
 VOL_MULT = 1.75                               # unusual-vol: day vol >= this × baseline
-RECENCY_HALF_LIFE_DAYS = 180.0                # exp decay: weight halves every N days
 # Similarity distance scales (gap in fraction, vol_ratio in multiples of baseline)
 SIMILARITY_GAP_SCALE = 0.05                   # 5pp gap difference → unit distance
 SIMILARITY_VOL_SCALE = 1.0                    # 1.0× vol-ratio difference → unit distance
-# Magnitude/similarity tilt (GENTLE — big-gap days must stay informative samples):
-#   0.0 = ignore magnitude entirely (pure recency)
+# Optional magnitude-similarity tilt (OFF by default → equal weights).
+#   0.0 = every qualifying analog counts the same (RECOMMENDED DEFAULT)
 #   1.0 = full floored-similarity tilt
-# Default LOW so magnitude only gently tilts weights; never discards analogs.
-SIMILARITY_STRENGTH = 0.3
-# Floor on the similarity factor BEFORE strength blend: even a "far" analog
-# keeps at least this fraction of the max similarity score (1.0). Prevents
-# exp(-dist)-style near-zeroing of explosive gap days.
+# Recency sub-weighting inside the 2yr window was REMOVED — it distorted small
+# samples (e.g. JOBY target collapsed when 2 recent days failed).
+SIMILARITY_STRENGTH = 0.0
+# Floor when similarity tilt is enabled: far analogs keep >= this fraction.
 SIMILARITY_FLOOR = 0.25
 MIN_ANALOGS_FOR_PROFILE = 3                   # below this → INSUFFICIENT_HISTORY
 
@@ -56,6 +56,8 @@ RTH_CLOSE_HOUR, RTH_CLOSE_MIN = 16, 0
 STOP_BEYOND_MULT = 1.05
 MFE_HIT_BUCKETS = (0.03, 0.05, 0.08, 0.10)    # absolute % move hit-rate thresholds
 POLYGON_SLEEP_SEC = 0.12                      # rate limit between minute-bar pulls
+# Warn when informational target / safe-max-stop reward:risk is thin
+RR_WARN_THRESHOLD = 1.5
 
 
 def similarity_factor(
@@ -68,16 +70,12 @@ def similarity_factor(
     floor: float = SIMILARITY_FLOOR,
 ) -> float:
     """
-    Bounded magnitude-similarity multiplier in [floor_blend, 1].
+    Optional magnitude-similarity multiplier. Default strength=0 → always 1.0
+    (equal weight). When enabled, soft+floored tilt — never near-zeros big gaps.
 
-    Soft distance → 1/(1+dist) in (0, 1], then floored at `floor`, then
-    blended with strength:
-
-      sim_soft  = 1 / (1 + dist)                    # mild, never near-zero alone
-      sim_floor = floor + (1 - floor) * sim_soft    # >= floor (e.g. 0.25)
+      sim_soft  = 1 / (1 + dist)
+      sim_floor = floor + (1 - floor) * sim_soft
       factor    = (1 - strength) * 1.0 + strength * sim_floor
-
-    strength=0 → always 1.0 (pure recency). strength=1 → floored soft tilt.
     """
     dist = (
         abs(gap_pct - ref_gap) / SIMILARITY_GAP_SCALE
@@ -165,55 +163,29 @@ def find_analog_days(
     volume_baseline_days: int = VOLUME_BASELINE_DAYS,
     min_gap_pct: float = MIN_GAP_PCT,
     vol_mult: float = VOL_MULT,
-    recency_half_life_days: float = RECENCY_HALF_LIFE_DAYS,
     similarity_strength: float = SIMILARITY_STRENGTH,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """
-    Find weighted analog gap+volume days for `ticker` as of `as_of_date`.
+    Find analog gap+volume days for `ticker` as of `as_of_date`.
 
-    WEIGHTING FORMULA
-    -----------------
-    For each analog i with age_days = (as_of_date - analog_date).days:
+    WEIGHTING
+    ---------
+    The HISTORY_CALENDAR_DAYS (~2yr) window IS the recency filter. There is
+    NO within-window recency decay (removed — it distorted small samples).
 
-      recency_weight_i =
-          0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
-          # exponential half-life: weight halves every RECENCY_HALF_LIFE_DAYS
+    Default (SIMILARITY_STRENGTH=0): EQUAL WEIGHT — every qualifying analog
+    gets combined_weight = 1/N.
 
-      ref_gap, ref_vol = (today_gap, today_vol_ratio) if both provided,
-                         else (median gap_pct, median vol_ratio) of the analog set
-
-      dist_i =
-          |gap_pct_i - ref_gap| / SIMILARITY_GAP_SCALE
-        + |vol_ratio_i - ref_vol| / SIMILARITY_VOL_SCALE
-
-      # Soft + floored similarity (NOT harsh exp(-dist), which zeroed big gaps):
-      sim_soft_i  = 1 / (1 + dist_i)
-      sim_floor_i = SIMILARITY_FLOOR + (1 - SIMILARITY_FLOOR) * sim_soft_i
-                    # every analog keeps >= SIMILARITY_FLOOR of max similarity
-      similarity_weight_i =
-          (1 - SIMILARITY_STRENGTH) * 1.0
-        + SIMILARITY_STRENGTH * sim_floor_i
-          # SIMILARITY_STRENGTH in [0,1]: 0 = pure recency; 1 = full floored tilt
-          # Default LOW (0.3) — magnitude only gently tilts weights
-
-      raw_i = recency_weight_i * similarity_weight_i
-      combined_weight_i = raw_i / sum(raw)     # normalize to sum 1
-
-    Every qualifying analog (gap>3% + unusual vol) remains a valid sample —
-    none are effectively discarded by magnitude distance.
+    Optional (SIMILARITY_STRENGTH>0): gentle floored magnitude-similarity tilt
+    via similarity_factor(); still no recency term.
 
     Returns
     -------
     {
-      "ticker": str,
-      "as_of_date": "YYYY-MM-DD",
-      "flag": None | "INSUFFICIENT_HISTORY",
-      "stats": {...},
-      "analogs": [
-          {date, gap_pct, vol_ratio, recency_weight, similarity_weight,
-           combined_weight}, ...
-      ],  # sorted by date ascending; combined_weight sums to ~1 when non-empty
+      "ticker", "as_of_date", "flag", "weighting": "equal"|"similarity_tilt",
+      "stats", "analogs": [{date, gap_pct, vol_ratio, similarity_weight,
+                            combined_weight}, ...],
     }
     """
     as_of = _parse_as_of(as_of_date)
@@ -265,12 +237,14 @@ def find_analog_days(
 
     n_analogs = len(candidates)
     flag = "INSUFFICIENT_HISTORY" if n_analogs < MIN_ANALOGS_FOR_PROFILE else None
+    weighting = "equal" if similarity_strength <= 0 else "similarity_tilt"
 
     if n_analogs == 0:
         return {
             "ticker": ticker.upper(),
             "as_of_date": as_of.isoformat(),
             "flag": flag or "INSUFFICIENT_HISTORY",
+            "weighting": weighting,
             "stats": {
                 "trading_days_scanned": trading_days,
                 "gap_gt_min_days": gap_gt_min,
@@ -278,8 +252,10 @@ def find_analog_days(
                 "min_gap_pct": min_gap_pct,
                 "vol_mult": vol_mult,
                 "volume_baseline_days": volume_baseline_days,
-                "recency_half_life_days": recency_half_life_days,
                 "history_calendar_days": history_calendar_days,
+                "similarity_strength": similarity_strength,
+                "similarity_floor": SIMILARITY_FLOOR,
+                "recency_weighting": False,
             },
             "analogs": [],
             "weight_sum": 0.0,
@@ -306,9 +282,9 @@ def find_analog_days(
         ref_vol = med_vol
         ref_source = "median_analog"
 
+    # No recency term. Equal weight unless optional similarity tilt is on.
     raw_sum = 0.0
     for c in candidates:
-        rec = 0.5 ** (c["age_days"] / recency_half_life_days)
         sim = similarity_factor(
             c["gap_pct"],
             c["vol_ratio"],
@@ -316,9 +292,8 @@ def find_analog_days(
             ref_vol,
             strength=similarity_strength,
         )
-        c["recency_weight"] = rec
         c["similarity_weight"] = sim
-        c["_raw"] = rec * sim
+        c["_raw"] = sim  # strength=0 → sim=1.0 for all → equal after normalize
         raw_sum += c["_raw"]
 
     analogs: list[dict] = []
@@ -328,7 +303,7 @@ def find_analog_days(
             "date": c["date"],
             "gap_pct": c["gap_pct"],
             "vol_ratio": c["vol_ratio"],
-            "recency_weight": round(c["recency_weight"], 6),
+            "age_days": c["age_days"],
             "similarity_weight": round(c["similarity_weight"], 6),
             "combined_weight": round(combined, 6),
         })
@@ -339,6 +314,7 @@ def find_analog_days(
         "ticker": ticker.upper(),
         "as_of_date": as_of.isoformat(),
         "flag": flag,
+        "weighting": weighting,
         "ref_source": ref_source,
         "ref_gap": round(ref_gap, 6),
         "ref_vol_ratio": round(ref_vol, 4),
@@ -349,10 +325,10 @@ def find_analog_days(
             "min_gap_pct": min_gap_pct,
             "vol_mult": vol_mult,
             "volume_baseline_days": volume_baseline_days,
-            "recency_half_life_days": recency_half_life_days,
             "history_calendar_days": history_calendar_days,
             "similarity_strength": similarity_strength,
             "similarity_floor": SIMILARITY_FLOOR,
+            "recency_weighting": False,
         },
         "analogs": analogs,
         "weight_sum": round(weight_sum, 6),
@@ -543,7 +519,7 @@ def confidence_label(n_analogs: int) -> str:
 
 def derive_bracket(mae_w: dict, mfe_w: dict) -> dict:
     """
-    Informational tier stops + target from weighted MAE/MFE percentiles.
+    Informational tier stops + target from MAE/MFE percentiles (equal-weight).
 
     Tier1 ~ MAE p50 (tight), Tier2 ~ p75, Tier3 ~ p90,
     Tier4 ~ just beyond p90 (STOP_BEYOND_MULT).
@@ -577,6 +553,71 @@ def derive_bracket(mae_w: dict, mfe_w: dict) -> dict:
             "INFORMATIONAL ONLY — not wired into order logic. "
             "Stops are % below entry; target is % above entry."
         ),
+    }
+
+
+def outcome_analytics(
+    per_day: list[dict],
+    bracket: dict,
+) -> dict[str, Any]:
+    """
+    Win-rate, conditional winner-MFE, failure-MAE, and R:R warning.
+
+    Win = session close above entry proxy (held=True).
+    Winner-MFE = MFE distribution among winners only.
+    Failure-MAE = MAE distribution among losers only.
+    R:R = target_pct / safe_max_stop_pct; warn if < RR_WARN_THRESHOLD.
+    """
+    n = len(per_day)
+    winners = [r for r in per_day if r.get("held")]
+    losers = [r for r in per_day if not r.get("held")]
+    n_w, n_l = len(winners), len(losers)
+    win_rate = (n_w / n) if n else 0.0
+
+    def _pcts(vals: list[float]) -> dict:
+        if not vals:
+            return {"p50": None, "p75": None, "p90": None, "n": 0}
+        return {
+            "p50": round(unweighted_percentile(vals, 50) or 0.0, 6),
+            "p75": round(unweighted_percentile(vals, 75) or 0.0, 6),
+            "p90": round(unweighted_percentile(vals, 90) or 0.0, 6),
+            "n": len(vals),
+        }
+
+    winner_mfe = _pcts([r["mfe_pct"] for r in winners])
+    failure_mae = _pcts([r["mae_pct"] for r in losers])
+
+    target = float(bracket.get("target_pct") or 0.0)
+    safe = float(bracket.get("safe_max_stop_pct") or 0.0)
+    rr = (target / safe) if safe > 0 else None
+    rr_warning = None
+    if rr is not None and rr < RR_WARN_THRESHOLD:
+        rr_warning = (
+            f"R:R {rr:.2f} below {RR_WARN_THRESHOLD} — "
+            f"median MFE target may not justify safe-max stop width "
+            f"(informational; not wired to orders)"
+        )
+
+    return {
+        "win_definition": "session_close > entry_proxy (held)",
+        "n_total": n,
+        "n_winners": n_w,
+        "n_losers": n_l,
+        "win_rate": round(win_rate, 4),
+        "win_rate_pct_display": round(win_rate * 100, 1),
+        "winner_mfe": winner_mfe,
+        "winner_mfe_p50_display": (
+            None if winner_mfe["p50"] is None
+            else round(winner_mfe["p50"] * 100, 3)
+        ),
+        "failure_mae": failure_mae,
+        "failure_mae_p50_display": (
+            None if failure_mae["p50"] is None
+            else round(failure_mae["p50"] * 100, 3)
+        ),
+        "reward_risk": None if rr is None else round(rr, 3),
+        "rr_warn_threshold": RR_WARN_THRESHOLD,
+        "rr_warning": rr_warning,
     }
 
 
@@ -669,11 +710,13 @@ def build_ticker_profile(
 
     maes = [r["mae_pct"] for r in per_day]
     mfes = [r["mfe_pct"] for r in per_day]
-    # Re-normalize weights over successfully measured days only
+    # Primary distribution = equal weight (1/n). Finder combined_weight is also
+    # equal under default SIMILARITY_STRENGTH=0; re-normalize over measured days.
+    equal_w = [1.0 / n] * n
     w_raw = [r["combined_weight"] for r in per_day]
     w_sum = sum(w_raw) or 1.0
-    weights = [w / w_sum for w in w_raw]
-    for r, w in zip(per_day, weights):
+    finder_w = [w / w_sum for w in w_raw]
+    for r, w in zip(per_day, equal_w):
         r["weight_renorm"] = round(w, 6)
 
     def _pct_block(vals: list[float], wts: list[float]) -> dict:
@@ -683,51 +726,40 @@ def build_ticker_profile(
             "p90": weighted_percentile(vals, wts, 90),
         }
 
-    mae_w = _pct_block(maes, weights)
-    mae_u = {
-        "p50": unweighted_percentile(maes, 50),
-        "p75": unweighted_percentile(maes, 75),
-        "p90": unweighted_percentile(maes, 90),
-    }
-    mfe_w = _pct_block(mfes, weights)
-    mfe_u = {
-        "p50": unweighted_percentile(mfes, 50),
-        "p75": unweighted_percentile(mfes, 75),
-        "p90": unweighted_percentile(mfes, 90),
-    }
-
-    # Round percentile dicts for JSON cleanliness
     def _round_pct(d: dict) -> dict:
         return {
             k: (None if v is None else round(float(v), 6))
             for k, v in d.items()
         }
 
-    mae_w, mae_u = _round_pct(mae_w), _round_pct(mae_u)
-    mfe_w, mfe_u = _round_pct(mfe_w), _round_pct(mfe_u)
+    # Bracket + primary percentiles use EQUAL weights (no recency skew).
+    mae_eq = _round_pct(_pct_block(maes, equal_w))
+    mfe_eq = _round_pct(_pct_block(mfes, equal_w))
+    # Optional: finder weights (equal unless similarity tilt enabled)
+    mae_fw = _round_pct(_pct_block(maes, finder_w))
+    mfe_fw = _round_pct(_pct_block(mfes, finder_w))
 
     hit_rates: dict[str, dict] = {}
     for thr in MFE_HIT_BUCKETS:
         flags = [1.0 if m >= thr else 0.0 for m in mfes]
-        hit_u = sum(flags) / n
-        hit_w = sum(f * w for f, w in zip(flags, weights))
+        hit_eq = sum(flags) / n
         key = f"mfe_ge_{int(thr * 100)}pct"
         hit_rates[key] = {
             "threshold_pct": thr,
-            "unweighted": round(hit_u, 4),
-            "weighted": round(hit_w, 4),
+            "equal_weight": round(hit_eq, 4),
         }
 
-    bracket = derive_bracket(mae_w, mfe_w)
+    bracket = derive_bracket(mae_eq, mfe_eq)
+    outcomes = outcome_analytics(per_day, bracket)
 
     # Sanity checks
     checks: list[str] = []
     ok = True
-    if not (mae_w["p50"] <= mae_w["p75"] <= mae_w["p90"]):
+    if not (mae_eq["p50"] <= mae_eq["p75"] <= mae_eq["p90"]):
         ok = False
-        checks.append("FAIL: weighted MAE percentiles not non-decreasing")
+        checks.append("FAIL: MAE percentiles not non-decreasing")
     else:
-        checks.append("OK: MAE p50 <= p75 <= p90 (weighted)")
+        checks.append("OK: MAE p50 <= p75 <= p90 (equal-weight)")
     t = bracket["tiers"]
     if not (t["tier1_pct"] <= t["tier2_pct"] <= t["tier3_pct"] <= t["tier4_pct"]):
         ok = False
@@ -739,18 +771,22 @@ def build_ticker_profile(
         checks.append("FAIL: target <= 0")
     else:
         checks.append("OK: target > 0")
+    if outcomes.get("rr_warning"):
+        checks.append(f"WARN: {outcomes['rr_warning']}")
 
     profile = {
         "ticker": ticker_u,
         "as_of_date": as_of,
         "informational_only": True,
         "confidence": conf,
+        "weighting": analogs_pack.get("weighting", "equal"),
         "flag": analogs_pack.get("flag") if conf == "INSUFFICIENT" else None,
         "n_analogs_finder": len(analogs),
         "n_analogs_measured": n,
         "entry_proxy_min": entry_proxy_min,
         "analog_finder": {
             "flag": analogs_pack.get("flag"),
+            "weighting": analogs_pack.get("weighting"),
             "stats": analogs_pack.get("stats"),
             "weight_sum": analogs_pack.get("weight_sum"),
             "ref_source": analogs_pack.get("ref_source"),
@@ -758,11 +794,15 @@ def build_ticker_profile(
         "per_analog": per_day,
         "skipped": skipped,
         "percentiles": {
-            "mae": {"weighted": mae_w, "unweighted": mae_u},
-            "mfe": {"weighted": mfe_w, "unweighted": mfe_u},
+            "scheme": "equal_weight",
+            "mae": mae_eq,
+            "mfe": mfe_eq,
+            "mae_finder_weights": mae_fw,
+            "mfe_finder_weights": mfe_fw,
         },
         "hit_rates": hit_rates,
         "bracket": bracket,
+        "outcomes": outcomes,
         "sanity": {"ok": ok, "checks": checks},
     }
     return profile
@@ -782,6 +822,8 @@ def _print_report(result: dict) -> None:
     print(f"\n{'=' * 60}")
     print(f"ANALOG FINDER — {result['ticker']}  as_of={result['as_of_date']}")
     print(f"{'=' * 60}")
+    print(f"Weighting: {result.get('weighting')}  "
+          f"(recency_weighting={stats.get('recency_weighting')})")
     print(f"Trading days scanned:     {stats['trading_days_scanned']}")
     print(f"Gap > {stats['min_gap_pct']:.0%} days:         {stats['gap_gt_min_days']}")
     print(
@@ -792,11 +834,7 @@ def _print_report(result: dict) -> None:
         print(f"FLAG: {result['flag']}")
     else:
         print("FLAG: (none — enough analogs for a profile)")
-    print(
-        f"Ref fingerprint: {result.get('ref_source')} "
-        f"gap={result.get('ref_gap')} vol_ratio={result.get('ref_vol_ratio')}"
-    )
-    print(f"\n{'date':<12} {'gap%':>8} {'vol_r':>8} {'w_comb':>10}")
+    print(f"\n{'date':<12} {'gap%':>8} {'vol_r':>8} {'weight':>10}")
     print("-" * 42)
     for a in result["analogs"]:
         print(
@@ -819,6 +857,7 @@ def _print_profile(profile: dict) -> None:
     print(
         f"Analogs: finder={profile.get('n_analogs_finder')}  "
         f"measured={profile.get('n_analogs_measured')}  "
+        f"weighting={profile.get('weighting')}  "
         f"entry_proxy=9:{30 + profile.get('entry_proxy_min', ENTRY_PROXY_MIN):02d} ET"
     )
     print("INFORMATIONAL ONLY — not wired into orders.\n")
@@ -840,31 +879,38 @@ def _print_profile(profile: dict) -> None:
     pct = profile.get("percentiles") or {}
     mae = pct.get("mae") or {}
     mfe = pct.get("mfe") or {}
-    print("\nPercentiles (fraction of entry):")
-    print(f"  {'':12} {'MAE w':>10} {'MAE u':>10} {'MFE w':>10} {'MFE u':>10}")
+    print("\nPercentiles (equal-weight, fraction of entry):")
+    print(f"  {'':8} {'MAE':>10} {'MFE':>10}")
     for key in ("p50", "p75", "p90"):
-        mw = (mae.get("weighted") or {}).get(key)
-        mu = (mae.get("unweighted") or {}).get(key)
-        fw = (mfe.get("weighted") or {}).get(key)
-        fu = (mfe.get("unweighted") or {}).get(key)
         print(
-            f"  {key:<12} "
-            f"{(mw or 0) * 100:9.2f}% {(mu or 0) * 100:9.2f}% "
-            f"{(fw or 0) * 100:9.2f}% {(fu or 0) * 100:9.2f}%"
+            f"  {key:<8} "
+            f"{(mae.get(key) or 0) * 100:9.2f}% "
+            f"{(mfe.get(key) or 0) * 100:9.2f}%"
         )
 
-    print("\nMFE hit-rates:")
+    print("\nMFE hit-rates (equal-weight):")
     for _k, h in (profile.get("hit_rates") or {}).items():
         thr = h["threshold_pct"] * 100
-        print(
-            f"  MFE ≥ +{thr:.0f}%:  "
-            f"weighted={h['weighted'] * 100:.1f}%  "
-            f"unweighted={h['unweighted'] * 100:.1f}%"
-        )
+        print(f"  MFE ≥ +{thr:.0f}%:  {h['equal_weight'] * 100:.1f}%")
+
+    out = profile.get("outcomes") or {}
+    print("\nOutcomes:")
+    print(
+        f"  Win rate: {out.get('win_rate_pct_display')}%  "
+        f"({out.get('n_winners')}/{out.get('n_total')} held close>entry)"
+    )
+    wm = out.get("winner_mfe_p50_display")
+    fm = out.get("failure_mae_p50_display")
+    print(f"  Winner MFE p50:  {wm}%  (conditional on held)")
+    print(f"  Failure MAE p50: {fm}%  (conditional on NOT held)")
+    print(f"  Reward:Risk:     {out.get('reward_risk')}  "
+          f"(target / safe_max_stop)")
+    if out.get("rr_warning"):
+        print(f"  R:R WARNING:     {out['rr_warning']}")
 
     b = profile.get("bracket") or {}
     t = b.get("tiers") or {}
-    print("\nDerived bracket (informational):")
+    print("\nDerived bracket (informational, equal-weight):")
     print(
         f"  SAFE MAX STOP:  {b.get('safe_max_stop_pct_display')}% below entry "
         f"(just beyond MAE p75)"
