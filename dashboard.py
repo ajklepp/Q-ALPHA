@@ -24,10 +24,9 @@
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
 #
-# MULTI-PAGE:
-#   Home (this file)     = Live Status / Trade Log / Performance / Health / Reviews
-#   pages/1_Ticker_Profiles.py = Setup Analysis (precomputed profiles/*.json only;
-#                                on-demand compute via button — never on load)
+# MULTI-PAGE NOTE: single-file app. Ticker Profiles is the 6th tab in st.tabs
+# (not a pages/ sidebar route). Profiler reads precomputed profiles/*.json;
+# "Refresh profile" is on-demand only — never on load/autorefresh.
 # =============================================================================
 from __future__ import annotations
 
@@ -48,7 +47,15 @@ if str(ROOT) not in sys.path:
 
 from candidates.supabase_sync import SupabaseSync
 from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
-from dashboard_shared import profile_rr_unfavorable
+from dashboard_shared import (
+    compute_and_save_profile,
+    et_today,
+    list_cached_profile_tickers,
+    load_profile,
+    load_todays_watchlist,
+    profile_path,
+    profile_rr_unfavorable,
+)
 
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
@@ -67,7 +74,7 @@ st.set_page_config(
     page_title="Q-ALPHA Dashboard",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st_autorefresh(interval=5 * 60 * 1000, key="main_refresh")
@@ -397,10 +404,7 @@ def render_header() -> None:
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.markdown("# 📈 Q-ALPHA Dashboard")
-        st.caption(
-            "Quantitative Momentum Trading System · "
-            "use the sidebar for Ticker Profiles"
-        )
+        st.caption("Quantitative Momentum Trading System")
         try:
             last_intraday = get_sync().get_last_health("intraday_monitor")
             if last_intraday and last_intraday.get("last_run"):
@@ -931,6 +935,222 @@ def tab_daily_reviews() -> None:
         st.info(f"💡 **Tomorrow's Improvement:**\n{suggestion}")
 
 
+def tab_ticker_profiles() -> None:
+    """
+    Setup-analysis tab: read precomputed profiles/<T>_profile.json.
+    No Polygon calls on tab open — only the explicit Refresh button.
+    """
+    st.caption(
+        "Analog MAE/MFE setup analysis · informational only · "
+        "reads precomputed JSON (no auto Polygon calls)"
+    )
+    st.info(
+        "Profiles are **precomputed** at the 9:20 scan (and via Refresh). "
+        "This tab does **not** call Polygon on load."
+    )
+
+    today = et_today()
+    watch_tickers: list[str] = []
+    watch_err: str | None = None
+    try:
+        rows = load_todays_watchlist(today)
+        watch_tickers = [
+            str(r.get("ticker") or "").upper()
+            for r in rows
+            if r.get("ticker")
+        ]
+    except Exception as exc:
+        watch_err = str(exc)
+
+    cached = list_cached_profile_tickers()
+    options: list[str] = []
+    seen: set[str] = set()
+    for t in watch_tickers + cached:
+        if t and t not in seen:
+            options.append(t)
+            seen.add(t)
+
+    if watch_err:
+        st.warning(f"Watchlist unavailable: {watch_err}")
+
+    if not options:
+        st.warning(
+            "No watchlist tickers and no cached profiles yet. "
+            "After the morning scan, tickers appear here — or type a symbol below."
+        )
+        manual = st.text_input(
+            "Ticker symbol", value="JOBY", key="profile_manual_ticker",
+        ).strip().upper()
+        if manual:
+            options = [manual]
+
+    col_sel, col_meta = st.columns([2, 3])
+    with col_sel:
+        ticker = st.selectbox(
+            "Select ticker",
+            options=options or ["JOBY"],
+            index=0,
+            key="profile_ticker_select",
+            help="Today's watchlist preferred; cached profiles also listed.",
+        )
+    with col_meta:
+        path = profile_path(ticker)
+        if path.exists():
+            mtime = path.stat().st_mtime
+            st.caption(
+                f"Cache: `{path.relative_to(ROOT)}` · "
+                f"updated {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')}"
+            )
+        else:
+            st.caption(f"No cache at `{path.relative_to(ROOT)}`")
+
+    c1, c2, _ = st.columns([1, 1, 2])
+    with c1:
+        do_refresh = st.button(
+            f"🔄 Refresh profile — {ticker}",
+            type="primary",
+            key="profile_refresh_btn",
+            help="Runs build_ticker_profile (Polygon 1-min). Slow. Not auto.",
+        )
+    with c2:
+        st.caption("Requires POLYGON_API_KEY in env or Streamlit secrets.")
+
+    if do_refresh:
+        with st.spinner(
+            f"Computing profile for {ticker} (Polygon daily + 1-min per analog)…"
+        ):
+            try:
+                profile = compute_and_save_profile(ticker)
+                st.success(
+                    f"Saved {ticker} profile "
+                    f"({profile.get('n_analogs_measured', '?')} analogs, "
+                    f"{profile.get('confidence', '?')})"
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Profile compute failed: {exc}")
+                return
+
+    profile = load_profile(ticker)
+    if profile is None:
+        st.warning(
+            f"No precomputed profile for **{ticker}**. "
+            f"Click **Refresh profile** to generate one (expensive)."
+        )
+        return
+
+    st.divider()
+    conf = profile.get("confidence", "?")
+    n_m = profile.get("n_analogs_measured") or profile.get("n_analogs_finder") or 0
+    as_of = profile.get("as_of_date", "—")
+    weighting = profile.get("weighting", "equal")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Analogs measured", n_m)
+    m2.metric("Confidence", conf)
+    m3.metric("As of", as_of)
+    m4.metric("Weighting", weighting)
+
+    if profile.get("informational_only", True):
+        st.caption("INFORMATIONAL ONLY — not wired into order / entry logic.")
+
+    outcomes = profile.get("outcomes") or {}
+    bracket = profile.get("bracket") or {}
+    tiers = bracket.get("tiers") or {}
+    pct = profile.get("percentiles") or {}
+    mae = pct.get("mae") or {}
+    mfe = pct.get("mfe") or {}
+
+    rr_warn = outcomes.get("rr_warning")
+    if rr_warn:
+        st.error(f"⚠️ R:R warning: {rr_warn}")
+    elif outcomes.get("reward_risk") is not None:
+        st.success(
+            f"Reward:Risk = {outcomes.get('reward_risk')} "
+            f"(target / safe-max stop)"
+        )
+
+    o1, o2, o3 = st.columns(3)
+    o1.metric(
+        "Win rate",
+        f"{outcomes.get('win_rate_pct_display', '—')}%",
+        help=outcomes.get("win_definition", "held close > entry"),
+    )
+    o2.metric(
+        "Winner MFE p50",
+        f"{outcomes.get('winner_mfe_p50_display', '—')}%",
+        help="Median MFE among days that closed above entry",
+    )
+    o3.metric(
+        "Failure MAE p50",
+        f"{outcomes.get('failure_mae_p50_display', '—')}%",
+        help="Median MAE among days that closed below entry",
+    )
+
+    st.subheader("MAE / MFE percentiles (equal-weight)")
+    pct_rows = []
+    for key in ("p50", "p75", "p90"):
+        pct_rows.append({
+            "Percentile": key,
+            "MAE %": round((mae.get(key) or 0) * 100, 2),
+            "MFE %": round((mfe.get(key) or 0) * 100, 2),
+        })
+    st.dataframe(
+        pd.DataFrame(pct_rows), hide_index=True, use_container_width=True,
+    )
+
+    st.subheader("Derived bracket (informational)")
+    b1, b2 = st.columns(2)
+    with b1:
+        st.markdown(
+            f"""
+| Level | % below entry |
+|---|---|
+| **SAFE MAX STOP** | **{bracket.get('safe_max_stop_pct_display', '—')}%** |
+| Tier 1 (≈ MAE p50) | {tiers.get('tier1_pct_display', '—')}% |
+| Tier 2 (≈ MAE p75) | {tiers.get('tier2_pct_display', '—')}% |
+| Tier 3 (≈ MAE p90) | {tiers.get('tier3_pct_display', '—')}% |
+| Tier 4 (beyond p90) | {tiers.get('tier4_pct_display', '—')}% |
+"""
+        )
+    with b2:
+        st.metric(
+            "TARGET (≈ MFE p50)",
+            f"+{bracket.get('target_pct_display', '—')}%",
+        )
+        hit = profile.get("hit_rates") or {}
+        if hit:
+            st.markdown("**MFE hit-rates**")
+            for _k, h in hit.items():
+                thr = float(h.get("threshold_pct") or 0) * 100
+                rate = h.get("equal_weight", h.get("unweighted", 0))
+                st.caption(f"MFE ≥ +{thr:.0f}% → {float(rate) * 100:.1f}%")
+
+    with st.expander("Per-analog day detail", expanded=False):
+        rows = profile.get("per_analog") or []
+        if not rows:
+            st.write("No per-analog rows in this profile.")
+        else:
+            df = pd.DataFrame([
+                {
+                    "date": r.get("date"),
+                    "entry": r.get("entry_proxy_price"),
+                    "MAE%": round(float(r.get("mae_pct") or 0) * 100, 2),
+                    "MFE%": round(float(r.get("mfe_pct") or 0) * 100, 2),
+                    "held": "Y" if r.get("held") else "N",
+                    "weight": r.get("weight_renorm", r.get("combined_weight")),
+                }
+                for r in rows
+            ])
+            st.dataframe(df, hide_index=True, use_container_width=True)
+
+    san = profile.get("sanity") or {}
+    with st.expander("Sanity checks", expanded=False):
+        for c in san.get("checks") or []:
+            st.write(f"- {c}")
+        st.write(f"overall={'PASS' if san.get('ok') else 'FAIL'}")
+
+
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
@@ -956,12 +1176,13 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
         "📓 Daily Reviews",
+        "🔬 Ticker Profiles",
     ])
 
     with tab1:
@@ -974,6 +1195,8 @@ def main() -> None:
         tab_system_health(health)
     with tab5:
         tab_daily_reviews()
+    with tab6:
+        tab_ticker_profiles()
 
     render_footer()
 
