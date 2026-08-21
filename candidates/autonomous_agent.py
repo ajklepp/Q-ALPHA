@@ -1316,10 +1316,14 @@ def fetch_regime_from_polygon() -> dict | None:
 
 def _generate_watchlist_profiles(candidates: list[dict]) -> None:
     """
-    Build profiles/<TICKER>_profile.json for each watchlist name after scan.
+    After the 9:20 watchlist is finalized, write profiles/<TICKER>_profile.json
+    for each name so the dashboard Ticker Profiles tab has fresh data.
 
-    Informational only for the dashboard Profiles page / R:R flags.
-    Failures are logged and skipped — NEVER abort the trading session.
+    Always persists JSON when build_ticker_profile returns (including
+    INSUFFICIENT_HISTORY / LOW confidence for short-history names like recent
+    IPOs) so the tab shows "insufficient history" instead of "no profile".
+
+    Per-ticker try/except — NEVER aborts the trading session.
     """
     tickers = [
         str(c.get("ticker") or "").upper()
@@ -1332,23 +1336,25 @@ def _generate_watchlist_profiles(candidates: list[dict]) -> None:
     try:
         from ticker_profiler import build_ticker_profile, save_profile_json
     except Exception as exc:
-        print(f"  ⚠️ ticker_profiler unavailable (non-fatal): {exc}")
+        print(f"  Profile skipped for (all): ticker_profiler unavailable — {exc}")
         return
 
-    print(f"\nBuilding setup profiles for {len(tickers)} watchlist ticker(s)...")
-    print("  (dashboard reads these; trading continues even if profiling fails)")
+    print(f"\nAuto-generating setup profiles for {len(tickers)} watchlist ticker(s)...")
     for ticker in tickers:
         try:
-            print(f"  Profiling {ticker}...")
             profile = build_ticker_profile(ticker)
-            save_profile_json(profile)
+            out = save_profile_json(profile)
             n = profile.get("n_analogs_measured", 0)
             conf = profile.get("confidence", "?")
-            rr_warn = (profile.get("outcomes") or {}).get("rr_warning")
-            flag = " ⚠️ R:R unfavorable" if rr_warn else ""
-            print(f"    ✓ {ticker}: {n} analogs, confidence={conf}{flag}")
+            flag = profile.get("flag") or (profile.get("analog_finder") or {}).get("flag")
+            detail = f"{n} analogs, confidence={conf}"
+            if flag:
+                detail += f", flag={flag}"
+            # Always write — even INSUFFICIENT_HISTORY — so the Profiles tab
+            # can show the flag instead of an empty "no profile" state.
+            print(f"  Profile generated for {ticker} ({detail}) → {out.name}")
         except Exception as exc:
-            print(f"  ⚠️ Profile {ticker} failed (non-fatal): {exc}")
+            print(f"  Profile skipped for {ticker}: {exc}")
             traceback.print_exc()
 
 
