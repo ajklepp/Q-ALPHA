@@ -26,7 +26,6 @@
 # =============================================================================
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
@@ -47,7 +46,7 @@ from candidates.supabase_sync import SupabaseSync
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
-SYSTEM_VERSION = "1.1.0"
+SYSTEM_VERSION = "1.1.1"
 SYSTEM_START_DATE = "2026-08-17"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
@@ -93,18 +92,17 @@ def _load_todays_watchlist(scan_date: str | None = None) -> list[dict]:
     return sync.get_watchlist(day)
 
 
-def _safe_load() -> tuple[list, list, list, list]:
+def _safe_load() -> tuple[list, list, list]:
     try:
         sync = get_sync()
         return (
             sync.get_all_trades(),
             sync.get_pool_history(),
-            sync.get_recent_scans(30),
             sync.get_system_health(),
         )
     except Exception as exc:
         st.error(f"Could not connect to Supabase: {exc}")
-        return [], [], [], []
+        return [], [], []
 
 
 def _trades_df(trades: list) -> pd.DataFrame:
@@ -118,18 +116,6 @@ def _trades_df(trades: list) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
-
-
-def _latest_scan(scans: list) -> dict | None:
-    return scans[0] if scans else None
-
-
-def _scan_for_date(scans: list, day: str) -> dict | None:
-    """Return the daily_scans row for an exact scan_date, else None."""
-    for row in scans:
-        if str(row.get("scan_date") or "") == day:
-            return row
-    return None
 
 
 def _parse_ts(ts_str: str) -> datetime:
@@ -206,15 +192,6 @@ def _color_gap(val: str) -> str:
         return ""
 
 
-def _candidate_price(ticker: str, latest_scan: dict | None, fallback: float) -> float:
-    if not latest_scan:
-        return fallback
-    for c in json.loads(latest_scan.get("candidates_json") or "[]"):
-        if c.get("ticker") == ticker:
-            return float(c.get("premarket_price") or fallback)
-    return fallback
-
-
 def render_header() -> None:
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
@@ -238,13 +215,18 @@ def render_header() -> None:
         st.metric("Next Scan", _next_scan_countdown())
 
 
-def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
+def tab_live_status(trades: list, pool_history: list) -> None:
     df = _trades_df(trades)
     today = _et_today()
-    # Never treat a prior day's daily_scans row as "today" (Aug-14 APMD/MGTX/KEX
-    # phantom). Prefer today's row; fall back to latest only for regime banner.
-    todays_scan = _scan_for_date(scans, today)
-    latest_scan = todays_scan or _latest_scan(scans)
+
+    # Watchlist is the single source of truth for what the agent is watching.
+    watch_rows: list[dict] = []
+    try:
+        watch_rows = _load_todays_watchlist(today)
+    except Exception as exc:
+        watch_load_err: str | None = str(exc)
+    else:
+        watch_load_err = None
 
     pool = STARTING_POOL
     if pool_history:
@@ -287,12 +269,11 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
     with col5:
         st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
 
-    spy_regime = latest_scan.get("spy_regime", "UNKNOWN") if latest_scan else "UNKNOWN"
-    vix_regime = latest_scan.get("vix_regime", "NORMAL") if latest_scan else "NORMAL"
-    spy_price = float(latest_scan.get("spy_price", 0) or 0) if latest_scan else 0
-    spy_sma50 = float(latest_scan.get("spy_sma50") or 0) if latest_scan else 0
-    if not spy_sma50 and spy_price:
-        spy_sma50 = spy_price * 0.97
+    # Regime from today's watchlist (not legacy daily_scans).
+    spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
+    vix_regime = "NORMAL"
+    spy_price = 0.0
+    spy_sma50 = 0.0
 
     regime_color = "#00AA44" if spy_regime == "BULL" else "#CC2200"
     regime_emoji = "🐂" if spy_regime == "BULL" else "🐻"
@@ -335,10 +316,7 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
             target_2r = float(trade.get("target_2r") or 0)
             pnl_dollars = float(trade.get("pnl_dollars") or 0)
             pnl_pct_val = float(trade.get("pnl_pct") or 0)
-            current_price = float(
-                trade.get("current_price")
-                or _candidate_price(ticker, latest_scan, entry_price)
-            )
+            current_price = float(trade.get("current_price") or entry_price)
             r_mult = float(trade.get("r_multiple") or 0)
             dist_stop = float(trade.get("dist_to_stop") or 0)
             updated = trade.get("last_updated") or ""
@@ -400,20 +378,15 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
 
                 st.divider()
 
-    # Prefer the normalized watchlist table (agent sync). Fresh client — never
-    # the @st.cache_resource instance, which Cloud has kept without get_watchlist.
     st.subheader("Today's Watchlist")
-    watch_rows: list[dict] = []
-    try:
-        watch_rows = _load_todays_watchlist(today)
-    except Exception as exc:
-        st.caption(f"Watchlist table unavailable: {exc}")
+    if watch_load_err:
+        st.caption(f"Watchlist table unavailable: {watch_load_err}")
 
     if watch_rows:
         regime_label = watch_rows[0].get("regime") or "—"
         st.caption(
             f"{len(watch_rows)} candidates · {today} · regime {regime_label} "
-            f"(live Supabase watchlist · auto-refreshes)"
+            f"(live Supabase watchlist · single source of truth)"
         )
         wl_rows = []
         for r in watch_rows:
@@ -422,7 +395,6 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
                 gap_f = float(gap) if gap is not None else 0.0
             except (TypeError, ValueError):
                 gap_f = 0.0
-            # Agent stores gap as a fraction (0.15); tolerate percent (15).
             gap_pct_display = gap_f * 100.0 if abs(gap_f) <= 1.0 else gap_f
             vol = r.get("pm_vol_ratio")
             try:
@@ -468,102 +440,6 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
             "No watchlist for today yet. It appears here as soon as the "
             "9:20 agent syncs candidates to Supabase (even with zero trades)."
         )
-
-    st.subheader("Today's Scan Results")
-    # Strictly today's daily_scans row — never the latest historical scan.
-    if not todays_scan:
-        stale = _latest_scan(scans)
-        if stale:
-            st.caption(
-                f"No daily_scans row for {today}. "
-                f"Latest historical scan is {stale.get('scan_date')} "
-                f"(not shown — avoids stale phantoms like APMD/MGTX/KEX)."
-            )
-        else:
-            st.info("No scan data yet.")
-        return
-
-    candidates = json.loads(todays_scan.get("candidates_json") or "[]")
-    if not candidates:
-        st.info("No candidates in today's scan.")
-        return
-
-    scan_date = todays_scan.get("scan_date")
-    approved_tickers = set(
-        df[(df["entry_date"] == scan_date)]["ticker"].tolist()
-    ) if not df.empty else set()
-
-    rows = []
-    for c in candidates:
-        plan = c.get("order_plan") or {}
-        # Agent watchlist shape uses gap_pct (fraction); legacy scanner uses
-        # gap_estimate. Accept either so today's agent-synced JSON renders.
-        gap = c.get("gap_estimate")
-        if gap is None:
-            gap = c.get("gap_pct") or 0
-        gap = float(gap or 0)
-        if abs(gap) > 1.0:
-            gap = gap / 100.0
-        vol = c.get("pm_vol_ratio", 0) or 0
-        price = (
-            c.get("premarket_price")
-            or c.get("last_price")
-            or c.get("prev_close")
-            or 0
-        )
-        catalyst = c.get(
-            "catalyst_summary",
-            c.get("news_headline", c.get("news_summary") or "No news"),
-        )
-        rows.append({
-            "Ticker": c.get("ticker"),
-            "Score": f"{c.get('quality_score', c.get('score', 0)) or 0:.0f}",
-            "Gap %": f"+{gap * 100:.1f}%",
-            "Vol Ratio": f"{float(vol):.1f}x",
-            "Price": f"${float(price):.2f}",
-            "Entry Est": f"${plan.get('entry_price', 0):.2f}",
-            "Stop": f"${plan.get('stop_price', 0):.2f}",
-            "Target": f"${plan.get('target_2r', 0):.2f}",
-            "Risk $": f"${plan.get('risk_dollars', 0):.0f}",
-            "Catalyst": catalyst,
-            "Approved": c.get("ticker") in approved_tickers,
-        })
-
-    scan_df = pd.DataFrame(rows)
-    styled_df = scan_df.style.map(_color_gap, subset=["Gap %"])
-    st.dataframe(
-        styled_df,
-        column_config={
-            "Score": st.column_config.TextColumn(
-                "Score",
-                help="Composite signal quality (0-100)",
-            ),
-            "Gap %": st.column_config.TextColumn(
-                "Gap %",
-                help="Pre-market gap vs prior close",
-            ),
-            "Vol Ratio": st.column_config.TextColumn(
-                "Vol Ratio",
-                help="Pre-market volume vs 20-day average",
-            ),
-            "Risk $": st.column_config.TextColumn(
-                "Risk $",
-                help="Maximum dollar loss if stop hit",
-            ),
-            "Catalyst": st.column_config.TextColumn(
-                "Catalyst",
-                width="large",
-                help="News headline driving the gap",
-            ),
-            "Approved": st.column_config.CheckboxColumn(
-                "✅ Approved",
-                help="Did you approve this trade today?",
-            ),
-        },
-        hide_index=True,
-        use_container_width=True,
-        height=400,
-    )
 
 
 def tab_trade_log(trades: list) -> None:
@@ -824,7 +700,7 @@ def render_footer() -> None:
 
 
 def main() -> None:
-    trades, pool_history, scans, health = _safe_load()
+    trades, pool_history, health = _safe_load()
     render_header()
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -836,7 +712,7 @@ def main() -> None:
     ])
 
     with tab1:
-        tab_live_status(trades, scans, pool_history)
+        tab_live_status(trades, pool_history)
     with tab2:
         tab_trade_log(trades)
     with tab3:
