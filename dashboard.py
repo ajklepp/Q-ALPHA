@@ -396,17 +396,10 @@ def render_header() -> None:
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.markdown("# 📈 Q-ALPHA Dashboard")
-        st.caption("Quantitative Momentum Trading System")
-        # Multipage nav (sidebar also lists pages — keep Home free of profiler UI)
-        n1, n2 = st.columns([1, 1])
-        with n1:
-            st.page_link("dashboard.py", label="📊 Live Status", icon="🏠")
-        with n2:
-            st.page_link(
-                "pages/1_Ticker_Profiles.py",
-                label="🔬 Ticker Profiles",
-                icon="🔬",
-            )
+        st.caption(
+            "Quantitative Momentum Trading System · "
+            "use the sidebar for Ticker Profiles"
+        )
         try:
             last_intraday = get_sync().get_last_health("intraday_monitor")
             if last_intraday and last_intraday.get("last_run"):

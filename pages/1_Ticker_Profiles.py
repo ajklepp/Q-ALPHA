@@ -36,13 +36,9 @@ st.set_page_config(
 
 st.markdown("# 🔬 Ticker Profiles")
 st.caption(
-    f"Setup analysis from analog MAE/MFE · informational only · v{SYSTEM_VERSION}"
+    f"Setup analysis from analog MAE/MFE · informational only · v{SYSTEM_VERSION} · "
+    "nav via sidebar (Home = Live Status)"
 )
-nav1, nav2 = st.columns([1, 1])
-with nav1:
-    st.page_link("dashboard.py", label="📊 Live Status", icon="🏠")
-with nav2:
-    st.page_link("pages/1_Ticker_Profiles.py", label="🔬 Ticker Profiles", icon="🔬")
 st.info(
     "Profiles are **precomputed** JSON files. This page does **not** call Polygon "
     "on load. Use **Refresh profile** only when you need a new compute "
