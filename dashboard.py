@@ -23,6 +23,11 @@
 #
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
+#
+# MULTI-PAGE:
+#   Home (this file)     = Live Status / Trade Log / Performance / Health / Reviews
+#   pages/1_Ticker_Profiles.py = Setup Analysis (precomputed profiles/*.json only;
+#                                on-demand compute via button — never on load)
 # =============================================================================
 from __future__ import annotations
 
@@ -42,11 +47,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from candidates.supabase_sync import SupabaseSync
+from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
 
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
-SYSTEM_VERSION = "1.2.1"
+SYSTEM_VERSION = SHARED_VERSION  # keep Home + Profiles pages in sync
 SYSTEM_START_DATE = "2026-08-17"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
@@ -60,7 +66,7 @@ st.set_page_config(
     page_title="Q-ALPHA Dashboard",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 st_autorefresh(interval=5 * 60 * 1000, key="main_refresh")
@@ -391,6 +397,16 @@ def render_header() -> None:
     with col1:
         st.markdown("# 📈 Q-ALPHA Dashboard")
         st.caption("Quantitative Momentum Trading System")
+        # Multipage nav (sidebar also lists pages — keep Home free of profiler UI)
+        n1, n2 = st.columns([1, 1])
+        with n1:
+            st.page_link("dashboard.py", label="📊 Live Status", icon="🏠")
+        with n2:
+            st.page_link(
+                "pages/1_Ticker_Profiles.py",
+                label="🔬 Ticker Profiles",
+                icon="🔬",
+            )
         try:
             last_intraday = get_sync().get_last_health("intraday_monitor")
             if last_intraday and last_intraday.get("last_run"):
