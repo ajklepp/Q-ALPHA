@@ -12,7 +12,6 @@ normalized so combined weights sum to 1.
 from __future__ import annotations
 
 import json
-import math
 import os
 import urllib.parse
 import urllib.request
@@ -31,12 +30,52 @@ POLYGON_BASE = "https://api.polygon.io"
 HISTORY_CALENDAR_DAYS = 365 * 2 + 30          # ~2 years (+ cushion for weekends)
 VOLUME_BASELINE_DAYS = 5                      # trailing avg vol window (excl. day)
 MIN_GAP_PCT = 0.03                            # >3% open gap vs prior close
-VOL_MULT = 2.0                                # unusual-vol: day vol >= this × baseline
+VOL_MULT = 1.75                               # unusual-vol: day vol >= this × baseline
 RECENCY_HALF_LIFE_DAYS = 180.0                # exp decay: weight halves every N days
 # Similarity distance scales (gap in fraction, vol_ratio in multiples of baseline)
 SIMILARITY_GAP_SCALE = 0.05                   # 5pp gap difference → unit distance
 SIMILARITY_VOL_SCALE = 1.0                    # 1.0× vol-ratio difference → unit distance
+# Magnitude/similarity tilt (GENTLE — big-gap days must stay informative samples):
+#   0.0 = ignore magnitude entirely (pure recency)
+#   1.0 = full floored-similarity tilt
+# Default LOW so magnitude only gently tilts weights; never discards analogs.
+SIMILARITY_STRENGTH = 0.3
+# Floor on the similarity factor BEFORE strength blend: even a "far" analog
+# keeps at least this fraction of the max similarity score (1.0). Prevents
+# exp(-dist)-style near-zeroing of explosive gap days.
+SIMILARITY_FLOOR = 0.25
 MIN_ANALOGS_FOR_PROFILE = 3                   # below this → INSUFFICIENT_HISTORY
+
+
+def similarity_factor(
+    gap_pct: float,
+    vol_ratio: float,
+    ref_gap: float,
+    ref_vol: float,
+    *,
+    strength: float = SIMILARITY_STRENGTH,
+    floor: float = SIMILARITY_FLOOR,
+) -> float:
+    """
+    Bounded magnitude-similarity multiplier in [floor_blend, 1].
+
+    Soft distance → 1/(1+dist) in (0, 1], then floored at `floor`, then
+    blended with strength:
+
+      sim_soft  = 1 / (1 + dist)                    # mild, never near-zero alone
+      sim_floor = floor + (1 - floor) * sim_soft    # >= floor (e.g. 0.25)
+      factor    = (1 - strength) * 1.0 + strength * sim_floor
+
+    strength=0 → always 1.0 (pure recency). strength=1 → floored soft tilt.
+    """
+    dist = (
+        abs(gap_pct - ref_gap) / SIMILARITY_GAP_SCALE
+        + abs(vol_ratio - ref_vol) / SIMILARITY_VOL_SCALE
+    )
+    sim_soft = 1.0 / (1.0 + dist)
+    sim_floored = floor + (1.0 - floor) * sim_soft
+    s = max(0.0, min(1.0, float(strength)))
+    return (1.0 - s) * 1.0 + s * sim_floored
 
 
 def _load_polygon_key() -> str:
@@ -116,6 +155,7 @@ def find_analog_days(
     min_gap_pct: float = MIN_GAP_PCT,
     vol_mult: float = VOL_MULT,
     recency_half_life_days: float = RECENCY_HALF_LIFE_DAYS,
+    similarity_strength: float = SIMILARITY_STRENGTH,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -136,11 +176,21 @@ def find_analog_days(
           |gap_pct_i - ref_gap| / SIMILARITY_GAP_SCALE
         + |vol_ratio_i - ref_vol| / SIMILARITY_VOL_SCALE
 
-      similarity_weight_i = exp(-dist_i)
-          # closer gap%/vol-elevation to the reference → higher weight
+      # Soft + floored similarity (NOT harsh exp(-dist), which zeroed big gaps):
+      sim_soft_i  = 1 / (1 + dist_i)
+      sim_floor_i = SIMILARITY_FLOOR + (1 - SIMILARITY_FLOOR) * sim_soft_i
+                    # every analog keeps >= SIMILARITY_FLOOR of max similarity
+      similarity_weight_i =
+          (1 - SIMILARITY_STRENGTH) * 1.0
+        + SIMILARITY_STRENGTH * sim_floor_i
+          # SIMILARITY_STRENGTH in [0,1]: 0 = pure recency; 1 = full floored tilt
+          # Default LOW (0.3) — magnitude only gently tilts weights
 
       raw_i = recency_weight_i * similarity_weight_i
       combined_weight_i = raw_i / sum(raw)     # normalize to sum 1
+
+    Every qualifying analog (gap>3% + unusual vol) remains a valid sample —
+    none are effectively discarded by magnitude distance.
 
     Returns
     -------
@@ -248,11 +298,13 @@ def find_analog_days(
     raw_sum = 0.0
     for c in candidates:
         rec = 0.5 ** (c["age_days"] / recency_half_life_days)
-        dist = (
-            abs(c["gap_pct"] - ref_gap) / SIMILARITY_GAP_SCALE
-            + abs(c["vol_ratio"] - ref_vol) / SIMILARITY_VOL_SCALE
+        sim = similarity_factor(
+            c["gap_pct"],
+            c["vol_ratio"],
+            ref_gap,
+            ref_vol,
+            strength=similarity_strength,
         )
-        sim = math.exp(-dist)
         c["recency_weight"] = rec
         c["similarity_weight"] = sim
         c["_raw"] = rec * sim
@@ -288,6 +340,8 @@ def find_analog_days(
             "volume_baseline_days": volume_baseline_days,
             "recency_half_life_days": recency_half_life_days,
             "history_calendar_days": history_calendar_days,
+            "similarity_strength": similarity_strength,
+            "similarity_floor": SIMILARITY_FLOOR,
         },
         "analogs": analogs,
         "weight_sum": round(weight_sum, 6),
