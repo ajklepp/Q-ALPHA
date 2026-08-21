@@ -46,7 +46,7 @@ from candidates.supabase_sync import SupabaseSync
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
-SYSTEM_VERSION = "1.2.0"
+SYSTEM_VERSION = "1.2.1"
 SYSTEM_START_DATE = "2026-08-17"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
@@ -255,10 +255,8 @@ def _candidate_status(trade: dict | None, now_et: datetime) -> str:
         return "— Skipped"
 
     status = str(trade.get("status") or "").upper()
-    entry = float(trade.get("entry_price") or 0)
-
     if status in OPEN_STATUSES or status in {"OPEN", "PENDING"}:
-        return f"🟢 In Trade (entry ${entry:.2f})"
+        return "🟢 In Trade"
 
     exit_reason = str(trade.get("exit_reason") or "").upper()
     pnl = float(trade.get("pnl_dollars") or 0)
@@ -278,22 +276,89 @@ def _candidate_status(trade: dict | None, now_et: datetime) -> str:
             r_mult = 1.0 if pnl > 0 else (-1.0 if pnl < 0 else 0.0)
 
     if is_stop or (not is_target and pnl < 0):
-        return f"🔴 Stopped {r_mult:.0f}r (${pnl:+.0f})"
-    return f"✅ Closed {r_mult:+.0f}r (${pnl:+.0f})"
+        return f"🔴 Stopped {r_mult:.0f}r"
+    return f"✅ Closed {r_mult:+.0f}r"
+
+
+def _trade_fill_columns(trade: dict | None) -> dict[str, str]:
+    """
+    Real fill levels from the trades table only (never scan-time estimates).
+    Blank when no trade exists for this ticker today.
+    """
+    blank = {"Entry": "—", "Stop": "—", "Target": "—", "P&L": "—"}
+    if not trade:
+        return blank
+
+    def _money(val) -> str:
+        try:
+            if val is None or val == "":
+                return "—"
+            return f"${float(val):.2f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    entry = trade.get("entry_price")
+    stop = trade.get("stop_price")
+    target = trade.get("target_2r")
+    pnl = trade.get("pnl_dollars")
+    pct = trade.get("pnl_pct")
+
+    pnl_str = "—"
+    try:
+        if pnl is not None and pnl != "":
+            pnl_f = float(pnl)
+            pct_part = ""
+            try:
+                if pct is not None and pct != "":
+                    pct_f = float(pct)
+                    # Trades store fraction (0.012) or already-percent; tolerate both.
+                    if abs(pct_f) <= 1.0:
+                        pct_f *= 100.0
+                    pct_part = f" ({pct_f:+.1f}%)"
+            except (TypeError, ValueError):
+                pct_part = ""
+            pnl_str = f"${pnl_f:+.2f}{pct_part}"
+    except (TypeError, ValueError):
+        pnl_str = "—"
+
+    return {
+        "Entry": _money(entry),
+        "Stop": _money(stop),
+        "Target": _money(target),
+        "P&L": pnl_str,
+    }
 
 
 def _style_watchlist(df: pd.DataFrame):
-    """Gap% green/red; numeric columns right-aligned; subtle header feel."""
-    def _gap_cell(val: str) -> str:
-        return _color_gap(val)
+    """Gap%/P&L green/red; money columns right-aligned; subtle header."""
+    money_cols = [c for c in ("Gap %", "Vol Ratio", "Score", "Rank",
+                              "Entry", "Stop", "Target", "P&L") if c in df.columns]
 
-    styled = df.style.map(_gap_cell, subset=["Gap %"])
+    def _pnl_cell(val: str) -> str:
+        text = str(val)
+        if text in {"—", "", "None"}:
+            return "color: #666666"
+        if text.startswith("$-") or "-$" in text or text.startswith("-$"):
+            return "color: #FF4444; font-weight: bold"
+        # "$+12.00" or positive without explicit +
+        if "+$" in text or text.startswith("$+"):
+            return "color: #00FF88; font-weight: bold"
+        if text.startswith("$") and not text.startswith("$-"):
+            # bare "$12.00" — treat leading digit after $ as positive if no minus
+            rest = text[1:].lstrip("+")
+            if rest and rest[0].isdigit():
+                return "color: #00FF88; font-weight: bold"
+        return ""
+
+    styled = df.style.map(_color_gap, subset=["Gap %"])
+    if "P&L" in df.columns:
+        styled = styled.map(_pnl_cell, subset=["P&L"])
     styled = styled.set_properties(
-        subset=["Gap %", "Vol Ratio", "Score", "Rank"],
+        subset=money_cols,
         **{"text-align": "right"},
     )
     styled = styled.set_properties(
-        subset=["Ticker", "Status"],
+        subset=[c for c in ("Ticker", "Status") if c in df.columns],
         **{"text-align": "left"},
     )
     styled = styled.set_table_styles(
@@ -539,13 +604,19 @@ def tab_live_status(trades: list, pool_history: list) -> None:
             except (TypeError, ValueError):
                 score_f = 0.0
             ticker = str(r.get("ticker") or "").upper()
+            trade = trades_today.get(ticker)
+            fills = _trade_fill_columns(trade)
             wl_rows.append({
                 "Rank": int(r.get("rank") or 0),
                 "Ticker": ticker,
                 "Gap %": f"+{gap_pct_display:.1f}%",
                 "Vol Ratio": f"{vol_f:.1f}x",
                 "Score": f"{score_f:.0f}",
-                "Status": _candidate_status(trades_today.get(ticker), et_now),
+                "Status": _candidate_status(trade, et_now),
+                "Entry": fills["Entry"],
+                "Stop": fills["Stop"],
+                "Target": fills["Target"],
+                "P&L": fills["P&L"],
             })
 
         wl_df = pd.DataFrame(wl_rows)
@@ -570,12 +641,32 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "Status": st.column_config.TextColumn(
                     "Status",
                     help="Trade lifecycle for today (watching → entered → closed)",
-                    width="large",
+                    width="medium",
+                ),
+                "Entry": st.column_config.TextColumn(
+                    "Entry",
+                    help="Real fill from trades table (watch_and_enter) — not a scan estimate",
+                    width="small",
+                ),
+                "Stop": st.column_config.TextColumn(
+                    "Stop",
+                    help="Real stop from trades table",
+                    width="small",
+                ),
+                "Target": st.column_config.TextColumn(
+                    "Target",
+                    help="Real 2R target from trades table",
+                    width="small",
+                ),
+                "P&L": st.column_config.TextColumn(
+                    "P&L",
+                    help="pnl_dollars from trades (live current_price when open)",
+                    width="medium",
                 ),
             },
             hide_index=True,
             use_container_width=True,
-            height=min(460, 56 + 38 * max(len(wl_rows), 1)),
+            height=min(520, 56 + 38 * max(len(wl_rows), 1)),
         )
     else:
         st.info(
