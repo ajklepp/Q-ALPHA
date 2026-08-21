@@ -13,7 +13,18 @@
 #    Program:   C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\venv\Scripts\python.exe
 #    Arguments: candidates\autonomous_agent.py
 #    Start in:  C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
-# 5. Ensure TWS paper is open before 9:20 AM
+# 5. Environment (REQUIRED — cp1252 consoles crash on emoji otherwise):
+#    Task Scheduler has no env-var UI. Either:
+#      A) Action Program = cmd.exe
+#         Arguments =
+#           /c "set PYTHONIOENCODING=utf-8&& set PYTHONUTF8=1&&
+#               C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\venv\Scripts\python.exe
+#               candidates\autonomous_agent.py"
+#         Start in = C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+#      B) Or set User-level env vars PYTHONIOENCODING=utf-8 and PYTHONUTF8=1
+#         (Windows Settings → System → About → Advanced system settings →
+#          Environment Variables) so every scheduled/manual run inherits them.
+# 6. Ensure TWS paper is open before 9:20 AM
 #
 # Timeline:
 #   9:20-9:29  Phase 1: IBKR pre-market scan
@@ -24,6 +35,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
@@ -33,6 +45,24 @@ import time
 import traceback
 from datetime import date, datetime, time as dtime
 from pathlib import Path
+
+# Windows Task Scheduler / cp1252 consoles raise UnicodeEncodeError on emoji
+# (✅ 🔍 ⚠️ etc.). Force UTF-8 with errors='replace' so a print can never kill
+# the 9:20 run. Must run before any emoji is printed.
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "buffer"):
+        setattr(
+            sys,
+            _stream_name,
+            io.TextIOWrapper(
+                _stream.buffer,
+                encoding="utf-8",
+                errors="replace",
+                line_buffering=True,
+            ),
+        )
+del _stream_name, _stream
 
 import pytz
 import requests
