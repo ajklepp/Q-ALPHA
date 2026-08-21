@@ -15,6 +15,8 @@
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS ticker         TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_date     TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price    NUMERIC;
+-- Dollar capital deployed (entry * shares). Live DB has this NOT NULL.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS position_size  NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_price     NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS target_1r      NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS target_2r      NUMERIC;

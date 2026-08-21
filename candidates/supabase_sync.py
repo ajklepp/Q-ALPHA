@@ -53,6 +53,7 @@ TRADE_FIELDS = (
     "ticker",
     "entry_date",
     "entry_price",
+    "position_size",  # dollars deployed (legacy NOT NULL; see upsert_trade)
     "stop_price",
     "target_1r",
     "target_2r",
@@ -97,9 +98,44 @@ class SupabaseSync:
         self.client = create_client(url, key)
 
     def upsert_trade(self, trade: dict) -> None:
-        """Insert or update a trade record."""
+        """
+        Insert or update a trade record.
+
+        position_size is the DOLLAR value of capital deployed in the position
+        (entry_price * shares), matching PoolManager.position_size() / experiment
+        BracketPosition sizing — NOT a share count. The live trades table has
+        position_size NOT NULL (legacy schema); never send null.
+        """
         record = {field: trade.get(field) for field in TRADE_FIELDS}
-        record["shares_total"] = trade.get("shares_total") or trade.get("shares")
+
+        try:
+            shares = int(trade.get("shares_total") or trade.get("shares") or 0)
+        except (TypeError, ValueError):
+            shares = 0
+        record["shares_total"] = shares
+
+        try:
+            entry = float(trade.get("entry_price") or 0)
+        except (TypeError, ValueError):
+            entry = 0.0
+        record["entry_price"] = entry
+
+        # Prefer explicit dollar fields; else entry * shares. Never None.
+        ps_raw = trade.get("position_size")
+        if ps_raw is None:
+            ps_raw = trade.get("position_value")
+        try:
+            position_size = float(ps_raw) if ps_raw is not None else entry * shares
+        except (TypeError, ValueError):
+            position_size = entry * shares
+        if position_size is None:
+            position_size = 0.0
+        record["position_size"] = position_size
+
+        # Harden other NOT NULL columns against missing keys.
+        record["ticker"] = trade.get("ticker") or ""
+        record["entry_date"] = trade.get("entry_date") or date.today().isoformat()
+
         self.client.table("trades").upsert(
             record, on_conflict="ticker,entry_date"
         ).execute()
