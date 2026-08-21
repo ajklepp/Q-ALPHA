@@ -77,7 +77,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from paper_trader import PaperTrade, PaperTradesStore
-from position_sizer import PoolManager
+from position_sizer import (
+    PoolManager,
+    compute_shares,
+    load_pool_value,
+    max_affordable_price,
+    SCAN_MIN_PRICE,
+)
 from state_paths import CANDIDATES_DIR as _CANDIDATES_DIR, is_trading_day, state_path
 from universe_filter import (
     EXCLUDE_SYMBOLS,
@@ -98,8 +104,8 @@ ENTRY_CLOSE = dtime(11, 0)
 SCAN_START = dtime(9, 20)
 MIN_GAP_PCT = 0.03
 MAX_GAP_PCT = 0.50
-MIN_PRICE = 5.00
-MAX_PRICE = 50.00
+MIN_PRICE = SCAN_MIN_PRICE  # $5 floor; ceiling = max_affordable_price(pool)
+# MAX_PRICE removed (was hardcoded 50.00). Dynamic ceiling = (pool/10)/4.
 MIN_PM_VOL_RATIO = 1.5
 MIN_DOLLAR_VOL = 2_000_000
 TOP_N_CANDIDATES = 10
@@ -379,9 +385,12 @@ def scan_premarket(ib: IB) -> list[dict]:
         return []
 
     print(f"Scanning {len(universe)} tickers via IBKR...")
+    pool = load_pool_value()
+    max_price = max_affordable_price(pool)
     print(
         f"Filters: gap {MIN_GAP_PCT:.0%}-{MAX_GAP_PCT:.0%} | "
-        f"price ${MIN_PRICE:.0f}-${MAX_PRICE:.0f} | "
+        f"price ${MIN_PRICE:.0f}-${max_price:.0f} "
+        f"(dynamic ceiling, pool=${pool:,.0f}) | "
         f"vol >= {MIN_PM_VOL_RATIO}x | dolVol >= ${MIN_DOLLAR_VOL / 1e6:.0f}M"
     )
 
@@ -425,7 +434,7 @@ def scan_premarket(ib: IB) -> list[dict]:
 
                 if not (MIN_GAP_PCT <= gap_pct <= MAX_GAP_PCT):
                     continue
-                if not (MIN_PRICE <= prev_close <= MAX_PRICE):
+                if not (MIN_PRICE <= prev_close <= max_price):
                     continue
 
                 dollar_vol = prev_close * avg_vol
@@ -437,8 +446,8 @@ def scan_premarket(ib: IB) -> list[dict]:
                 if pm_vol_ratio < MIN_PM_VOL_RATIO:
                     continue
 
-                est_shares = int(300 / last)
-                if est_shares < 6:
+                # Must fit at least 4 shares under the per-trade pot
+                if compute_shares(pool, last) < 4:
                     continue
 
                 candidates.append({
@@ -992,8 +1001,23 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
             if all_conditions:
                 print(f"  → ENTERING {ticker} @ ${current_price:.2f}")
 
-                pool_size = pool.position_size()
-                shares = max(6, int(pool_size / current_price))
+                shares = compute_shares(pool.pool, current_price)
+                if shares < 4:
+                    reason = f"SKIP {ticker}: 4 shares exceeds per-trade pot"
+                    print(f"  {reason}")
+                    skipped.append({
+                        "ticker": ticker,
+                        "reason": reason,
+                        "price": current_price,
+                    })
+                    decided.add(ticker)
+                    track.update(
+                        decision="skipped",
+                        decision_time=now_et.isoformat(),
+                        decision_reason=reason,
+                    )
+                    send_telegram(f"⏭ {ticker} SKIPPED\n{reason}")
+                    continue
 
                 # SINGLE-BRACKET (2R) MODEL -- books must equal broker.
                 # The broker (_place_intraday_bracket) sends ONE 100% buy,
@@ -1001,6 +1025,8 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                 # must also hold 100% in a single tranche that exits at 2R.
                 # T1 carries 100%; the monitor exits T1 at target_2r.
                 # T2/T3 stay ZERO so no phantom scale-out or trail exists.
+                # shares is always divisible by 4 (compute_shares) for a
+                # future 4-tier trailing stop; today all shares stay in T1.
                 t1_shares = shares
                 t2_shares = 0
                 t3_shares = 0

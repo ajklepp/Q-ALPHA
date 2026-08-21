@@ -7,6 +7,7 @@ for incoming gap-day signals. Imported by scanner and execution layers.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -35,6 +36,56 @@ ATR_FETCH_CALENDAR_DAYS = 20
 ATR_STOP_MULTIPLIER = 1.5
 MAX_STOP_PCT = 0.08  # never more than 8% stop
 MIN_STOP_PCT = 0.02  # never less than 2% stop
+
+# Pool-scaled sizing: up to 10 concurrent full positions; shares always ÷4
+# so a future 4-tier trailing stop can split evenly. Price ceiling is dynamic:
+# max_affordable_price = (pool / 10) / 4  — at $3000 pool that is $75.
+SHARE_LOT = 4
+MIN_TRADE_SHARES = SHARE_LOT
+SCAN_MIN_PRICE = 5.00  # scanner floor (unchanged); ceiling is dynamic
+
+
+def per_trade_target(pool: float) -> float:
+    """Dollar budget for one full position (= pool / max concurrent slots)."""
+    return float(pool) / MAX_OPEN_POSITIONS
+
+
+def max_affordable_price(pool: float) -> float:
+    """
+    DYNAMIC scanner price ceiling: 4 shares must fit in the per-trade pot.
+    At pool=$3000 → $300/4 = $75. Recomputed from live pool each run.
+    """
+    return per_trade_target(pool) / SHARE_LOT
+
+
+def compute_shares(pool: float, price: float) -> int:
+    """
+    Largest multiple of SHARE_LOT that fits in per_trade_target at `price`.
+
+    Returns 0 when fewer than MIN_TRADE_SHARES (4) fit — caller must SKIP
+    ("4 shares exceeds per-trade pot"). Guarantees shares % 4 == 0 when > 0
+    so a future 4-tier stop can trust even splits.
+    """
+    if pool <= 0 or price <= 0:
+        return 0
+    target = per_trade_target(pool)
+    max_by_target = math.floor(target / price)
+    shares = (max_by_target // SHARE_LOT) * SHARE_LOT
+    if shares < MIN_TRADE_SHARES:
+        return 0
+    return int(shares)
+
+
+def load_pool_value(state_path: Path | None = None) -> float:
+    """
+    Current pool dollars from pool_state.json (the `pool` field — not peak).
+    Used by scanners to recompute the dynamic price ceiling each run.
+    """
+    path = state_path or get_state_path("pool_state.json")
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return float(data.get("pool", DEFAULT_STARTING_POOL))
+    return DEFAULT_STARTING_POOL
 
 
 def now_et() -> datetime:
@@ -224,9 +275,8 @@ class PositionSizer:
     """Convert a signal + pool state into an executable order plan."""
 
     def calculate(self, signal: SignalInput, pool: PoolManager) -> OrderPlan:
-        """Size a trade with ATR bracket stops and 3-tranche exit."""
+        """Size a trade with ATR bracket stops; shares always divisible by 4."""
         vix_adj = 0.5 if signal.vix_regime == "ELEVATED" else 1.0
-        base_size = pool.position_size() * vix_adj
         entry_est = signal.premarket_price
 
         stop_distance = compute_stop_distance(entry_est, signal.atr_14)
@@ -242,20 +292,23 @@ class PositionSizer:
                 skip_reason="Invalid ATR or stop price",
             )
 
-        shares = int(base_size / entry_est)
-        if shares < 1:
+        # VIX still scales the effective pool for sizing; shares always ÷4.
+        sized_pool = pool.pool * vix_adj
+        shares = compute_shares(sized_pool, entry_est)
+        if shares < MIN_TRADE_SHARES:
             return OrderPlan(
                 ticker=signal.ticker,
                 valid=False,
-                skip_reason="Position too small for 1 share",
+                skip_reason=f"SKIP {signal.ticker}: 4 shares exceeds per-trade pot",
             )
 
         risk_per_share = stop_distance
         total_risk = shares * risk_per_share
 
         if total_risk > pool.pool * MAX_RISK_PCT:
-            shares = int((pool.pool * REDUCED_RISK_PCT) / risk_per_share)
-            if shares < 1:
+            reduced = math.floor((pool.pool * REDUCED_RISK_PCT) / risk_per_share)
+            shares = (reduced // SHARE_LOT) * SHARE_LOT
+            if shares < MIN_TRADE_SHARES:
                 return OrderPlan(
                     ticker=signal.ticker,
                     valid=False,
@@ -263,6 +316,9 @@ class PositionSizer:
                 )
             total_risk = shares * risk_per_share
 
+        # Single-bracket 2R for now: 100% in T1; T2/T3 zero (agent path).
+        # Legacy tranche split kept only when TRANCHE_PCT path is desired —
+        # here we still expose 3 fields but keep shares % 4 == 0 overall.
         t1_shares = int(shares * TRANCHE_PCT)
         t2_shares = int(shares * TRANCHE_PCT)
         t3_shares = shares - t1_shares - t2_shares

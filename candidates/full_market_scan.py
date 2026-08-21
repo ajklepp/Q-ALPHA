@@ -18,7 +18,8 @@ Filter stack (all must pass):
   1. Symbol is Polygon type == "CS"  AND  name is not a fund/derivative
      (closes the SOXS / NEBX leveraged-ETF hole — snapshot alone has no name)
   2. Opening gap in [MIN_GAP_PCT, MAX_GAP_PCT]
-  3. Reference price in [MIN_PRICE, MAX_PRICE]
+  3. Reference price in [MIN_PRICE, max_affordable_price(pool)]
+     Ceiling is DYNAMIC: (pool/10)/4 from pool_state.json (not hardcoded)
   4. PRIOR-DAY dollar volume >= MIN_DOLLAR_VOL             (liquidity)
      Uses yesterday's tape, NOT today's accumulating volume. At 9:20 AM
      today_vol is near-zero, so a today-$vol floor always returns 0 names.
@@ -50,14 +51,20 @@ if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
 from universe_filter import EXCLUDE_SYMBOLS, is_leveraged_or_fund  # exact reuse
+from position_sizer import (
+    SCAN_MIN_PRICE,
+    load_pool_value,
+    max_affordable_price,
+)
 
 ET = pytz.timezone("America/New_York")
 
 # ── Filter constants (mirror autonomous_agent.py; tune empirically) ─────────
 MIN_GAP_PCT = 0.03
 MAX_GAP_PCT = 0.50
-MIN_PRICE = 5.00
-MAX_PRICE = 50.00
+MIN_PRICE = SCAN_MIN_PRICE  # $5 floor; ceiling is DYNAMIC from live pool
+# MAX_PRICE removed: was hardcoded 50.00. Now max_affordable_price(pool)
+# = (pool/10)/4 — at $3000 pool that is $75. Recomputed each scan.
 # Liquidity = PRIOR day dollar volume (agent / pre_market_scanner use $2M).
 # Never use today's accumulating $vol at 9:20 — that filter always zeros out.
 MIN_DOLLAR_VOL = 2_000_000
@@ -240,9 +247,17 @@ def scan_market(api_key: str) -> tuple[list[dict], dict]:
     """
     Canonical full-market gap scan. Module constants (MIN_GAP_PCT, MIN_PRICE,
     MIN_DOLLAR_VOL, MIN_PM_VOL_RATIO, TOP_N_CANDIDATES, ...) are the single
-    source of truth for thresholds. Standalone CLI and the agent both go
-    through this function — never fork the filter stack.
+    source of truth for thresholds. Price ceiling is DYNAMIC:
+    max_affordable_price(live pool) = (pool/10)/4. Standalone CLI and the
+    agent both go through this function — never fork the filter stack.
     """
+    pool = load_pool_value()
+    max_price = max_affordable_price(pool)
+    print(
+        f"  Dynamic price ceiling: ${max_price:.2f} "
+        f"(pool=${pool:,.2f}, per-trade=${pool / 10:,.2f})"
+    )
+
     cs_universe = build_cs_universe(api_key)
     avg_vol = build_avg_volume(api_key, RVOL_LOOKBACK_DAYS)
     snapshot = fetch_full_market_snapshot(api_key)
@@ -252,6 +267,7 @@ def scan_market(api_key: str) -> tuple[list[dict], dict]:
         "dropped_no_data": 0, "dropped_not_cs": 0, "dropped_gap": 0,
         "dropped_price": 0, "dropped_dollar_vol": 0, "dropped_no_avgvol": 0,
         "dropped_rvol": 0, "passed": 0,
+        "pool": pool, "max_price": max_price,
     }
     candidates: list[dict] = []
 
@@ -274,7 +290,7 @@ def scan_market(api_key: str) -> tuple[list[dict], dict]:
         if not (MIN_GAP_PCT <= gap <= MAX_GAP_PCT):
             stats["dropped_gap"] += 1
             continue
-        if not (MIN_PRICE <= ref_price <= MAX_PRICE):
+        if not (MIN_PRICE <= ref_price <= max_price):
             stats["dropped_price"] += 1
             continue
 
@@ -400,7 +416,9 @@ def main() -> None:
         "source": "full_market_scan.scan_market()",
         "constants": {
             "MIN_GAP_PCT": MIN_GAP_PCT, "MAX_GAP_PCT": MAX_GAP_PCT,
-            "MIN_PRICE": MIN_PRICE, "MAX_PRICE": MAX_PRICE,
+            "MIN_PRICE": MIN_PRICE,
+            "MAX_PRICE": stats.get("max_price"),  # dynamic (pool/10)/4
+            "pool": stats.get("pool"),
             "MIN_DOLLAR_VOL": MIN_DOLLAR_VOL,
             "MIN_PM_VOL_RATIO": MIN_PM_VOL_RATIO,
             "EXPECTED_PM_VOL_PCT": EXPECTED_PM_VOL_PCT,
