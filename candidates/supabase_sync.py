@@ -71,6 +71,19 @@ TRADE_FIELDS = (
     "last_updated",
 )
 
+# Columns written to the watchlist table. Keep in sync with
+# candidates/sql/watchlist_schema.sql. Only these keys are sent so a missing
+# optional column never triggers PGRST204 (same discipline as TRADE_FIELDS).
+WATCHLIST_FIELDS = (
+    "scan_date",
+    "ticker",
+    "rank",
+    "gap_pct",
+    "pm_vol_ratio",
+    "score",
+    "regime",
+)
+
 
 class SupabaseSync:
     """Read/write Q-Alpha dashboard data in Supabase."""
@@ -119,6 +132,67 @@ class SupabaseSync:
         self.client.table("daily_scans").upsert(
             record, on_conflict="scan_date"
         ).execute()
+
+    def upsert_watchlist(
+        self,
+        candidates: list[dict],
+        scan_date: str,
+        regime: str,
+    ) -> None:
+        """
+        Replace the day's watchlist in Supabase so the dashboard shows it
+        even when zero trades are placed.
+
+        Deletes any existing rows for scan_date first (re-scans must not
+        duplicate), then inserts one row per candidate. Only WATCHLIST_FIELDS
+        are written — never invent columns the live table may lack.
+        """
+        day = str(scan_date)
+        self.client.table("watchlist").delete().eq("scan_date", day).execute()
+        if not candidates:
+            return
+
+        rows: list[dict] = []
+        for i, cand in enumerate(candidates, start=1):
+            gap = cand.get("gap_pct")
+            if gap is None:
+                gap = cand.get("gap_estimate")
+            record = {
+                "scan_date": day,
+                "ticker": cand.get("ticker"),
+                "rank": int(cand.get("rank") or i),
+                "gap_pct": float(gap) if gap is not None else None,
+                "pm_vol_ratio": (
+                    float(cand["pm_vol_ratio"])
+                    if cand.get("pm_vol_ratio") is not None else None
+                ),
+                "score": float(
+                    cand.get("quality_score")
+                    if cand.get("quality_score") is not None
+                    else cand.get("score")
+                    if cand.get("score") is not None
+                    else 0.0
+                ),
+                "regime": regime,
+            }
+            rows.append({field: record.get(field) for field in WATCHLIST_FIELDS})
+
+        self.client.table("watchlist").insert(rows).execute()
+
+    def get_watchlist(self, scan_date: str | None = None) -> list:
+        """
+        Fetch watchlist rows for a scan_date (default: today ET calendar date
+        as ISO string). Ordered by rank ascending.
+        """
+        day = scan_date or date.today().isoformat()
+        result = (
+            self.client.table("watchlist")
+            .select("*")
+            .eq("scan_date", day)
+            .order("rank")
+            .execute()
+        )
+        return result.data or []
 
     def log_health(self, component: str, status: str, message: str) -> None:
         """Log system component health."""

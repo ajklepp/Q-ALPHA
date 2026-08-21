@@ -98,6 +98,19 @@ CREATE TABLE IF NOT EXISTS daily_scans (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS watchlist (
+    id BIGSERIAL PRIMARY KEY,
+    scan_date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    rank INTEGER,
+    gap_pct NUMERIC,
+    pm_vol_ratio NUMERIC,
+    score NUMERIC,
+    regime TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (scan_date, ticker)
+);
+
 CREATE TABLE IF NOT EXISTS system_health (
     id SERIAL PRIMARY KEY,
     component TEXT,
@@ -176,7 +189,7 @@ def main() -> None:
     _load_env()
     _verify_supabase_client()
     _execute_schema()
-    print("Done. Tables: trades, pool_snapshots, daily_scans, system_health, daily_reviews")
+    print("Done. Tables: trades, pool_snapshots, daily_scans, watchlist, system_health, daily_reviews")
 
 
 if __name__ == "__main__":

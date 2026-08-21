@@ -368,6 +368,76 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
 
                 st.divider()
 
+    # Prefer the normalized watchlist table (agent sync). Fall back to the
+    # legacy daily_scans JSON blob so older scanner runs still render.
+    st.subheader("Today's Watchlist")
+    today = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+    watch_rows: list[dict] = []
+    try:
+        watch_rows = get_sync().get_watchlist(today)
+    except Exception as exc:
+        st.caption(f"Watchlist table unavailable: {exc}")
+
+    if watch_rows:
+        regime_label = watch_rows[0].get("regime") or "—"
+        st.caption(
+            f"{len(watch_rows)} candidates · {today} · regime {regime_label} "
+            f"(auto-refreshes with the dashboard)"
+        )
+        wl_rows = []
+        for r in watch_rows:
+            gap = r.get("gap_pct")
+            try:
+                gap_f = float(gap) if gap is not None else 0.0
+            except (TypeError, ValueError):
+                gap_f = 0.0
+            # Agent stores gap as a fraction (0.15); tolerate percent (15).
+            gap_pct_display = gap_f * 100.0 if abs(gap_f) <= 1.0 else gap_f
+            vol = r.get("pm_vol_ratio")
+            try:
+                vol_f = float(vol) if vol is not None else 0.0
+            except (TypeError, ValueError):
+                vol_f = 0.0
+            score = r.get("score")
+            try:
+                score_f = float(score) if score is not None else 0.0
+            except (TypeError, ValueError):
+                score_f = 0.0
+            wl_rows.append({
+                "Rank": r.get("rank"),
+                "Ticker": r.get("ticker"),
+                "Gap %": f"+{gap_pct_display:.1f}%",
+                "Vol Ratio": f"{vol_f:.1f}x",
+                "Score": f"{score_f:.0f}",
+                "Regime": r.get("regime") or "—",
+            })
+        wl_df = pd.DataFrame(wl_rows)
+        st.dataframe(
+            wl_df.style.map(_color_gap, subset=["Gap %"]),
+            column_config={
+                "Rank": st.column_config.NumberColumn("Rank", width="small"),
+                "Ticker": st.column_config.TextColumn("Ticker"),
+                "Gap %": st.column_config.TextColumn(
+                    "Gap %", help="Pre-market gap vs prior close",
+                ),
+                "Vol Ratio": st.column_config.TextColumn(
+                    "Vol Ratio", help="Pre-market volume vs expected baseline",
+                ),
+                "Score": st.column_config.TextColumn(
+                    "Score", help="Composite signal quality (0-100)",
+                ),
+                "Regime": st.column_config.TextColumn("Regime"),
+            },
+            hide_index=True,
+            use_container_width=True,
+            height=min(420, 48 + 36 * max(len(wl_rows), 1)),
+        )
+    else:
+        st.info(
+            "No watchlist for today yet. It appears here as soon as the "
+            "9:20 agent syncs candidates to Supabase (even with zero trades)."
+        )
+
     st.subheader("Today's Scan Results")
     if not latest_scan:
         st.info("No scan data yet.")

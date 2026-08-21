@@ -1360,6 +1360,17 @@ def main() -> None:
 
         send_premarket_summary(candidates, regime, vix)
 
+        # Push watchlist to Supabase so the dashboard shows today's names even
+        # with zero trades. Never block the trading flow on a sync failure.
+        try:
+            from supabase_sync import SupabaseSync
+
+            scan_day = date.today().isoformat()
+            SupabaseSync().upsert_watchlist(candidates, scan_day, regime)
+            print(f"  Supabase watchlist synced ({len(candidates)} names, {scan_day})")
+        except Exception as exc:
+            print(f"  ⚠️ Supabase watchlist sync failed (non-fatal): {exc}")
+
         if not AUTO_APPROVE:
             print(
                 "AUTO_APPROVE=False — advisory mode. Watchlist sent via Telegram; "
