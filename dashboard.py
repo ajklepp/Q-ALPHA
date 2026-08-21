@@ -1,34 +1,28 @@
 # =============================================================================
 # Q-ALPHA STREAMLIT DASHBOARD
 # =============================================================================
+# DEPLOY TO STREAMLIT COMMUNITY CLOUD:
+# App URL: https://q-alpha-lshnrvza2radqpkjrkf52m.streamlit.app
+# Repo:    ajklepp/Q-ALPHA  |  Branch: main  |  Main file: dashboard.py
+#
+# Streamlit Cloud DOES auto-redeploy on push to the linked branch IF the app
+# is connected to GitHub. If the live app still shows old UI / AttributeError:
+#   1. https://share.streamlit.io → open the Q-ALPHA app
+#   2. Confirm Settings → General: repo ajklepp/Q-ALPHA, branch main,
+#      Main file path dashboard.py
+#   3. Manage app → Reboot app  (or Redeploy) to force a clean process
+#      (clears @st.cache_resource holding a pre-watchlist SupabaseSync)
+#   4. Settings → Secrets must contain:
+#        SUPABASE_URL = "https://zabyiqhyliuvrwqbnxkq.supabase.co"
+#        SUPABASE_SECRET_KEY = "<service_role key — same as local .env>"
+#      Update secrets if keys were rotated; then reboot.
+#
 # LOCAL LAUNCH (DETACHED — never block Cursor / agents):
 #   .\start_dashboard.ps1          # returns immediately; URL http://localhost:8501
 #   .\stop_dashboard.ps1           # kills whatever owns port 8501
 #
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
-#
-# DEPLOY TO STREAMLIT COMMUNITY CLOUD:
-# 1. Push all changes to GitHub:
-#    git add .
-#    git commit -m "Dashboard upgrade — rich visuals + scan details"
-#    git push
-#
-# 2. Go to: https://share.streamlit.io
-# 3. Sign in with GitHub
-# 4. Click "New app"
-# 5. Repository: ajklepp/Q-ALPHA
-# 6. Branch: main
-# 7. Main file path: dashboard.py
-# 8. Click Deploy
-#
-# 9. Add secrets in Streamlit Cloud:
-#    App Settings → Secrets → paste:
-#    SUPABASE_URL = "your_url"
-#    SUPABASE_SECRET_KEY = "your_key"
-#
-# 10. URL will be: https://qalpha.streamlit.app
-#     (or similar — customize in app settings)
 # =============================================================================
 from __future__ import annotations
 
@@ -53,10 +47,13 @@ from candidates.supabase_sync import SupabaseSync
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
-SYSTEM_VERSION = "1.0.0"
+SYSTEM_VERSION = "1.1.0"
 SYSTEM_START_DATE = "2026-08-17"
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
+# Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
+# otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
+_SUPABASE_SYNC_API = "watchlist-v1"
 
 st.set_page_config(
     page_title="Q-ALPHA Dashboard",
@@ -69,8 +66,31 @@ st_autorefresh(interval=5 * 60 * 1000, key="main_refresh")
 
 
 @st.cache_resource
-def get_sync() -> SupabaseSync:
+def get_sync(_api: str = _SUPABASE_SYNC_API) -> SupabaseSync:
+    """Cached Supabase client. `_api` exists only to bust stale class caches."""
     return SupabaseSync()
+
+
+def _et_today() -> str:
+    """Today's calendar date in America/New_York as YYYY-MM-DD."""
+    return datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+
+
+def _load_todays_watchlist(scan_date: str | None = None) -> list[dict]:
+    """
+    Load today's watchlist via a FRESH SupabaseSync (not get_sync cache).
+
+    Cloud soft-reloads have previously kept a cached SupabaseSync class from
+    before get_watchlist existed, which raised AttributeError while the rest
+    of the new dashboard UI rendered. Instantiating here always binds the
+    current module's class.
+    """
+    day = scan_date or _et_today()
+    sync = SupabaseSync()
+    if not hasattr(sync, "get_watchlist"):
+        get_sync.clear()
+        sync = SupabaseSync()
+    return sync.get_watchlist(day)
 
 
 def _safe_load() -> tuple[list, list, list, list]:
@@ -102,6 +122,14 @@ def _trades_df(trades: list) -> pd.DataFrame:
 
 def _latest_scan(scans: list) -> dict | None:
     return scans[0] if scans else None
+
+
+def _scan_for_date(scans: list, day: str) -> dict | None:
+    """Return the daily_scans row for an exact scan_date, else None."""
+    for row in scans:
+        if str(row.get("scan_date") or "") == day:
+            return row
+    return None
 
 
 def _parse_ts(ts_str: str) -> datetime:
@@ -212,7 +240,11 @@ def render_header() -> None:
 
 def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
     df = _trades_df(trades)
-    latest_scan = _latest_scan(scans)
+    today = _et_today()
+    # Never treat a prior day's daily_scans row as "today" (Aug-14 APMD/MGTX/KEX
+    # phantom). Prefer today's row; fall back to latest only for regime banner.
+    todays_scan = _scan_for_date(scans, today)
+    latest_scan = todays_scan or _latest_scan(scans)
 
     pool = STARTING_POOL
     if pool_history:
@@ -368,13 +400,12 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
 
                 st.divider()
 
-    # Prefer the normalized watchlist table (agent sync). Fall back to the
-    # legacy daily_scans JSON blob so older scanner runs still render.
+    # Prefer the normalized watchlist table (agent sync). Fresh client — never
+    # the @st.cache_resource instance, which Cloud has kept without get_watchlist.
     st.subheader("Today's Watchlist")
-    today = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
     watch_rows: list[dict] = []
     try:
-        watch_rows = get_sync().get_watchlist(today)
+        watch_rows = _load_todays_watchlist(today)
     except Exception as exc:
         st.caption(f"Watchlist table unavailable: {exc}")
 
@@ -382,7 +413,7 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
         regime_label = watch_rows[0].get("regime") or "—"
         st.caption(
             f"{len(watch_rows)} candidates · {today} · regime {regime_label} "
-            f"(auto-refreshes with the dashboard)"
+            f"(live Supabase watchlist · auto-refreshes)"
         )
         wl_rows = []
         for r in watch_rows:
@@ -439,16 +470,25 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
         )
 
     st.subheader("Today's Scan Results")
-    if not latest_scan:
-        st.info("No scan data yet.")
+    # Strictly today's daily_scans row — never the latest historical scan.
+    if not todays_scan:
+        stale = _latest_scan(scans)
+        if stale:
+            st.caption(
+                f"No daily_scans row for {today}. "
+                f"Latest historical scan is {stale.get('scan_date')} "
+                f"(not shown — avoids stale phantoms like APMD/MGTX/KEX)."
+            )
+        else:
+            st.info("No scan data yet.")
         return
 
-    candidates = json.loads(latest_scan.get("candidates_json") or "[]")
+    candidates = json.loads(todays_scan.get("candidates_json") or "[]")
     if not candidates:
-        st.info("No candidates in latest scan.")
+        st.info("No candidates in today's scan.")
         return
 
-    scan_date = latest_scan.get("scan_date")
+    scan_date = todays_scan.get("scan_date")
     approved_tickers = set(
         df[(df["entry_date"] == scan_date)]["ticker"].tolist()
     ) if not df.empty else set()
@@ -456,18 +496,31 @@ def tab_live_status(trades: list, scans: list, pool_history: list) -> None:
     rows = []
     for c in candidates:
         plan = c.get("order_plan") or {}
-        gap = c.get("gap_estimate", 0) or 0
+        # Agent watchlist shape uses gap_pct (fraction); legacy scanner uses
+        # gap_estimate. Accept either so today's agent-synced JSON renders.
+        gap = c.get("gap_estimate")
+        if gap is None:
+            gap = c.get("gap_pct") or 0
+        gap = float(gap or 0)
+        if abs(gap) > 1.0:
+            gap = gap / 100.0
         vol = c.get("pm_vol_ratio", 0) or 0
+        price = (
+            c.get("premarket_price")
+            or c.get("last_price")
+            or c.get("prev_close")
+            or 0
+        )
         catalyst = c.get(
             "catalyst_summary",
-            c.get("news_headline", "No news"),
+            c.get("news_headline", c.get("news_summary") or "No news"),
         )
         rows.append({
             "Ticker": c.get("ticker"),
-            "Score": f"{c.get('quality_score', 0):.0f}",
+            "Score": f"{c.get('quality_score', c.get('score', 0)) or 0:.0f}",
             "Gap %": f"+{gap * 100:.1f}%",
-            "Vol Ratio": f"{vol:.1f}x",
-            "Price": f"${c.get('premarket_price', 0):.2f}",
+            "Vol Ratio": f"{float(vol):.1f}x",
+            "Price": f"${float(price):.2f}",
             "Entry Est": f"${plan.get('entry_price', 0):.2f}",
             "Stop": f"${plan.get('stop_price', 0):.2f}",
             "Target": f"${plan.get('target_2r', 0):.2f}",
