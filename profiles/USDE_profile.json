@@ -2,155 +2,58 @@
   "ticker": "USDE",
   "as_of_date": "2026-08-21",
   "informational_only": true,
+  "stats_meaningful": false,
   "confidence": "INSUFFICIENT",
   "history_flag": "**",
-  "analog_count": 1,
+  "analog_count": 0,
   "actual_lookback_days": 56,
   "actual_lookback_start_date": "2026-06-26",
-  "weighting": "equal",
   "flag": "INSUFFICIENT_HISTORY",
-  "n_analogs_finder": 1,
-  "n_analogs_measured": 1,
-  "entry_proxy_min": 3,
   "analog_finder": {
     "flag": "INSUFFICIENT_HISTORY",
     "history_flag": "**",
     "confidence": "INSUFFICIENT",
-    "weighting": "equal",
     "stats": {
       "actual_lookback_days": 56,
       "actual_lookback_start_date": "2026-06-26",
-      "lookback_cap_days": 760,
+      "lookback_cap_days": 1855,
       "trading_days_scanned": 40,
-      "analog_count": 1,
+      "analog_count": 0,
       "history_flag": "**",
       "confidence": "INSUFFICIENT",
-      "gap_gt_min_days": 4,
-      "analog_days": 1,
+      "gap_gt_min_days": 3,
+      "analog_days": 0,
       "min_gap_pct": 0.03,
       "vol_mult": 1.75,
       "volume_baseline_days": 5,
-      "history_calendar_days": 760,
+      "history_calendar_days": 1855,
       "similarity_strength": 0.0,
       "similarity_floor": 0.25,
       "recency_weighting": false
     },
-    "weight_sum": 1.0,
-    "ref_source": "median_analog"
+    "weight_sum": 0.0
   },
-  "per_analog": [
-    {
-      "date": "2026-08-20",
-      "gap_pct": 0.045307,
-      "vol_ratio": 13.666,
-      "combined_weight": 1.0,
-      "n_rth_bars": 360,
-      "entry_proxy_price": 3.41,
-      "entry_proxy_time": "2026-08-20T09:33:00-04:00",
-      "mae_pct": 0.035191,
-      "mfe_pct": 0.211144,
-      "mae_pct_display": 3.519,
-      "mfe_pct_display": 21.114,
-      "time_of_mfe_peak": "2026-08-20T15:40:00-04:00",
-      "held": true,
-      "close_vs_entry_pct": 0.170088,
-      "session_close": 3.99,
-      "min_low": 3.29,
-      "max_high": 4.13,
-      "weight_renorm": 1.0
-    }
-  ],
+  "entry_proxy_min": 3,
+  "n_analogs_finder": 0,
+  "n_analogs_measured": 0,
+  "per_analog": [],
   "skipped": [],
-  "percentiles": {
-    "scheme": "equal_weight",
-    "mae": {
-      "p50": 0.035191,
-      "p75": 0.035191,
-      "p90": 0.035191
-    },
-    "mfe": {
-      "p50": 0.211144,
-      "p75": 0.211144,
-      "p90": 0.211144
-    },
-    "mae_finder_weights": {
-      "p50": 0.035191,
-      "p75": 0.035191,
-      "p90": 0.035191
-    },
-    "mfe_finder_weights": {
-      "p50": 0.211144,
-      "p75": 0.211144,
-      "p90": 0.211144
-    }
-  },
-  "hit_rates": {
-    "mfe_ge_3pct": {
-      "threshold_pct": 0.03,
-      "equal_weight": 1.0
-    },
-    "mfe_ge_5pct": {
-      "threshold_pct": 0.05,
-      "equal_weight": 1.0
-    },
-    "mfe_ge_8pct": {
-      "threshold_pct": 0.08,
-      "equal_weight": 1.0
-    },
-    "mfe_ge_10pct": {
-      "threshold_pct": 0.1,
-      "equal_weight": 1.0
-    }
-  },
-  "bracket": {
-    "safe_max_stop_pct": 0.036951,
-    "safe_max_stop_pct_display": 3.695,
-    "tiers": {
-      "tier1_pct": 0.035191,
-      "tier1_pct_display": 3.519,
-      "tier2_pct": 0.035191,
-      "tier2_pct_display": 3.519,
-      "tier3_pct": 0.035191,
-      "tier3_pct_display": 3.519,
-      "tier4_pct": 0.036951,
-      "tier4_pct_display": 3.695
-    },
-    "target_pct": 0.211144,
-    "target_pct_display": 21.114,
-    "stop_beyond_mult": 1.05,
-    "note": "INFORMATIONAL ONLY \u2014 not wired into order logic. Stops are % below entry; target is % above entry."
-  },
+  "percentiles": {},
+  "hit_rates": {},
+  "bracket": {},
   "outcomes": {
-    "win_definition": "session_close > entry_proxy (held)",
-    "n_total": 1,
-    "n_winners": 1,
-    "n_losers": 0,
-    "win_rate": 1.0,
-    "win_rate_pct_display": 100.0,
-    "winner_mfe": {
-      "p50": 0.211144,
-      "p75": 0.211144,
-      "p90": 0.211144,
-      "n": 1
-    },
-    "winner_mfe_p50_display": 21.114,
-    "failure_mae": {
-      "p50": null,
-      "p75": null,
-      "p90": null,
-      "n": 0
-    },
-    "failure_mae_p50_display": null,
-    "reward_risk": 5.714,
-    "rr_warn_threshold": 1.5,
-    "rr_warning": null
+    "n_total": 0,
+    "n_finder": 0,
+    "win_rate": null,
+    "win_rate_pct_display": null,
+    "reward_risk": null,
+    "rr_warning": null,
+    "note": "n=0 analog(s), not meaningful \u2014 insufficient sample (need \u22653). Informational flag only."
   },
   "sanity": {
-    "ok": true,
+    "ok": false,
     "checks": [
-      "OK: MAE p50 <= p75 <= p90 (equal-weight)",
-      "OK: tier1 <= tier2 <= tier3 <= tier4",
-      "OK: target > 0"
+      "n=0 analog(s), not meaningful \u2014 insufficient sample (need \u22653). Informational flag only."
     ]
   }
 }

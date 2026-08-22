@@ -1074,18 +1074,24 @@ def tab_ticker_profiles() -> None:
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Analogs", n_m)
     m2.metric("Confidence", conf)
-    m3.metric("History flag", hist_flag if hist_flag else "(none)")
+    m3.metric(
+        "History flag",
+        {"*": "* limited", "**": "** insuff", "": "(none)"}.get(
+            hist_flag, hist_flag or "(none)"
+        ),
+    )
     m4.metric("Lookback days", lookback_d if lookback_d is not None else "—")
     m5.metric("As of", as_of)
 
+    # Avoid markdown **bold** wrapping tickers that already contain * / ** flags
+    # (was rendering as: **USDE **** insufficient...).
     if hist_flag == "**":
         st.warning(
-            f"**{display_name}** — insufficient analogs; profile is "
-            "informational only (not reliable)."
+            f"⚠️ {ticker} — insufficient analogs; informational only."
         )
     elif hist_flag == "*":
         st.info(
-            f"**{display_name}** — limited history and/or small sample; "
+            f"⚠️ {ticker} — limited history and/or small sample; "
             "usable but less certain."
         )
 
@@ -1098,10 +1104,28 @@ def tab_ticker_profiles() -> None:
     pct = profile.get("percentiles") or {}
     mae = pct.get("mae") or {}
     mfe = pct.get("mfe") or {}
+    meaningful = profile.get("stats_meaningful", hist_flag != "**")
+
+    if not meaningful:
+        note = outcomes.get("note") or (
+            f"n={n_m}, not meaningful — insufficient sample."
+        )
+        st.error(f"📊 Metrics suppressed: {note}")
+        if profile.get("per_analog"):
+            st.caption(
+                "Raw per-analog audit rows may appear below; "
+                "win-rate / R:R / percentiles are intentionally blank."
+            )
+        # Still show audit table if any; skip confident summary metrics
+        per = profile.get("per_analog") or []
+        if per:
+            st.subheader("Per-analog audit (not for sizing)")
+            st.dataframe(pd.DataFrame(per), hide_index=True, use_container_width=True)
+        return
 
     rr_warn = outcomes.get("rr_warning")
     if rr_warn:
-        st.error(f"⚠️ R:R warning ({display_name}): {rr_warn}")
+        st.error(f"⚠️ R:R warning ({ticker}): {rr_warn}")
     elif outcomes.get("reward_risk") is not None:
         st.success(
             f"Reward:Risk = {outcomes.get('reward_risk')} "

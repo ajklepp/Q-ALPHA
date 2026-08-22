@@ -1,42 +1,114 @@
 {
   "ticker": "ABUS",
   "as_of_date": "2026-08-21",
-  "flag": "INSUFFICIENT_HISTORY",
-  "history_flag": "**",
-  "confidence": "INSUFFICIENT",
-  "analog_count": 2,
-  "actual_lookback_days": 760,
-  "actual_lookback_start_date": "2024-07-22",
+  "flag": null,
+  "history_flag": "",
+  "confidence": "HIGH",
+  "analog_count": 11,
+  "actual_lookback_days": 1855,
+  "actual_lookback_start_date": "2021-07-23",
   "weighting": "equal",
   "ref_source": "median_analog",
-  "ref_gap": 0.04502,
-  "ref_vol_ratio": 1.7646,
+  "ref_gap": 0.059829,
+  "ref_vol_ratio": 2.9521,
   "stats": {
-    "actual_lookback_days": 760,
-    "actual_lookback_start_date": "2024-07-22",
-    "lookback_cap_days": 760,
-    "trading_days_scanned": 524,
-    "analog_count": 2,
-    "history_flag": "**",
-    "confidence": "INSUFFICIENT",
-    "gap_gt_min_days": 4,
-    "analog_days": 2,
+    "actual_lookback_days": 1855,
+    "actual_lookback_start_date": "2021-07-23",
+    "lookback_cap_days": 1855,
+    "trading_days_scanned": 1276,
+    "analog_count": 11,
+    "history_flag": "",
+    "confidence": "HIGH",
+    "gap_gt_min_days": 22,
+    "analog_days": 11,
     "min_gap_pct": 0.03,
     "vol_mult": 1.75,
     "volume_baseline_days": 5,
-    "history_calendar_days": 760,
+    "history_calendar_days": 1855,
     "similarity_strength": 0.0,
     "similarity_floor": 0.25,
     "recency_weighting": false
   },
   "analogs": [
     {
+      "date": "2021-09-10",
+      "gap_pct": 0.162791,
+      "vol_ratio": 12.929,
+      "age_days": 1806,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2021-10-07",
+      "gap_pct": 0.0725,
+      "vol_ratio": 5.06,
+      "age_days": 1779,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2021-12-01",
+      "gap_pct": 0.609375,
+      "vol_ratio": 299.0852,
+      "age_days": 1724,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2022-02-02",
+      "gap_pct": 0.071918,
+      "vol_ratio": 2.5277,
+      "age_days": 1661,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2022-02-28",
+      "gap_pct": 0.07362,
+      "vol_ratio": 3.3771,
+      "age_days": 1635,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2022-05-10",
+      "gap_pct": 0.049327,
+      "vol_ratio": 2.9521,
+      "age_days": 1564,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2022-08-03",
+      "gap_pct": 0.03913,
+      "vol_ratio": 2.7421,
+      "age_days": 1479,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2022-11-03",
+      "gap_pct": 0.059829,
+      "vol_ratio": 4.7231,
+      "age_days": 1387,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
+      "date": "2023-11-15",
+      "gap_pct": 0.047872,
+      "vol_ratio": 1.8268,
+      "age_days": 1010,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.090909
+    },
+    {
       "date": "2026-04-15",
       "gap_pct": 0.048276,
       "vol_ratio": 1.7701,
       "age_days": 128,
       "similarity_weight": 1.0,
-      "combined_weight": 0.5
+      "combined_weight": 0.090909
     },
     {
       "date": "2026-05-13",
@@ -44,8 +116,8 @@
       "vol_ratio": 1.7591,
       "age_days": 100,
       "similarity_weight": 1.0,
-      "combined_weight": 0.5
+      "combined_weight": 0.090909
     }
   ],
-  "weight_sum": 1.0
+  "weight_sum": 0.999999
 }

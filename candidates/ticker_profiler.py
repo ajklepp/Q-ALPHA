@@ -31,8 +31,10 @@ POLYGON_BASE = "https://api.polygon.io"
 ET = ZoneInfo("America/New_York")
 
 # ── Tunable parameters (retune without rewriting logic) ─────────────────────
-# Request up to ~2 years; young tickers use whatever history exists (adaptive).
-HISTORY_MAX_CALENDAR_DAYS = 365 * 2 + 30      # hard cap on lookback request
+# Adaptive lookback: use whatever history exists, up to this cap.
+# 5yr (not 2yr): quiet names like ABUS only form enough gap+vol analogs
+# over a longer window; 2yr left ABUS at n=2 (**) despite a 2016 listing.
+HISTORY_MAX_CALENDAR_DAYS = 365 * 5 + 30      # hard cap on lookback request
 HISTORY_CALENDAR_DAYS = HISTORY_MAX_CALENDAR_DAYS  # alias for callers
 # Reliable window ≈ 1.75 years of calendar history in the sample
 RELIABLE_LOOKBACK_DAYS = int(1.75 * 365)      # ~639 calendar days
@@ -49,6 +51,10 @@ SIMILARITY_FLOOR = 0.25
 MIN_ANALOGS_RELIABLE = 10                     # + long lookback → "" / HIGH
 MIN_ANALOGS_USABLE = 3                        # below → "**" / INSUFFICIENT
 MIN_ANALOGS_FOR_PROFILE = MIN_ANALOGS_USABLE  # back-compat alias
+# Analogs must be strictly before as_of AND at least this many calendar days
+# older. age=1 (yesterday) is excluded so today's setup never treats
+# yesterday's same-name gap day as "history" (USDE 2026-08-20 bug).
+MIN_ANALOG_AGE_DAYS = 2
 
 # ── Commit 2: MAE/MFE / tier derivation ─────────────────────────────────────
 ENTRY_PROXY_MIN = 3                           # minutes after 9:30 ET → entry proxy
@@ -147,9 +153,9 @@ def fetch_daily_bars(
 
 
 def _parse_as_of(as_of_date: date | str | None) -> date:
-    """Normalize as_of_date to a date (default: today calendar date)."""
+    """Normalize as_of_date to a date (default: today in America/New_York)."""
     if as_of_date is None:
-        return date.today()
+        return datetime.now(ET).date()
     if isinstance(as_of_date, date):
         return as_of_date
     return date.fromisoformat(str(as_of_date)[:10])
@@ -199,10 +205,15 @@ def find_analog_days(
 
     LOOKBACK (adaptive)
     -------------------
-    Requests up to history_calendar_days (~2yr cap). Uses whatever daily
-    history Polygon returns — a 10-month IPO uses ~10 months; a 5-year name
-    uses the most recent ~2 years. Records actual_lookback_days /
+    Requests up to history_calendar_days (~5yr cap). Uses whatever daily
+    history Polygon returns — a 10-month IPO uses ~10 months; a long-listed
+    name uses the most recent ~5 years. Records actual_lookback_days /
     actual_lookback_start_date from the first available bar.
+
+    ANALOG DATES
+    ------------
+    Analogs are STRICTLY PAST days: date < as_of. The as_of / current
+    session is NEVER an analog (no self-matching / circular n=1 profiles).
 
     WEIGHTING: equal by default (SIMILARITY_STRENGTH=0). No within-window
     recency decay — the lookback window itself is the recency filter.
@@ -213,7 +224,8 @@ def find_analog_days(
     start = as_of - timedelta(days=req_days)
     bars = fetch_daily_bars(ticker, start, as_of, api_key=api_key)
 
-    # Keep bars through as_of; analogs are STRICTLY before as_of.
+    # Keep bars through as_of for baselines; candidate days still require
+    # cur["date"] < as_of (as_of session itself is never an analog).
     bars = [b for b in bars if b["date"] <= as_of]
 
     if bars:
@@ -230,7 +242,13 @@ def find_analog_days(
     for i in range(1, len(bars)):
         prev = bars[i - 1]
         cur = bars[i]
+        # CRITICAL: never treat as_of / current / future as an analog.
         if cur["date"] >= as_of:
+            continue
+        age_days = (as_of - cur["date"]).days
+        # Also skip yesterday (age=1): today's setup must not use the prior
+        # session of the same name as its only "historical" analog.
+        if age_days < MIN_ANALOG_AGE_DAYS:
             continue
         prev_close = prev["close"]
         if prev_close <= 0:
@@ -249,7 +267,6 @@ def find_analog_days(
         if gap_pct > min_gap_pct:
             gap_gt_min += 1
             if cur["volume"] >= vol_mult * avg_vol:
-                age_days = (as_of - cur["date"]).days
                 candidates.append({
                     "date": cur["date"].isoformat(),
                     "gap_pct": round(gap_pct, 6),
@@ -261,6 +278,12 @@ def find_analog_days(
                     "prev_close": prev_close,
                 })
 
+    # Safety net: drop anything that is not strictly before as_of / too recent
+    candidates = [
+        c for c in candidates
+        if date.fromisoformat(c["date"]) < as_of
+        and int(c.get("age_days") or 0) >= MIN_ANALOG_AGE_DAYS
+    ]
     n_analogs = len(candidates)
     history_flag, confidence = classify_history(actual_lookback_days, n_analogs)
     weighting = "equal" if similarity_strength <= 0 else "similarity_tilt"
@@ -698,7 +721,13 @@ def build_ticker_profile(
     )
     ticker_u = analogs_pack["ticker"]
     as_of = analogs_pack["as_of_date"]
-    analogs = analogs_pack.get("analogs") or []
+    as_of_d = date.fromisoformat(str(as_of)[:10])
+    # Never measure MAE/MFE on as_of / future / too-recent sessions.
+    analogs = [
+        a for a in (analogs_pack.get("analogs") or [])
+        if date.fromisoformat(a["date"]) < as_of_d
+        and (as_of_d - date.fromisoformat(a["date"])).days >= MIN_ANALOG_AGE_DAYS
+    ]
 
     per_day: list[dict] = []
     skipped: list[dict] = []
@@ -745,20 +774,31 @@ def build_ticker_profile(
     # Flag / confidence from lookback + measured analogs (fallback: finder count).
     lookback_days = int(analogs_pack.get("actual_lookback_days") or 0)
     lookback_start = analogs_pack.get("actual_lookback_start_date")
-    analog_count_for_flag = n if n > 0 else len(analogs)
+    # Flag on finder count (intended sample), not only measured — a single
+    # measurable day must not look like a full profile.
+    finder_n = len(analogs)
+    analog_count_for_flag = finder_n
     history_flag, conf = classify_history(lookback_days, analog_count_for_flag)
+    stats_meaningful = history_flag != "**" and conf != "INSUFFICIENT"
 
-    if n == 0:
+    if n == 0 or not stats_meaningful:
+        # Still persist per_analog for audit when n>0, but do NOT publish
+        # percentiles / win-rate / R:R that look confident on n<3.
+        note = (
+            f"n={finder_n} analog(s), not meaningful — insufficient sample "
+            f"(need ≥{MIN_ANALOGS_USABLE}). Informational flag only."
+        )
         profile = {
             "ticker": ticker_u,
             "as_of_date": as_of,
             "informational_only": True,
-            "confidence": conf,
-            "history_flag": history_flag,
-            "analog_count": 0,
+            "stats_meaningful": False,
+            "confidence": conf if finder_n < MIN_ANALOGS_USABLE else "INSUFFICIENT",
+            "history_flag": "**" if finder_n < MIN_ANALOGS_USABLE else history_flag,
+            "analog_count": finder_n,
             "actual_lookback_days": lookback_days,
             "actual_lookback_start_date": lookback_start,
-            "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
+            "flag": "INSUFFICIENT_HISTORY",
             "analog_finder": {
                 "flag": analogs_pack.get("flag"),
                 "history_flag": analogs_pack.get("history_flag"),
@@ -767,13 +807,32 @@ def build_ticker_profile(
                 "weight_sum": analogs_pack.get("weight_sum"),
             },
             "entry_proxy_min": entry_proxy_min,
-            "per_analog": [],
+            "n_analogs_finder": finder_n,
+            "n_analogs_measured": n,
+            "per_analog": per_day,  # audit trail only; not for summary metrics
             "skipped": skipped,
             "percentiles": {},
             "hit_rates": {},
             "bracket": {},
-            "sanity": {"ok": False, "checks": ["no measurable analog days"]},
+            "outcomes": {
+                "n_total": n,
+                "n_finder": finder_n,
+                "win_rate": None,
+                "win_rate_pct_display": None,
+                "reward_risk": None,
+                "rr_warning": None,
+                "note": note,
+            },
+            "sanity": {
+                "ok": False,
+                "checks": [note],
+            },
         }
+        # Keep history_flag / confidence consistent via classify_history
+        profile["history_flag"] = history_flag
+        profile["confidence"] = conf
+        if history_flag == "**":
+            profile["flag"] = "INSUFFICIENT_HISTORY"
         return profile
 
     maes = [r["mae_pct"] for r in per_day]
@@ -846,6 +905,7 @@ def build_ticker_profile(
         "ticker": ticker_u,
         "as_of_date": as_of,
         "informational_only": True,
+        "stats_meaningful": True,
         "confidence": conf,
         "history_flag": history_flag,
         "analog_count": n,
