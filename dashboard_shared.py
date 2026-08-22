@@ -23,7 +23,7 @@ if str(CANDIDATES_DIR) not in sys.path:
 from candidates.supabase_sync import SupabaseSync  # noqa: E402
 
 PROFILES_DIR = ROOT / "profiles"
-SYSTEM_VERSION = "1.3.6"
+SYSTEM_VERSION = "1.3.7"
 _SUPABASE_SYNC_API = "watchlist-v2"
 # Match ticker_profiler.RR_WARN_THRESHOLD — target / safe_max_stop
 RR_WARN_THRESHOLD = 1.5
@@ -125,31 +125,49 @@ def format_ticker_with_history(ticker: str) -> str:
     return t
 
 
-def profile_rr_unfavorable(ticker: str) -> bool:
+def format_profile_rr_cell(ticker: str) -> str:
     """
-    True when Live Status should show ⚠️ next to the ticker:
-      - unfavorable R:R (target < RR_WARN_THRESHOLD × safe_max_stop), OR
-      - history_flag '**' / INSUFFICIENT
-    Missing or unreadable profile → False (no icon, no crash).
+    Live Status R:R column text (display only):
+
+      meaningful R:R >= 1.5 → "1.80"
+      meaningful R:R < 1.5  → "0.74 ⚠️"
+      insufficient / stats suppressed → "n/a"
+      missing profile → "" (blank)
+
+    Never show ⚠️ for insufficient profiles — that would imply bad R:R
+    when the truth is unknown. The ticker's ** flag already marks no data.
     """
     try:
         profile = load_profile(ticker)
     except Exception:
-        return False
+        return ""
     if not profile:
-        return False
+        return ""
     try:
         if _profile_insufficient(profile):
-            return True
+            return "n/a"
+        if profile.get("stats_meaningful") is False:
+            return "n/a"
         outcomes = profile.get("outcomes") or {}
-        if outcomes.get("rr_warning"):
-            return True
         rr = outcomes.get("reward_risk")
-        if rr is not None and float(rr) < RR_WARN_THRESHOLD:
-            return True
+        if rr is None:
+            return "n/a"
+        rr_f = float(rr)
+        text = f"{rr_f:.2f}"
+        if rr_f < RR_WARN_THRESHOLD:
+            return f"{text} ⚠️"
+        return text
     except Exception:
-        return False
-    return False
+        return ""
+
+
+def profile_rr_unfavorable(ticker: str) -> bool:
+    """
+    True when a meaningful profile has R:R < RR_WARN_THRESHOLD.
+    Insufficient / missing profile → False (not a bad-R:R warning).
+    """
+    cell = format_profile_rr_cell(ticker)
+    return cell.endswith("⚠️")
 
 
 def list_cached_profile_tickers() -> list[str]:

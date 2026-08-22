@@ -50,12 +50,12 @@ from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
 from dashboard_shared import (
     compute_and_save_profile,
     et_today,
+    format_profile_rr_cell,
     format_ticker_with_history,
     list_cached_profile_tickers,
     load_profile,
     load_todays_watchlist,
     profile_path,
-    profile_rr_unfavorable,
 )
 
 STARTING_POOL = 3000.0
@@ -345,7 +345,7 @@ def _trade_fill_columns(trade: dict | None) -> dict[str, str]:
 
 
 def _style_watchlist(df: pd.DataFrame):
-    """Gap%/P&L green/red; money columns right-aligned; subtle header."""
+    """Gap%/P&L green/red; R:R warn amber; money columns right-aligned."""
     money_cols = [c for c in ("Gap %", "Vol Ratio", "Score", "Rank",
                               "Entry", "Stop", "Target", "P&L") if c in df.columns]
 
@@ -365,9 +365,21 @@ def _style_watchlist(df: pd.DataFrame):
                 return "color: #00FF88; font-weight: bold"
         return ""
 
+    def _rr_cell(val: str) -> str:
+        text = str(val)
+        if text in {"", "—", "None"}:
+            return "color: #666666"
+        if text == "n/a":
+            return "color: #888888"
+        if "⚠️" in text:
+            return "color: #FFAA33; font-weight: bold"
+        return "color: #00FF88"
+
     styled = df.style.map(_color_gap, subset=["Gap %"])
     if "P&L" in df.columns:
         styled = styled.map(_pnl_cell, subset=["P&L"])
+    if "R:R" in df.columns:
+        styled = styled.map(_rr_cell, subset=["R:R"])
     styled = styled.set_properties(
         subset=money_cols,
         **{"text-align": "right"},
@@ -621,11 +633,10 @@ def tab_live_status(trades: list, pool_history: list) -> None:
             ticker = str(r.get("ticker") or "").upper()
             trade = trades_today.get(ticker)
             fills = _trade_fill_columns(trade)
-            rr_flag = "⚠️" if profile_rr_unfavorable(ticker) else ""
             wl_rows.append({
                 "Rank": int(r.get("rank") or 0),
                 "Ticker": format_ticker_with_history(ticker),
-                "R:R": rr_flag,
+                "R:R": format_profile_rr_cell(ticker),
                 "Gap %": f"+{gap_pct_display:.1f}%",
                 "Vol Ratio": f"{vol_f:.1f}x",
                 "Score": f"{score_f:.0f}",
@@ -655,9 +666,9 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "R:R": st.column_config.TextColumn(
                     "R:R",
                     help=(
-                        "⚠️ = unfavorable reward:risk (target < 1.5× "
-                        "safe-max stop) OR history_flag **. Blank if no "
-                        "profile. Details on Ticker Profiles tab."
+                        "target / safe-max-stop; <1.5 = reward may not "
+                        "justify stop width. Shows number + ⚠️ when below "
+                        "1.5; n/a when profile is insufficient (no R:R)."
                     ),
                     width="small",
                 ),
