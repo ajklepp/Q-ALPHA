@@ -197,17 +197,16 @@
       "n": 3
     },
     "failure_mae_p50_display": 4.216,
-    "reward_risk": 0.012,
+    "reward_risk": null,
     "rr_warn_threshold": 1.5,
-    "rr_warning": "R:R 0.01 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
+    "rr_warning": null
   },
   "sanity": {
     "ok": true,
     "checks": [
       "OK: MAE p50 <= p75 <= p90 (equal-weight)",
       "OK: tier1 <= tier2 <= tier3 <= tier4",
-      "OK: target > 0",
-      "WARN: R:R 0.01 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
+      "OK: target > 0"
     ]
   }
 }

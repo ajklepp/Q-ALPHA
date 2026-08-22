@@ -783,7 +783,7 @@ def outcome_analytics(
 
     target = float(bracket.get("target_pct") or 0.0)
     safe = float(bracket.get("safe_max_stop_pct") or 0.0)
-    rr = (target / safe) if safe > 0 else None
+    rr = (target / safe) if (safe > 0 and n_w > 0) else None
     rr_warning = None
     if rr is not None and rr < RR_WARN_THRESHOLD:
         rr_warning = (

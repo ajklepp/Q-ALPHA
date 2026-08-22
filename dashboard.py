@@ -1139,7 +1139,8 @@ def tab_ticker_profiles() -> None:
         return
 
     rr_warn = outcomes.get("rr_warning")
-    if rr_warn:
+    n_winners = ((outcomes.get("winner_mfe") or {}).get("n") or 0)
+    if rr_warn and n_winners > 0:
         st.error(f"⚠️ R:R warning ({ticker}): {rr_warn}")
     elif outcomes.get("reward_risk") is not None:
         st.success(
@@ -1147,20 +1148,24 @@ def tab_ticker_profiles() -> None:
             f"(target / safe-max stop) · {display_name}"
         )
 
+    def _pct_metric(value) -> str:
+        """Format a display-% metric; null → em dash (not 'None%')."""
+        return "—" if value is None else f"{value}%"
+
     o1, o2, o3 = st.columns(3)
     o1.metric(
         "Win rate",
-        f"{outcomes.get('win_rate_pct_display', '—')}%",
+        _pct_metric(outcomes.get("win_rate_pct_display")),
         help=outcomes.get("win_definition", "held close > entry"),
     )
     o2.metric(
         "Winner MFE p50",
-        f"{outcomes.get('winner_mfe_p50_display', '—')}%",
+        _pct_metric(outcomes.get("winner_mfe_p50_display")),
         help="Median MFE among days that closed above entry",
     )
     o3.metric(
         "Failure MAE p50",
-        f"{outcomes.get('failure_mae_p50_display', '—')}%",
+        _pct_metric(outcomes.get("failure_mae_p50_display")),
         help="Median MAE among days that closed below entry",
     )
 
