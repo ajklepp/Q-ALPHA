@@ -1344,15 +1344,15 @@ def _generate_watchlist_profiles(candidates: list[dict]) -> None:
         try:
             profile = build_ticker_profile(ticker)
             out = save_profile_json(profile)
-            n = profile.get("n_analogs_measured", 0)
+            n = profile.get("analog_count", profile.get("n_analogs_measured", 0))
             conf = profile.get("confidence", "?")
-            flag = profile.get("flag") or (profile.get("analog_finder") or {}).get("flag")
-            detail = f"{n} analogs, confidence={conf}"
-            if flag:
-                detail += f", flag={flag}"
-            # Always write — even INSUFFICIENT_HISTORY — so the Profiles tab
-            # can show the flag instead of an empty "no profile" state.
-            print(f"  Profile generated for {ticker} ({detail}) → {out.name}")
+            hf = profile.get("history_flag") or ""
+            lb = profile.get("actual_lookback_days")
+            label = f"{ticker}{(' ' + hf) if hf else ''}"
+            detail = f"{n} analogs, confidence={conf}, lookback={lb}d"
+            if hf:
+                detail += f", history_flag={hf!r}"
+            print(f"  Profile generated for {label} ({detail}) → {out.name}")
         except Exception as exc:
             print(f"  Profile skipped for {ticker}: {exc}")
             traceback.print_exc()

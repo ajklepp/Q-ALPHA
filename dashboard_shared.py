@@ -23,7 +23,7 @@ if str(CANDIDATES_DIR) not in sys.path:
 from candidates.supabase_sync import SupabaseSync  # noqa: E402
 
 PROFILES_DIR = ROOT / "profiles"
-SYSTEM_VERSION = "1.3.3"
+SYSTEM_VERSION = "1.3.4"
 _SUPABASE_SYNC_API = "watchlist-v2"
 # Match ticker_profiler.RR_WARN_THRESHOLD — target / safe_max_stop
 RR_WARN_THRESHOLD = 1.5
@@ -78,22 +78,58 @@ def load_profile(ticker: str) -> dict | None:
 
 
 def _profile_insufficient(profile: dict) -> bool:
-    """True if profile is flagged INSUFFICIENT_HISTORY / confidence INSUFFICIENT."""
+    """True if profile is ** / INSUFFICIENT (informational-only sample)."""
+    if profile.get("history_flag") == "**":
+        return True
     if profile.get("flag") == "INSUFFICIENT_HISTORY":
         return True
     if profile.get("confidence") == "INSUFFICIENT":
         return True
     finder = profile.get("analog_finder") or {}
+    if finder.get("history_flag") == "**":
+        return True
     if finder.get("flag") == "INSUFFICIENT_HISTORY":
         return True
     return False
+
+
+def profile_history_flag(ticker: str) -> str:
+    """Return history_flag from cached profile ('' | '*' | '**'), else ''."""
+    try:
+        profile = load_profile(ticker)
+    except Exception:
+        return ""
+    if not profile:
+        return ""
+    flag = profile.get("history_flag")
+    if flag is None:
+        # Back-compat: derive from confidence / old flag
+        if _profile_insufficient(profile):
+            return "**"
+        conf = profile.get("confidence")
+        n = int(profile.get("analog_count") or profile.get("n_analogs_measured") or 0)
+        if conf in ("MEDIUM", "LOW") or (0 < n < 10):
+            return "*"
+        return ""
+    return str(flag)
+
+
+def format_ticker_with_history(ticker: str) -> str:
+    """Append history_flag: 'ABUS', 'USDE *', or 'XYZ **'."""
+    t = str(ticker or "").upper().strip()
+    if not t:
+        return t
+    flag = profile_history_flag(t)
+    if flag:
+        return f"{t} {flag}"
+    return t
 
 
 def profile_rr_unfavorable(ticker: str) -> bool:
     """
     True when Live Status should show ⚠️ next to the ticker:
       - unfavorable R:R (target < RR_WARN_THRESHOLD × safe_max_stop), OR
-      - INSUFFICIENT_HISTORY / confidence INSUFFICIENT
+      - history_flag '**' / INSUFFICIENT
     Missing or unreadable profile → False (no icon, no crash).
     """
     try:

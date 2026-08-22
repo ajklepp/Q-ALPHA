@@ -31,7 +31,11 @@ POLYGON_BASE = "https://api.polygon.io"
 ET = ZoneInfo("America/New_York")
 
 # ── Tunable parameters (retune without rewriting logic) ─────────────────────
-HISTORY_CALENDAR_DAYS = 365 * 2 + 30          # ~2 years (= the recency filter)
+# Request up to ~2 years; young tickers use whatever history exists (adaptive).
+HISTORY_MAX_CALENDAR_DAYS = 365 * 2 + 30      # hard cap on lookback request
+HISTORY_CALENDAR_DAYS = HISTORY_MAX_CALENDAR_DAYS  # alias for callers
+# Reliable window ≈ 1.75 years of calendar history in the sample
+RELIABLE_LOOKBACK_DAYS = int(1.75 * 365)      # ~639 calendar days
 VOLUME_BASELINE_DAYS = 5                      # trailing avg vol window (excl. day)
 MIN_GAP_PCT = 0.03                            # >3% open gap vs prior close
 VOL_MULT = 1.75                               # unusual-vol: day vol >= this × baseline
@@ -39,14 +43,12 @@ VOL_MULT = 1.75                               # unusual-vol: day vol >= this × 
 SIMILARITY_GAP_SCALE = 0.05                   # 5pp gap difference → unit distance
 SIMILARITY_VOL_SCALE = 1.0                    # 1.0× vol-ratio difference → unit distance
 # Optional magnitude-similarity tilt (OFF by default → equal weights).
-#   0.0 = every qualifying analog counts the same (RECOMMENDED DEFAULT)
-#   1.0 = full floored-similarity tilt
-# Recency sub-weighting inside the 2yr window was REMOVED — it distorted small
-# samples (e.g. JOBY target collapsed when 2 recent days failed).
 SIMILARITY_STRENGTH = 0.0
-# Floor when similarity tilt is enabled: far analogs keep >= this fraction.
 SIMILARITY_FLOOR = 0.25
-MIN_ANALOGS_FOR_PROFILE = 3                   # below this → INSUFFICIENT_HISTORY
+# Analog-count thresholds for history_flag / confidence
+MIN_ANALOGS_RELIABLE = 10                     # + long lookback → "" / HIGH
+MIN_ANALOGS_USABLE = 3                        # below → "**" / INSUFFICIENT
+MIN_ANALOGS_FOR_PROFILE = MIN_ANALOGS_USABLE  # back-compat alias
 
 # ── Commit 2: MAE/MFE / tier derivation ─────────────────────────────────────
 ENTRY_PROXY_MIN = 3                           # minutes after 9:30 ET → entry proxy
@@ -153,13 +155,39 @@ def _parse_as_of(as_of_date: date | str | None) -> date:
     return date.fromisoformat(str(as_of_date)[:10])
 
 
+def classify_history(
+    actual_lookback_days: int,
+    analog_count: int,
+) -> tuple[str, str]:
+    """
+    Return (history_flag, confidence) from lookback length + analog count.
+
+      ""   reliable: lookback >= ~1.75yr AND analog_count >= 10 → HIGH
+      "*"  limited:  lookback < ~1.75yr OR analog_count in 3..9
+                     → MEDIUM (5-9) or LOW (3-4); still usable
+      "**" insufficient: analog_count < 3 → INSUFFICIENT (informational only)
+
+    Profiles are ALWAYS built when possible; flags communicate certainty.
+    """
+    if analog_count < MIN_ANALOGS_USABLE:
+        return "**", "INSUFFICIENT"
+    young = actual_lookback_days < RELIABLE_LOOKBACK_DAYS
+    small = analog_count < MIN_ANALOGS_RELIABLE
+    if young or small:
+        # Limited but usable
+        if analog_count >= 5:
+            return "*", "MEDIUM"
+        return "*", "LOW"
+    return "", "HIGH"
+
+
 def find_analog_days(
     ticker: str,
     as_of_date: date | str | None = None,
     *,
     today_gap: float | None = None,
     today_vol_ratio: float | None = None,
-    history_calendar_days: int = HISTORY_CALENDAR_DAYS,
+    history_calendar_days: int = HISTORY_MAX_CALENDAR_DAYS,
     volume_baseline_days: int = VOLUME_BASELINE_DAYS,
     min_gap_pct: float = MIN_GAP_PCT,
     vol_mult: float = VOL_MULT,
@@ -169,31 +197,31 @@ def find_analog_days(
     """
     Find analog gap+volume days for `ticker` as of `as_of_date`.
 
-    WEIGHTING
-    ---------
-    The HISTORY_CALENDAR_DAYS (~2yr) window IS the recency filter. There is
-    NO within-window recency decay (removed — it distorted small samples).
+    LOOKBACK (adaptive)
+    -------------------
+    Requests up to history_calendar_days (~2yr cap). Uses whatever daily
+    history Polygon returns — a 10-month IPO uses ~10 months; a 5-year name
+    uses the most recent ~2 years. Records actual_lookback_days /
+    actual_lookback_start_date from the first available bar.
 
-    Default (SIMILARITY_STRENGTH=0): EQUAL WEIGHT — every qualifying analog
-    gets combined_weight = 1/N.
-
-    Optional (SIMILARITY_STRENGTH>0): gentle floored magnitude-similarity tilt
-    via similarity_factor(); still no recency term.
-
-    Returns
-    -------
-    {
-      "ticker", "as_of_date", "flag", "weighting": "equal"|"similarity_tilt",
-      "stats", "analogs": [{date, gap_pct, vol_ratio, similarity_weight,
-                            combined_weight}, ...],
-    }
+    WEIGHTING: equal by default (SIMILARITY_STRENGTH=0). No within-window
+    recency decay — the lookback window itself is the recency filter.
     """
     as_of = _parse_as_of(as_of_date)
-    start = as_of - timedelta(days=history_calendar_days)
+    # Cap the request; Polygon returns only bars that exist (young tickers).
+    req_days = min(int(history_calendar_days), HISTORY_MAX_CALENDAR_DAYS)
+    start = as_of - timedelta(days=req_days)
     bars = fetch_daily_bars(ticker, start, as_of, api_key=api_key)
 
     # Keep bars through as_of; analogs are STRICTLY before as_of.
     bars = [b for b in bars if b["date"] <= as_of]
+
+    if bars:
+        lookback_start = bars[0]["date"]
+        actual_lookback_days = (as_of - lookback_start).days
+    else:
+        lookback_start = None
+        actual_lookback_days = 0
 
     trading_days = len(bars)
     gap_gt_min = 0
@@ -209,8 +237,6 @@ def find_analog_days(
             continue
         gap_pct = (cur["open"] - prev_close) / prev_close
 
-        # Trailing avg volume: prior volume_baseline_days sessions ONLY
-        # (exclude current day — no look-ahead into the analog day's volume).
         if i < volume_baseline_days:
             continue
         baseline_vols = [bars[j]["volume"] for j in range(i - volume_baseline_days, i)]
@@ -236,23 +262,40 @@ def find_analog_days(
                 })
 
     n_analogs = len(candidates)
-    flag = "INSUFFICIENT_HISTORY" if n_analogs < MIN_ANALOGS_FOR_PROFILE else None
+    history_flag, confidence = classify_history(actual_lookback_days, n_analogs)
     weighting = "equal" if similarity_strength <= 0 else "similarity_tilt"
+
+    lookback_meta = {
+        "actual_lookback_days": actual_lookback_days,
+        "actual_lookback_start_date": (
+            lookback_start.isoformat() if lookback_start else None
+        ),
+        "lookback_cap_days": req_days,
+        "trading_days_scanned": trading_days,
+        "analog_count": n_analogs,
+        "history_flag": history_flag,
+        "confidence": confidence,
+    }
 
     if n_analogs == 0:
         return {
             "ticker": ticker.upper(),
             "as_of_date": as_of.isoformat(),
-            "flag": flag or "INSUFFICIENT_HISTORY",
+            "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
+            "history_flag": history_flag,
+            "confidence": confidence,
+            "analog_count": 0,
+            "actual_lookback_days": actual_lookback_days,
+            "actual_lookback_start_date": lookback_meta["actual_lookback_start_date"],
             "weighting": weighting,
             "stats": {
-                "trading_days_scanned": trading_days,
+                **lookback_meta,
                 "gap_gt_min_days": gap_gt_min,
                 "analog_days": 0,
                 "min_gap_pct": min_gap_pct,
                 "vol_mult": vol_mult,
                 "volume_baseline_days": volume_baseline_days,
-                "history_calendar_days": history_calendar_days,
+                "history_calendar_days": req_days,
                 "similarity_strength": similarity_strength,
                 "similarity_floor": SIMILARITY_FLOOR,
                 "recency_weighting": False,
@@ -282,7 +325,6 @@ def find_analog_days(
         ref_vol = med_vol
         ref_source = "median_analog"
 
-    # No recency term. Equal weight unless optional similarity tilt is on.
     raw_sum = 0.0
     for c in candidates:
         sim = similarity_factor(
@@ -293,7 +335,7 @@ def find_analog_days(
             strength=similarity_strength,
         )
         c["similarity_weight"] = sim
-        c["_raw"] = sim  # strength=0 → sim=1.0 for all → equal after normalize
+        c["_raw"] = sim
         raw_sum += c["_raw"]
 
     analogs: list[dict] = []
@@ -313,19 +355,24 @@ def find_analog_days(
     return {
         "ticker": ticker.upper(),
         "as_of_date": as_of.isoformat(),
-        "flag": flag,
+        "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
+        "history_flag": history_flag,
+        "confidence": confidence,
+        "analog_count": n_analogs,
+        "actual_lookback_days": actual_lookback_days,
+        "actual_lookback_start_date": lookback_meta["actual_lookback_start_date"],
         "weighting": weighting,
         "ref_source": ref_source,
         "ref_gap": round(ref_gap, 6),
         "ref_vol_ratio": round(ref_vol, 4),
         "stats": {
-            "trading_days_scanned": trading_days,
+            **lookback_meta,
             "gap_gt_min_days": gap_gt_min,
             "analog_days": n_analogs,
             "min_gap_pct": min_gap_pct,
             "vol_mult": vol_mult,
             "volume_baseline_days": volume_baseline_days,
-            "history_calendar_days": history_calendar_days,
+            "history_calendar_days": req_days,
             "similarity_strength": similarity_strength,
             "similarity_floor": SIMILARITY_FLOOR,
             "recency_weighting": False,
@@ -506,15 +553,26 @@ def unweighted_percentile(values: list[float], pct: float) -> float | None:
     return weighted_percentile(values, [1.0] * n, pct)
 
 
-def confidence_label(n_analogs: int) -> str:
-    """Map analog count to profile confidence band."""
-    if n_analogs >= 10:
-        return "HIGH"
-    if n_analogs >= 5:
-        return "MEDIUM"
-    if n_analogs >= 3:
-        return "LOW"
-    return "INSUFFICIENT"
+def confidence_label(
+    n_analogs: int,
+    actual_lookback_days: int | None = None,
+) -> str:
+    """
+    Map analog count (+ optional lookback) to confidence band.
+
+    Prefer classify_history() when lookback is known; fallback for callers
+    that only pass analog count.
+    """
+    if actual_lookback_days is None:
+        if n_analogs >= MIN_ANALOGS_RELIABLE:
+            return "HIGH"
+        if n_analogs >= 5:
+            return "MEDIUM"
+        if n_analogs >= MIN_ANALOGS_USABLE:
+            return "LOW"
+        return "INSUFFICIENT"
+    _, conf = classify_history(actual_lookback_days, n_analogs)
+    return conf
 
 
 def derive_bracket(mae_w: dict, mfe_w: dict) -> dict:
@@ -684,7 +742,11 @@ def build_ticker_profile(
         )
 
     n = len(per_day)
-    conf = confidence_label(n)
+    # Flag / confidence from lookback + measured analogs (fallback: finder count).
+    lookback_days = int(analogs_pack.get("actual_lookback_days") or 0)
+    lookback_start = analogs_pack.get("actual_lookback_start_date")
+    analog_count_for_flag = n if n > 0 else len(analogs)
+    history_flag, conf = classify_history(lookback_days, analog_count_for_flag)
 
     if n == 0:
         profile = {
@@ -692,9 +754,15 @@ def build_ticker_profile(
             "as_of_date": as_of,
             "informational_only": True,
             "confidence": conf,
-            "flag": "INSUFFICIENT_HISTORY",
+            "history_flag": history_flag,
+            "analog_count": 0,
+            "actual_lookback_days": lookback_days,
+            "actual_lookback_start_date": lookback_start,
+            "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
             "analog_finder": {
                 "flag": analogs_pack.get("flag"),
+                "history_flag": analogs_pack.get("history_flag"),
+                "confidence": analogs_pack.get("confidence"),
                 "stats": analogs_pack.get("stats"),
                 "weight_sum": analogs_pack.get("weight_sum"),
             },
@@ -779,13 +847,19 @@ def build_ticker_profile(
         "as_of_date": as_of,
         "informational_only": True,
         "confidence": conf,
+        "history_flag": history_flag,
+        "analog_count": n,
+        "actual_lookback_days": lookback_days,
+        "actual_lookback_start_date": lookback_start,
         "weighting": analogs_pack.get("weighting", "equal"),
-        "flag": analogs_pack.get("flag") if conf == "INSUFFICIENT" else None,
+        "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
         "n_analogs_finder": len(analogs),
         "n_analogs_measured": n,
         "entry_proxy_min": entry_proxy_min,
         "analog_finder": {
             "flag": analogs_pack.get("flag"),
+            "history_flag": analogs_pack.get("history_flag"),
+            "confidence": analogs_pack.get("confidence"),
             "weighting": analogs_pack.get("weighting"),
             "stats": analogs_pack.get("stats"),
             "weight_sum": analogs_pack.get("weight_sum"),
@@ -819,21 +893,28 @@ def save_profile_json(profile: dict, path: Path | None = None) -> Path:
 def _print_report(result: dict) -> None:
     """Human-readable proof output for a find_analog_days result."""
     stats = result["stats"]
+    hf = result.get("history_flag") or ""
+    label = f"{result['ticker']}{(' ' + hf) if hf else ''}"
     print(f"\n{'=' * 60}")
-    print(f"ANALOG FINDER — {result['ticker']}  as_of={result['as_of_date']}")
+    print(f"ANALOG FINDER — {label}  as_of={result['as_of_date']}")
     print(f"{'=' * 60}")
     print(f"Weighting: {result.get('weighting')}  "
           f"(recency_weighting={stats.get('recency_weighting')})")
+    print(
+        f"Lookback: {result.get('actual_lookback_days')}d "
+        f"(start={result.get('actual_lookback_start_date')}, "
+        f"cap={stats.get('lookback_cap_days') or stats.get('history_calendar_days')}d)"
+    )
     print(f"Trading days scanned:     {stats['trading_days_scanned']}")
     print(f"Gap > {stats['min_gap_pct']:.0%} days:         {stats['gap_gt_min_days']}")
     print(
         f"Analog days (gap+vol≥{stats['vol_mult']}x): "
         f"{stats['analog_days']}"
     )
-    if result.get("flag"):
-        print(f"FLAG: {result['flag']}")
-    else:
-        print("FLAG: (none — enough analogs for a profile)")
+    print(
+        f"history_flag={hf!r}  confidence={result.get('confidence')}  "
+        f"legacy_flag={result.get('flag')}"
+    )
     print(f"\n{'date':<12} {'gap%':>8} {'vol_r':>8} {'weight':>10}")
     print("-" * 42)
     for a in result["analogs"]:
@@ -843,17 +924,28 @@ def _print_report(result: dict) -> None:
         )
     print("-" * 42)
     print(f"{'weight sum':<12} {'':>8} {'':>8} {result['weight_sum']:10.6f}")
-    print(f"Analogs found: {stats['analog_days']}  (need ≥{MIN_ANALOGS_FOR_PROFILE})")
+    print(
+        f"Analogs found: {stats['analog_days']}  "
+        f"(** if <{MIN_ANALOGS_USABLE}; reliable if ≥{MIN_ANALOGS_RELIABLE} "
+        f"+ lookback ≥{RELIABLE_LOOKBACK_DAYS}d)"
+    )
 
 
 def _print_profile(profile: dict) -> None:
     """Human-readable Commit-2 proof output."""
+    hf = profile.get("history_flag") or ""
+    label = f"{profile['ticker']}{(' ' + hf) if hf else ''}"
     print(f"\n{'=' * 72}")
     print(
-        f"MAE/MFE PROFILE — {profile['ticker']}  as_of={profile['as_of_date']}  "
+        f"MAE/MFE PROFILE — {label}  as_of={profile['as_of_date']}  "
         f"confidence={profile['confidence']}"
     )
     print(f"{'=' * 72}")
+    print(
+        f"Lookback: {profile.get('actual_lookback_days')}d "
+        f"(start={profile.get('actual_lookback_start_date')})  "
+        f"history_flag={hf!r}  analog_count={profile.get('analog_count')}"
+    )
     print(
         f"Analogs: finder={profile.get('n_analogs_finder')}  "
         f"measured={profile.get('n_analogs_measured')}  "

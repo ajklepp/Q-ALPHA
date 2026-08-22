@@ -1,0 +1,51 @@
+{
+  "ticker": "ABUS",
+  "as_of_date": "2026-08-21",
+  "flag": "INSUFFICIENT_HISTORY",
+  "history_flag": "**",
+  "confidence": "INSUFFICIENT",
+  "analog_count": 2,
+  "actual_lookback_days": 760,
+  "actual_lookback_start_date": "2024-07-22",
+  "weighting": "equal",
+  "ref_source": "median_analog",
+  "ref_gap": 0.04502,
+  "ref_vol_ratio": 1.7646,
+  "stats": {
+    "actual_lookback_days": 760,
+    "actual_lookback_start_date": "2024-07-22",
+    "lookback_cap_days": 760,
+    "trading_days_scanned": 524,
+    "analog_count": 2,
+    "history_flag": "**",
+    "confidence": "INSUFFICIENT",
+    "gap_gt_min_days": 4,
+    "analog_days": 2,
+    "min_gap_pct": 0.03,
+    "vol_mult": 1.75,
+    "volume_baseline_days": 5,
+    "history_calendar_days": 760,
+    "similarity_strength": 0.0,
+    "similarity_floor": 0.25,
+    "recency_weighting": false
+  },
+  "analogs": [
+    {
+      "date": "2026-04-15",
+      "gap_pct": 0.048276,
+      "vol_ratio": 1.7701,
+      "age_days": 128,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.5
+    },
+    {
+      "date": "2026-05-13",
+      "gap_pct": 0.041763,
+      "vol_ratio": 1.7591,
+      "age_days": 100,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.5
+    }
+  ],
+  "weight_sum": 1.0
+}

@@ -50,6 +50,7 @@ from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
 from dashboard_shared import (
     compute_and_save_profile,
     et_today,
+    format_ticker_with_history,
     list_cached_profile_tickers,
     load_profile,
     load_todays_watchlist,
@@ -623,7 +624,7 @@ def tab_live_status(trades: list, pool_history: list) -> None:
             rr_flag = "⚠️" if profile_rr_unfavorable(ticker) else ""
             wl_rows.append({
                 "Rank": int(r.get("rank") or 0),
-                "Ticker": ticker,
+                "Ticker": format_ticker_with_history(ticker),
                 "R:R": rr_flag,
                 "Gap %": f"+{gap_pct_display:.1f}%",
                 "Vol Ratio": f"{vol_f:.1f}x",
@@ -642,14 +643,21 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "Rank": st.column_config.NumberColumn(
                     "Rank", width="small", format="%d",
                 ),
-                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "Ticker": st.column_config.TextColumn(
+                    "Ticker",
+                    help=(
+                        "Symbol + history_flag: none = reliable, "
+                        "* = limited history/sample, "
+                        "** = insufficient (informational only)."
+                    ),
+                    width="small",
+                ),
                 "R:R": st.column_config.TextColumn(
                     "R:R",
                     help=(
-                        "⚠️ = setup caution from profile JSON: unfavorable "
-                        "reward:risk (target < 1.5× safe-max stop) OR "
-                        "INSUFFICIENT_HISTORY. Blank if no profile. "
-                        "Details on Ticker Profiles tab."
+                        "⚠️ = unfavorable reward:risk (target < 1.5× "
+                        "safe-max stop) OR history_flag **. Blank if no "
+                        "profile. Details on Ticker Profiles tab."
                     ),
                     width="small",
                 ),
@@ -950,6 +958,10 @@ def tab_ticker_profiles() -> None:
         "Profiles are **precomputed** at the 9:20 scan (and via Refresh). "
         "This tab does **not** call Polygon on load."
     )
+    st.caption(
+        "History flags: `*` limited history/small sample · "
+        "`**` insufficient — informational only"
+    )
 
     today = et_today()
     watch_tickers: list[str] = []
@@ -1023,10 +1035,13 @@ def tab_ticker_profiles() -> None:
         ):
             try:
                 profile = compute_and_save_profile(ticker)
+                hf = profile.get("history_flag") or ""
                 st.success(
-                    f"Saved {ticker} profile "
-                    f"({profile.get('n_analogs_measured', '?')} analogs, "
-                    f"{profile.get('confidence', '?')})"
+                    f"Saved {format_ticker_with_history(ticker)} profile "
+                    f"({profile.get('analog_count', profile.get('n_analogs_measured', '?'))} "
+                    f"analogs, {profile.get('confidence', '?')}"
+                    f"{', lookback=' + str(profile.get('actual_lookback_days')) + 'd' if profile.get('actual_lookback_days') is not None else ''}"
+                    f"{', flag=' + repr(hf) if hf else ''})"
                 )
                 st.rerun()
             except Exception as exc:
@@ -1043,15 +1058,36 @@ def tab_ticker_profiles() -> None:
 
     st.divider()
     conf = profile.get("confidence", "?")
-    n_m = profile.get("n_analogs_measured") or profile.get("n_analogs_finder") or 0
+    n_m = (
+        profile.get("analog_count")
+        or profile.get("n_analogs_measured")
+        or profile.get("n_analogs_finder")
+        or 0
+    )
     as_of = profile.get("as_of_date", "—")
     weighting = profile.get("weighting", "equal")
+    hist_flag = profile.get("history_flag") or ""
+    lookback_d = profile.get("actual_lookback_days")
+    display_name = format_ticker_with_history(ticker)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Analogs measured", n_m)
+    st.subheader(display_name)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Analogs", n_m)
     m2.metric("Confidence", conf)
-    m3.metric("As of", as_of)
-    m4.metric("Weighting", weighting)
+    m3.metric("History flag", hist_flag if hist_flag else "(none)")
+    m4.metric("Lookback days", lookback_d if lookback_d is not None else "—")
+    m5.metric("As of", as_of)
+
+    if hist_flag == "**":
+        st.warning(
+            f"**{display_name}** — insufficient analogs; profile is "
+            "informational only (not reliable)."
+        )
+    elif hist_flag == "*":
+        st.info(
+            f"**{display_name}** — limited history and/or small sample; "
+            "usable but less certain."
+        )
 
     if profile.get("informational_only", True):
         st.caption("INFORMATIONAL ONLY — not wired into order / entry logic.")
@@ -1065,11 +1101,11 @@ def tab_ticker_profiles() -> None:
 
     rr_warn = outcomes.get("rr_warning")
     if rr_warn:
-        st.error(f"⚠️ R:R warning: {rr_warn}")
+        st.error(f"⚠️ R:R warning ({display_name}): {rr_warn}")
     elif outcomes.get("reward_risk") is not None:
         st.success(
             f"Reward:Risk = {outcomes.get('reward_risk')} "
-            f"(target / safe-max stop)"
+            f"(target / safe-max stop) · {display_name}"
         )
 
     o1, o2, o3 = st.columns(3)

@@ -1,0 +1,139 @@
+{
+  "ticker": "JOBY",
+  "as_of_date": "2026-08-21",
+  "flag": null,
+  "history_flag": "",
+  "confidence": "HIGH",
+  "analog_count": 13,
+  "actual_lookback_days": 760,
+  "actual_lookback_start_date": "2024-07-22",
+  "weighting": "equal",
+  "ref_source": "median_analog",
+  "ref_gap": 0.071326,
+  "ref_vol_ratio": 2.575,
+  "stats": {
+    "actual_lookback_days": 760,
+    "actual_lookback_start_date": "2024-07-22",
+    "lookback_cap_days": 760,
+    "trading_days_scanned": 524,
+    "analog_count": 13,
+    "history_flag": "",
+    "confidence": "HIGH",
+    "gap_gt_min_days": 52,
+    "analog_days": 13,
+    "min_gap_pct": 0.03,
+    "vol_mult": 1.75,
+    "volume_baseline_days": 5,
+    "history_calendar_days": 760,
+    "similarity_strength": 0.0,
+    "similarity_floor": 0.25,
+    "recency_weighting": false
+  },
+  "analogs": [
+    {
+      "date": "2024-10-02",
+      "gap_pct": 0.185417,
+      "vol_ratio": 11.1262,
+      "age_days": 688,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2024-10-23",
+      "gap_pct": 0.032362,
+      "vol_ratio": 1.8098,
+      "age_days": 667,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2024-11-11",
+      "gap_pct": 0.03263,
+      "vol_ratio": 2.7381,
+      "age_days": 648,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2024-11-25",
+      "gap_pct": 0.03385,
+      "vol_ratio": 2.0268,
+      "age_days": 634,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-05-28",
+      "gap_pct": 0.165698,
+      "vol_ratio": 9.8783,
+      "age_days": 450,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-06-09",
+      "gap_pct": 0.10468,
+      "vol_ratio": 1.9555,
+      "age_days": 438,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-06-30",
+      "gap_pct": 0.0625,
+      "vol_ratio": 2.6685,
+      "age_days": 417,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-07-16",
+      "gap_pct": 0.071326,
+      "vol_ratio": 2.575,
+      "age_days": 401,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-08-04",
+      "gap_pct": 0.071096,
+      "vol_ratio": 2.5984,
+      "age_days": 382,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-08-15",
+      "gap_pct": 0.087507,
+      "vol_ratio": 1.7668,
+      "age_days": 371,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2025-09-12",
+      "gap_pct": 0.078216,
+      "vol_ratio": 2.7207,
+      "age_days": 343,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2026-02-26",
+      "gap_pct": 0.080448,
+      "vol_ratio": 1.9506,
+      "age_days": 176,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    },
+    {
+      "date": "2026-06-15",
+      "gap_pct": 0.052459,
+      "vol_ratio": 1.9107,
+      "age_days": 67,
+      "similarity_weight": 1.0,
+      "combined_weight": 0.076923
+    }
+  ],
+  "weight_sum": 0.999999
+}
