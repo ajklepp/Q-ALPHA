@@ -646,8 +646,10 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "R:R": st.column_config.TextColumn(
                     "R:R",
                     help=(
-                        "⚠️ = profile reward:risk unfavorable "
-                        "(target < 1.5× safe-max stop). Details on Ticker Profiles."
+                        "⚠️ = setup caution from profile JSON: unfavorable "
+                        "reward:risk (target < 1.5× safe-max stop) OR "
+                        "INSUFFICIENT_HISTORY. Blank if no profile. "
+                        "Details on Ticker Profiles tab."
                     ),
                     width="small",
                 ),

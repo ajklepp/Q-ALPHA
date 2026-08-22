@@ -23,7 +23,7 @@ if str(CANDIDATES_DIR) not in sys.path:
 from candidates.supabase_sync import SupabaseSync  # noqa: E402
 
 PROFILES_DIR = ROOT / "profiles"
-SYSTEM_VERSION = "1.3.2"
+SYSTEM_VERSION = "1.3.3"
 _SUPABASE_SYNC_API = "watchlist-v2"
 # Match ticker_profiler.RR_WARN_THRESHOLD — target / safe_max_stop
 RR_WARN_THRESHOLD = 1.5
@@ -77,24 +77,42 @@ def load_profile(ticker: str) -> dict | None:
         return None
 
 
+def _profile_insufficient(profile: dict) -> bool:
+    """True if profile is flagged INSUFFICIENT_HISTORY / confidence INSUFFICIENT."""
+    if profile.get("flag") == "INSUFFICIENT_HISTORY":
+        return True
+    if profile.get("confidence") == "INSUFFICIENT":
+        return True
+    finder = profile.get("analog_finder") or {}
+    if finder.get("flag") == "INSUFFICIENT_HISTORY":
+        return True
+    return False
+
+
 def profile_rr_unfavorable(ticker: str) -> bool:
     """
-    True when cached profile has unfavorable reward:risk
-    (target < RR_WARN_THRESHOLD × safe_max_stop), for main-watchlist ⚠️ flag.
-    Missing profile → False (no false alarms).
+    True when Live Status should show ⚠️ next to the ticker:
+      - unfavorable R:R (target < RR_WARN_THRESHOLD × safe_max_stop), OR
+      - INSUFFICIENT_HISTORY / confidence INSUFFICIENT
+    Missing or unreadable profile → False (no icon, no crash).
     """
-    profile = load_profile(ticker)
+    try:
+        profile = load_profile(ticker)
+    except Exception:
+        return False
     if not profile:
         return False
-    outcomes = profile.get("outcomes") or {}
-    if outcomes.get("rr_warning"):
-        return True
-    rr = outcomes.get("reward_risk")
     try:
+        if _profile_insufficient(profile):
+            return True
+        outcomes = profile.get("outcomes") or {}
+        if outcomes.get("rr_warning"):
+            return True
+        rr = outcomes.get("reward_risk")
         if rr is not None and float(rr) < RR_WARN_THRESHOLD:
             return True
-    except (TypeError, ValueError):
-        pass
+    except Exception:
+        return False
     return False
 
 
