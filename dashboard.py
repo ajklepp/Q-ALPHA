@@ -179,11 +179,14 @@ def get_last_health(component: str, health: list) -> dict | None:
 
 
 def _next_scan_countdown() -> str:
-    """Countdown to next 8:30 AM ET scan."""
+    """Countdown to next weekday 9:20 AM ET scan (skips Sat/Sun)."""
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
-    next_scan = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
+    next_scan = now_et.replace(hour=9, minute=20, second=0, microsecond=0)
     if now_et >= next_scan:
+        next_scan = next_scan + timedelta(days=1)
+    # Scan only runs Mon–Fri — roll weekend targets forward to Monday 9:20.
+    while next_scan.weekday() >= 5:  # 5=Sat, 6=Sun
         next_scan = next_scan + timedelta(days=1)
     diff = next_scan - now_et
     hours, rem = divmod(int(diff.total_seconds()), 3600)
