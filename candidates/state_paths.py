@@ -4,11 +4,13 @@ Shared state file paths for local dev vs Modal volume.
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 CANDIDATES_DIR = Path(__file__).resolve().parent
 VOLUME_MOUNT = "/state"
+ET = ZoneInfo("America/New_York")
 
 
 def state_path(filename: str) -> Path:
@@ -21,8 +23,14 @@ def state_path(filename: str) -> Path:
 
 
 def is_trading_day(check_date: date | None = None) -> bool:
-    """Return False on weekends and major US market holidays."""
-    today = check_date or date.today()
+    """
+    Return False on weekends and major US market holidays.
+
+    Default "today" is the US/Eastern calendar date (same TZ as the agent
+    scheduler) — never the machine's local date, which can disagree with ET
+    near midnight and break the weekend guard.
+    """
+    today = check_date if check_date is not None else datetime.now(ET).date()
 
     if today.weekday() >= 5:
         return False
