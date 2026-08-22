@@ -31,11 +31,13 @@ POLYGON_BASE = "https://api.polygon.io"
 ET = ZoneInfo("America/New_York")
 
 # ── Tunable parameters (retune without rewriting logic) ─────────────────────
-# Adaptive lookback: use whatever history exists, up to this cap.
-# 5yr (not 2yr): quiet names like ABUS only form enough gap+vol analogs
-# over a longer window; 2yr left ABUS at n=2 (**) despite a 2016 listing.
-HISTORY_MAX_CALENDAR_DAYS = 365 * 5 + 30      # hard cap on lookback request
-HISTORY_CALENDAR_DAYS = HISTORY_MAX_CALENDAR_DAYS  # alias for callers
+# Lookback: default ~2yr (current regime). If too few analogs, step-extend
+# up to a hard 3yr cap — never 5yr (avoids deep COVID/meme-era regime mix).
+HISTORY_DEFAULT_CALENDAR_DAYS = 365 * 2 + 30  # start here (~2.1yr)
+HISTORY_MAX_CALENDAR_DAYS = 365 * 3 + 30      # hard cap (~3.1yr)
+HISTORY_CALENDAR_DAYS = HISTORY_DEFAULT_CALENDAR_DAYS  # alias for callers
+LOOKBACK_EXTEND_STEP_DAYS = 90                # grow window in ~quarter-year steps
+MIN_ANALOGS_TARGET = 8                        # extend beyond 2yr if below this
 # Reliable window ≈ 1.75 years of calendar history in the sample
 RELIABLE_LOOKBACK_DAYS = int(1.75 * 365)      # ~639 calendar days
 VOLUME_BASELINE_DAYS = 5                      # trailing avg vol window (excl. day)
@@ -164,90 +166,64 @@ def _parse_as_of(as_of_date: date | str | None) -> date:
 def classify_history(
     actual_lookback_days: int,
     analog_count: int,
-) -> tuple[str, str]:
+    *,
+    lookback_extended: bool = False,
+) -> tuple[str, str, str | None]:
     """
-    Return (history_flag, confidence) from lookback length + analog count.
+    Return (history_flag, confidence, lookback_note).
 
-      ""   reliable: lookback >= ~1.75yr AND analog_count >= 10 → HIGH
-      "*"  limited:  lookback < ~1.75yr OR analog_count in 3..9
-                     → MEDIUM (5-9) or LOW (3-4); still usable
+      ""   reliable: within default ~2yr, lookback >= ~1.75yr, analogs >= 10 → HIGH
+      "*"  limited:  young ticker, small sample (3-9), OR lookback extended
+                     past 2yr to reach MIN_ANALOGS_TARGET (older-regime note)
       "**" insufficient: analog_count < 3 → INSUFFICIENT (informational only)
 
     Profiles are ALWAYS built when possible; flags communicate certainty.
     """
     if analog_count < MIN_ANALOGS_USABLE:
-        return "**", "INSUFFICIENT"
+        return "**", "INSUFFICIENT", None
+
+    if lookback_extended:
+        yrs = round(actual_lookback_days / 365.25, 2)
+        note = (
+            f"used {yrs}yr to reach {analog_count} analogs - "
+            f"includes older-regime data"
+        )
+        # Never HIGH when leaning on data beyond the 2yr default window
+        if analog_count >= 5:
+            return "*", "MEDIUM", note
+        return "*", "LOW", note
+
     young = actual_lookback_days < RELIABLE_LOOKBACK_DAYS
     small = analog_count < MIN_ANALOGS_RELIABLE
     if young or small:
-        # Limited but usable
         if analog_count >= 5:
-            return "*", "MEDIUM"
-        return "*", "LOW"
-    return "", "HIGH"
+            return "*", "MEDIUM", None
+        return "*", "LOW", None
+    return "", "HIGH", None
 
 
-def find_analog_days(
-    ticker: str,
-    as_of_date: date | str | None = None,
+def _scan_gap_vol_candidates(
+    bars: list[dict],
+    as_of: date,
     *,
-    today_gap: float | None = None,
-    today_vol_ratio: float | None = None,
-    history_calendar_days: int = HISTORY_MAX_CALENDAR_DAYS,
-    volume_baseline_days: int = VOLUME_BASELINE_DAYS,
-    min_gap_pct: float = MIN_GAP_PCT,
-    vol_mult: float = VOL_MULT,
-    similarity_strength: float = SIMILARITY_STRENGTH,
-    api_key: str | None = None,
-) -> dict[str, Any]:
+    volume_baseline_days: int,
+    min_gap_pct: float,
+    vol_mult: float,
+) -> tuple[list[dict], int]:
     """
-    Find analog gap+volume days for `ticker` as of `as_of_date`.
+    Scan daily bars for gap+unusual-vol analog candidates.
 
-    LOOKBACK (adaptive)
-    -------------------
-    Requests up to history_calendar_days (~5yr cap). Uses whatever daily
-    history Polygon returns — a 10-month IPO uses ~10 months; a long-listed
-    name uses the most recent ~5 years. Records actual_lookback_days /
-    actual_lookback_start_date from the first available bar.
-
-    ANALOG DATES
-    ------------
-    Analogs are STRICTLY PAST days: date < as_of. The as_of / current
-    session is NEVER an analog (no self-matching / circular n=1 profiles).
-
-    WEIGHTING: equal by default (SIMILARITY_STRENGTH=0). No within-window
-    recency decay — the lookback window itself is the recency filter.
+    Returns (candidates, gap_gt_min_count). Candidates never include
+    as_of / future / age < MIN_ANALOG_AGE_DAYS.
     """
-    as_of = _parse_as_of(as_of_date)
-    # Cap the request; Polygon returns only bars that exist (young tickers).
-    req_days = min(int(history_calendar_days), HISTORY_MAX_CALENDAR_DAYS)
-    start = as_of - timedelta(days=req_days)
-    bars = fetch_daily_bars(ticker, start, as_of, api_key=api_key)
-
-    # Keep bars through as_of for baselines; candidate days still require
-    # cur["date"] < as_of (as_of session itself is never an analog).
-    bars = [b for b in bars if b["date"] <= as_of]
-
-    if bars:
-        lookback_start = bars[0]["date"]
-        actual_lookback_days = (as_of - lookback_start).days
-    else:
-        lookback_start = None
-        actual_lookback_days = 0
-
-    trading_days = len(bars)
     gap_gt_min = 0
     candidates: list[dict] = []
-
     for i in range(1, len(bars)):
         prev = bars[i - 1]
         cur = bars[i]
-        # CRITICAL: never treat as_of / current / future as an analog.
         if cur["date"] >= as_of:
             continue
         age_days = (as_of - cur["date"]).days
-        # Also skip yesterday (age=1): today's setup must not use the prior
-        # session of the same name as its only "historical" analog.
         if age_days < MIN_ANALOG_AGE_DAYS:
             continue
         prev_close = prev["close"]
@@ -277,40 +253,178 @@ def find_analog_days(
                     "open": cur["open"],
                     "prev_close": prev_close,
                 })
+    return candidates, gap_gt_min
 
-    # Safety net: drop anything that is not strictly before as_of / too recent
-    candidates = [
-        c for c in candidates
+
+def _choose_lookback_window(
+    all_candidates: list[dict],
+    as_of: date,
+    bars: list[dict],
+) -> dict[str, Any]:
+    """
+    Default 2yr window; step-extend to 3yr cap only if analogs < MIN_ANALOGS_TARGET.
+
+    Returns window metadata + filtered candidate list for the chosen window.
+    """
+    default_days = HISTORY_DEFAULT_CALENDAR_DAYS
+    max_days = HISTORY_MAX_CALENDAR_DAYS
+
+    def _in_window(cands: list[dict], window: int) -> list[dict]:
+        return [c for c in cands if int(c["age_days"]) <= window]
+
+    n_at_2yr = len(_in_window(all_candidates, default_days))
+    n_at_3yr = len(_in_window(all_candidates, max_days))
+
+    window_days = default_days
+    if n_at_2yr < MIN_ANALOGS_TARGET:
+        while (
+            len(_in_window(all_candidates, window_days)) < MIN_ANALOGS_TARGET
+            and window_days < max_days
+        ):
+            window_days = min(window_days + LOOKBACK_EXTEND_STEP_DAYS, max_days)
+
+    chosen = _in_window(all_candidates, window_days)
+    # Only call it "extended" if we actually kept analogs older than the
+    # 2yr default. Young names with <2yr of data must not get a false flag.
+    has_older = any(int(c["age_days"]) > default_days for c in chosen)
+    if not has_older:
+        window_days = default_days
+        chosen = _in_window(all_candidates, window_days)
+        lookback_extended = False
+    else:
+        lookback_extended = True
+
+    # actual lookback = span of bars available inside the chosen window
+    bars_in_window = [
+        b for b in bars
+        if b["date"] <= as_of and (as_of - b["date"]).days <= window_days
+    ]
+    if bars_in_window:
+        lookback_start = bars_in_window[0]["date"]
+        actual_lookback_days = (as_of - lookback_start).days
+    elif bars:
+        lookback_start = bars[0]["date"]
+        actual_lookback_days = (as_of - lookback_start).days
+    else:
+        lookback_start = None
+        actual_lookback_days = 0
+
+    return {
+        "window_days": window_days,
+        "lookback_extended": lookback_extended,
+        "candidates": chosen,
+        "lookback_start": lookback_start,
+        "actual_lookback_days": actual_lookback_days,
+        "analogs_at_2yr": n_at_2yr,
+        "analogs_at_3yr": n_at_3yr,
+        "trading_days_in_window": len(bars_in_window),
+    }
+
+
+def find_analog_days(
+    ticker: str,
+    as_of_date: date | str | None = None,
+    *,
+    today_gap: float | None = None,
+    today_vol_ratio: float | None = None,
+    history_calendar_days: int | None = None,
+    volume_baseline_days: int = VOLUME_BASELINE_DAYS,
+    min_gap_pct: float = MIN_GAP_PCT,
+    vol_mult: float = VOL_MULT,
+    similarity_strength: float = SIMILARITY_STRENGTH,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """
+    Find analog gap+volume days for `ticker` as of `as_of_date`.
+
+    LOOKBACK (2yr default → step-extend to 3yr)
+    ------------------------------------------
+    Fetch up to HISTORY_MAX (~3yr). Prefer analogs inside the default ~2yr
+    window. If count < MIN_ANALOGS_TARGET, grow the window in
+    LOOKBACK_EXTEND_STEP_DAYS steps up to the 3yr hard cap. Never beyond 3yr.
+    Young tickers use whatever history exists. Records actual_lookback_days
+    and flags when the window was extended (older-regime data).
+
+    ANALOG DATES: strictly past (date < as_of, age >= MIN_ANALOG_AGE_DAYS).
+    """
+    as_of = _parse_as_of(as_of_date)
+    # Always fetch the hard cap once; window choice filters candidates.
+    fetch_days = HISTORY_MAX_CALENDAR_DAYS
+    if history_calendar_days is not None:
+        fetch_days = min(int(history_calendar_days), HISTORY_MAX_CALENDAR_DAYS)
+    start = as_of - timedelta(days=fetch_days)
+    bars = fetch_daily_bars(ticker, start, as_of, api_key=api_key)
+    bars = [b for b in bars if b["date"] <= as_of]
+
+    all_candidates, gap_gt_min = _scan_gap_vol_candidates(
+        bars,
+        as_of,
+        volume_baseline_days=volume_baseline_days,
+        min_gap_pct=min_gap_pct,
+        vol_mult=vol_mult,
+    )
+    # Safety net
+    all_candidates = [
+        c for c in all_candidates
         if date.fromisoformat(c["date"]) < as_of
         and int(c.get("age_days") or 0) >= MIN_ANALOG_AGE_DAYS
     ]
+
+    win = _choose_lookback_window(all_candidates, as_of, bars)
+    candidates = win["candidates"]
     n_analogs = len(candidates)
-    history_flag, confidence = classify_history(actual_lookback_days, n_analogs)
+    actual_lookback_days = win["actual_lookback_days"]
+    lookback_start = win["lookback_start"]
+    lookback_extended = win["lookback_extended"]
+
+    history_flag, confidence, lookback_note = classify_history(
+        actual_lookback_days,
+        n_analogs,
+        lookback_extended=lookback_extended,
+    )
     weighting = "equal" if similarity_strength <= 0 else "similarity_tilt"
 
     lookback_meta = {
         "actual_lookback_days": actual_lookback_days,
+        "actual_lookback_years": round(actual_lookback_days / 365.25, 2),
         "actual_lookback_start_date": (
             lookback_start.isoformat() if lookback_start else None
         ),
-        "lookback_cap_days": req_days,
-        "trading_days_scanned": trading_days,
+        "lookback_default_days": HISTORY_DEFAULT_CALENDAR_DAYS,
+        "lookback_cap_days": HISTORY_MAX_CALENDAR_DAYS,
+        "lookback_window_days": win["window_days"],
+        "lookback_extended": lookback_extended,
+        "lookback_note": lookback_note,
+        "analogs_at_2yr": win["analogs_at_2yr"],
+        "analogs_at_3yr": win["analogs_at_3yr"],
+        "min_analogs_target": MIN_ANALOGS_TARGET,
+        "trading_days_scanned": win["trading_days_in_window"],
+        "trading_days_fetched": len(bars),
         "analog_count": n_analogs,
         "history_flag": history_flag,
         "confidence": confidence,
     }
 
+    empty_base = {
+        "ticker": ticker.upper(),
+        "as_of_date": as_of.isoformat(),
+        "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
+        "history_flag": history_flag,
+        "confidence": confidence,
+        "lookback_note": lookback_note,
+        "lookback_extended": lookback_extended,
+        "analog_count": 0,
+        "actual_lookback_days": actual_lookback_days,
+        "actual_lookback_years": lookback_meta["actual_lookback_years"],
+        "actual_lookback_start_date": lookback_meta["actual_lookback_start_date"],
+        "analogs_at_2yr": win["analogs_at_2yr"],
+        "analogs_at_3yr": win["analogs_at_3yr"],
+        "weighting": weighting,
+    }
+
     if n_analogs == 0:
         return {
-            "ticker": ticker.upper(),
-            "as_of_date": as_of.isoformat(),
-            "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
-            "history_flag": history_flag,
-            "confidence": confidence,
-            "analog_count": 0,
-            "actual_lookback_days": actual_lookback_days,
-            "actual_lookback_start_date": lookback_meta["actual_lookback_start_date"],
-            "weighting": weighting,
+            **empty_base,
             "stats": {
                 **lookback_meta,
                 "gap_gt_min_days": gap_gt_min,
@@ -318,7 +432,7 @@ def find_analog_days(
                 "min_gap_pct": min_gap_pct,
                 "vol_mult": vol_mult,
                 "volume_baseline_days": volume_baseline_days,
-                "history_calendar_days": req_days,
+                "history_calendar_days": win["window_days"],
                 "similarity_strength": similarity_strength,
                 "similarity_floor": SIMILARITY_FLOOR,
                 "recency_weighting": False,
@@ -376,15 +490,8 @@ def find_analog_days(
     weight_sum = sum(a["combined_weight"] for a in analogs)
 
     return {
-        "ticker": ticker.upper(),
-        "as_of_date": as_of.isoformat(),
-        "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
-        "history_flag": history_flag,
-        "confidence": confidence,
+        **empty_base,
         "analog_count": n_analogs,
-        "actual_lookback_days": actual_lookback_days,
-        "actual_lookback_start_date": lookback_meta["actual_lookback_start_date"],
-        "weighting": weighting,
         "ref_source": ref_source,
         "ref_gap": round(ref_gap, 6),
         "ref_vol_ratio": round(ref_vol, 4),
@@ -395,7 +502,7 @@ def find_analog_days(
             "min_gap_pct": min_gap_pct,
             "vol_mult": vol_mult,
             "volume_baseline_days": volume_baseline_days,
-            "history_calendar_days": req_days,
+            "history_calendar_days": win["window_days"],
             "similarity_strength": similarity_strength,
             "similarity_floor": SIMILARITY_FLOOR,
             "recency_weighting": False,
@@ -579,6 +686,8 @@ def unweighted_percentile(values: list[float], pct: float) -> float | None:
 def confidence_label(
     n_analogs: int,
     actual_lookback_days: int | None = None,
+    *,
+    lookback_extended: bool = False,
 ) -> str:
     """
     Map analog count (+ optional lookback) to confidence band.
@@ -594,7 +703,11 @@ def confidence_label(
         if n_analogs >= MIN_ANALOGS_USABLE:
             return "LOW"
         return "INSUFFICIENT"
-    _, conf = classify_history(actual_lookback_days, n_analogs)
+    _, conf, _ = classify_history(
+        actual_lookback_days,
+        n_analogs,
+        lookback_extended=lookback_extended,
+    )
     return conf
 
 
@@ -774,12 +887,30 @@ def build_ticker_profile(
     # Flag / confidence from lookback + measured analogs (fallback: finder count).
     lookback_days = int(analogs_pack.get("actual_lookback_days") or 0)
     lookback_start = analogs_pack.get("actual_lookback_start_date")
+    lookback_extended = bool(analogs_pack.get("lookback_extended"))
+    lookback_note = analogs_pack.get("lookback_note")
     # Flag on finder count (intended sample), not only measured — a single
     # measurable day must not look like a full profile.
     finder_n = len(analogs)
     analog_count_for_flag = finder_n
-    history_flag, conf = classify_history(lookback_days, analog_count_for_flag)
+    history_flag, conf, note_from_classify = classify_history(
+        lookback_days,
+        analog_count_for_flag,
+        lookback_extended=lookback_extended,
+    )
+    if note_from_classify:
+        lookback_note = note_from_classify
     stats_meaningful = history_flag != "**" and conf != "INSUFFICIENT"
+
+    lookback_fields = {
+        "actual_lookback_days": lookback_days,
+        "actual_lookback_years": round(lookback_days / 365.25, 2),
+        "actual_lookback_start_date": lookback_start,
+        "lookback_extended": lookback_extended,
+        "lookback_note": lookback_note,
+        "analogs_at_2yr": analogs_pack.get("analogs_at_2yr"),
+        "analogs_at_3yr": analogs_pack.get("analogs_at_3yr"),
+    }
 
     if n == 0 or not stats_meaningful:
         # Still persist per_analog for audit when n>0, but do NOT publish
@@ -793,23 +924,23 @@ def build_ticker_profile(
             "as_of_date": as_of,
             "informational_only": True,
             "stats_meaningful": False,
-            "confidence": conf if finder_n < MIN_ANALOGS_USABLE else "INSUFFICIENT",
-            "history_flag": "**" if finder_n < MIN_ANALOGS_USABLE else history_flag,
+            "confidence": conf,
+            "history_flag": history_flag,
             "analog_count": finder_n,
-            "actual_lookback_days": lookback_days,
-            "actual_lookback_start_date": lookback_start,
-            "flag": "INSUFFICIENT_HISTORY",
+            **lookback_fields,
+            "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
             "analog_finder": {
                 "flag": analogs_pack.get("flag"),
                 "history_flag": analogs_pack.get("history_flag"),
                 "confidence": analogs_pack.get("confidence"),
+                "lookback_note": lookback_note,
                 "stats": analogs_pack.get("stats"),
                 "weight_sum": analogs_pack.get("weight_sum"),
             },
             "entry_proxy_min": entry_proxy_min,
             "n_analogs_finder": finder_n,
             "n_analogs_measured": n,
-            "per_analog": per_day,  # audit trail only; not for summary metrics
+            "per_analog": per_day,
             "skipped": skipped,
             "percentiles": {},
             "hit_rates": {},
@@ -828,11 +959,6 @@ def build_ticker_profile(
                 "checks": [note],
             },
         }
-        # Keep history_flag / confidence consistent via classify_history
-        profile["history_flag"] = history_flag
-        profile["confidence"] = conf
-        if history_flag == "**":
-            profile["flag"] = "INSUFFICIENT_HISTORY"
         return profile
 
     maes = [r["mae_pct"] for r in per_day]
@@ -909,8 +1035,7 @@ def build_ticker_profile(
         "confidence": conf,
         "history_flag": history_flag,
         "analog_count": n,
-        "actual_lookback_days": lookback_days,
-        "actual_lookback_start_date": lookback_start,
+        **lookback_fields,
         "weighting": analogs_pack.get("weighting", "equal"),
         "flag": "INSUFFICIENT_HISTORY" if history_flag == "**" else None,
         "n_analogs_finder": len(analogs),
@@ -920,6 +1045,7 @@ def build_ticker_profile(
             "flag": analogs_pack.get("flag"),
             "history_flag": analogs_pack.get("history_flag"),
             "confidence": analogs_pack.get("confidence"),
+            "lookback_note": lookback_note,
             "weighting": analogs_pack.get("weighting"),
             "stats": analogs_pack.get("stats"),
             "weight_sum": analogs_pack.get("weight_sum"),
@@ -962,9 +1088,17 @@ def _print_report(result: dict) -> None:
           f"(recency_weighting={stats.get('recency_weighting')})")
     print(
         f"Lookback: {result.get('actual_lookback_days')}d "
-        f"(start={result.get('actual_lookback_start_date')}, "
-        f"cap={stats.get('lookback_cap_days') or stats.get('history_calendar_days')}d)"
+        f"({result.get('actual_lookback_years')}yr, "
+        f"start={result.get('actual_lookback_start_date')}, "
+        f"extended={result.get('lookback_extended')})"
     )
+    print(
+        f"Analogs @2yr={result.get('analogs_at_2yr')}  "
+        f"@3yr={result.get('analogs_at_3yr')}  "
+        f"used={result.get('analog_count')}"
+    )
+    if result.get("lookback_note"):
+        print(f"NOTE: {result['lookback_note']}")
     print(f"Trading days scanned:     {stats['trading_days_scanned']}")
     print(f"Gap > {stats['min_gap_pct']:.0%} days:         {stats['gap_gt_min_days']}")
     print(
@@ -1003,8 +1137,16 @@ def _print_profile(profile: dict) -> None:
     print(f"{'=' * 72}")
     print(
         f"Lookback: {profile.get('actual_lookback_days')}d "
-        f"(start={profile.get('actual_lookback_start_date')})  "
+        f"({profile.get('actual_lookback_years')}yr, "
+        f"start={profile.get('actual_lookback_start_date')})  "
+        f"extended={profile.get('lookback_extended')}  "
         f"history_flag={hf!r}  analog_count={profile.get('analog_count')}"
+    )
+    if profile.get("lookback_note"):
+        print(f"NOTE: {profile['lookback_note']}")
+    print(
+        f"Analogs @2yr={profile.get('analogs_at_2yr')}  "
+        f"@3yr={profile.get('analogs_at_3yr')}"
     )
     print(
         f"Analogs: finder={profile.get('n_analogs_finder')}  "

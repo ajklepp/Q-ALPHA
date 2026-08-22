@@ -3,35 +3,50 @@
   "as_of_date": "2026-08-21",
   "informational_only": true,
   "stats_meaningful": true,
-  "confidence": "HIGH",
-  "history_flag": "",
-  "analog_count": 11,
-  "actual_lookback_days": 1855,
-  "actual_lookback_start_date": "2021-07-23",
+  "confidence": "LOW",
+  "history_flag": "*",
+  "analog_count": 3,
+  "actual_lookback_days": 1124,
+  "actual_lookback_years": 3.08,
+  "actual_lookback_start_date": "2023-07-24",
+  "lookback_extended": true,
+  "lookback_note": "used 3.08yr to reach 3 analogs - includes older-regime data",
+  "analogs_at_2yr": 2,
+  "analogs_at_3yr": 3,
   "weighting": "equal",
   "flag": null,
-  "n_analogs_finder": 11,
-  "n_analogs_measured": 11,
+  "n_analogs_finder": 3,
+  "n_analogs_measured": 3,
   "entry_proxy_min": 3,
   "analog_finder": {
     "flag": null,
-    "history_flag": "",
-    "confidence": "HIGH",
+    "history_flag": "*",
+    "confidence": "LOW",
+    "lookback_note": "used 3.08yr to reach 3 analogs - includes older-regime data",
     "weighting": "equal",
     "stats": {
-      "actual_lookback_days": 1855,
-      "actual_lookback_start_date": "2021-07-23",
-      "lookback_cap_days": 1855,
-      "trading_days_scanned": 1276,
-      "analog_count": 11,
-      "history_flag": "",
-      "confidence": "HIGH",
-      "gap_gt_min_days": 22,
-      "analog_days": 11,
+      "actual_lookback_days": 1124,
+      "actual_lookback_years": 3.08,
+      "actual_lookback_start_date": "2023-07-24",
+      "lookback_default_days": 760,
+      "lookback_cap_days": 1125,
+      "lookback_window_days": 1125,
+      "lookback_extended": true,
+      "lookback_note": "used 3.08yr to reach 3 analogs - includes older-regime data",
+      "analogs_at_2yr": 2,
+      "analogs_at_3yr": 3,
+      "min_analogs_target": 8,
+      "trading_days_scanned": 774,
+      "trading_days_fetched": 774,
+      "analog_count": 3,
+      "history_flag": "*",
+      "confidence": "LOW",
+      "gap_gt_min_days": 5,
+      "analog_days": 3,
       "min_gap_pct": 0.03,
       "vol_mult": 1.75,
       "volume_baseline_days": 5,
-      "history_calendar_days": 1855,
+      "history_calendar_days": 1125,
       "similarity_strength": 0.0,
       "similarity_floor": 0.25,
       "recency_weighting": false
@@ -41,170 +56,10 @@
   },
   "per_analog": [
     {
-      "date": "2021-09-10",
-      "gap_pct": 0.162791,
-      "vol_ratio": 12.929,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 390,
-      "entry_proxy_price": 4.345,
-      "entry_proxy_time": "2021-09-10T09:33:00-04:00",
-      "mae_pct": 0.040276,
-      "mfe_pct": 0.074799,
-      "mae_pct_display": 4.028,
-      "mfe_pct_display": 7.48,
-      "time_of_mfe_peak": "2021-09-10T10:15:00-04:00",
-      "held": true,
-      "close_vs_entry_pct": 0.010357,
-      "session_close": 4.39,
-      "min_low": 4.17,
-      "max_high": 4.67,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2021-10-07",
-      "gap_pct": 0.0725,
-      "vol_ratio": 5.06,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 383,
-      "entry_proxy_price": 4.21,
-      "entry_proxy_time": "2021-10-07T09:33:00-04:00",
-      "mae_pct": 0.114014,
-      "mfe_pct": 0.048694,
-      "mae_pct_display": 11.401,
-      "mfe_pct_display": 4.869,
-      "time_of_mfe_peak": "2021-10-07T09:45:00-04:00",
-      "held": false,
-      "close_vs_entry_pct": -0.028504,
-      "session_close": 4.09,
-      "min_low": 3.73,
-      "max_high": 4.415,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2021-12-01",
-      "gap_pct": 0.609375,
-      "vol_ratio": 299.0852,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 390,
-      "entry_proxy_price": 4.815,
-      "entry_proxy_time": "2021-12-01T09:33:00-05:00",
-      "mae_pct": 0.142264,
-      "mfe_pct": 0.349948,
-      "mae_pct_display": 14.226,
-      "mfe_pct_display": 34.995,
-      "time_of_mfe_peak": "2021-12-01T12:07:00-05:00",
-      "held": false,
-      "close_vs_entry_pct": -0.044631,
-      "session_close": 4.6001,
-      "min_low": 4.13,
-      "max_high": 6.5,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2022-02-02",
-      "gap_pct": 0.071918,
-      "vol_ratio": 2.5277,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 384,
-      "entry_proxy_price": 3.065,
-      "entry_proxy_time": "2022-02-02T09:33:00-05:00",
-      "mae_pct": 0.060359,
-      "mfe_pct": 0.014682,
-      "mae_pct_display": 6.036,
-      "mfe_pct_display": 1.468,
-      "time_of_mfe_peak": "2022-02-02T09:37:00-05:00",
-      "held": false,
-      "close_vs_entry_pct": -0.055465,
-      "session_close": 2.895,
-      "min_low": 2.88,
-      "max_high": 3.11,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2022-02-28",
-      "gap_pct": 0.07362,
-      "vol_ratio": 3.3771,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 385,
-      "entry_proxy_price": 3.52,
-      "entry_proxy_time": "2022-02-28T09:33:00-05:00",
-      "mae_pct": 0.113636,
-      "mfe_pct": 0.028409,
-      "mae_pct_display": 11.364,
-      "mfe_pct_display": 2.841,
-      "time_of_mfe_peak": "2022-02-28T09:35:00-05:00",
-      "held": false,
-      "close_vs_entry_pct": -0.09375,
-      "session_close": 3.19,
-      "min_low": 3.12,
-      "max_high": 3.62,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2022-05-10",
-      "gap_pct": 0.049327,
-      "vol_ratio": 2.9521,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 351,
-      "entry_proxy_price": 2.33,
-      "entry_proxy_time": "2022-05-10T09:33:00-04:00",
-      "mae_pct": 0.171674,
-      "mfe_pct": 0.004292,
-      "mae_pct_display": 17.167,
-      "mfe_pct_display": 0.429,
-      "time_of_mfe_peak": "2022-05-10T10:08:00-04:00",
-      "held": false,
-      "close_vs_entry_pct": -0.16309,
-      "session_close": 1.95,
-      "min_low": 1.93,
-      "max_high": 2.34,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2022-08-03",
-      "gap_pct": 0.03913,
-      "vol_ratio": 2.7421,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 352,
-      "entry_proxy_price": 2.355,
-      "entry_proxy_time": "2022-08-03T09:33:00-04:00",
-      "mae_pct": 0.044586,
-      "mfe_pct": 0.044586,
-      "mae_pct_display": 4.459,
-      "mfe_pct_display": 4.459,
-      "time_of_mfe_peak": "2022-08-03T15:56:00-04:00",
-      "held": true,
-      "close_vs_entry_pct": 0.044586,
-      "session_close": 2.46,
-      "min_low": 2.25,
-      "max_high": 2.46,
-      "weight_renorm": 0.090909
-    },
-    {
-      "date": "2022-11-03",
-      "gap_pct": 0.059829,
-      "vol_ratio": 4.7231,
-      "combined_weight": 0.090909,
-      "n_rth_bars": 348,
-      "entry_proxy_price": 2.44,
-      "entry_proxy_time": "2022-11-03T09:33:00-04:00",
-      "mae_pct": 0.012295,
-      "mfe_pct": 0.07377,
-      "mae_pct_display": 1.23,
-      "mfe_pct_display": 7.377,
-      "time_of_mfe_peak": "2022-11-03T10:51:00-04:00",
-      "held": true,
-      "close_vs_entry_pct": 0.040984,
-      "session_close": 2.54,
-      "min_low": 2.41,
-      "max_high": 2.62,
-      "weight_renorm": 0.090909
-    },
-    {
       "date": "2023-11-15",
       "gap_pct": 0.047872,
       "vol_ratio": 1.8268,
-      "combined_weight": 0.090909,
+      "combined_weight": 0.333333,
       "n_rth_bars": 266,
       "entry_proxy_price": 1.97,
       "entry_proxy_time": "2023-11-15T09:33:00-05:00",
@@ -218,13 +73,13 @@
       "session_close": 1.83,
       "min_low": 1.8,
       "max_high": 1.97,
-      "weight_renorm": 0.090909
+      "weight_renorm": 0.333333
     },
     {
       "date": "2026-04-15",
       "gap_pct": 0.048276,
       "vol_ratio": 1.7701,
-      "combined_weight": 0.090909,
+      "combined_weight": 0.333333,
       "n_rth_bars": 367,
       "entry_proxy_price": 4.625,
       "entry_proxy_time": "2026-04-15T09:33:00-04:00",
@@ -238,13 +93,13 @@
       "session_close": 4.48,
       "min_low": 4.43,
       "max_high": 4.63,
-      "weight_renorm": 0.090909
+      "weight_renorm": 0.333333
     },
     {
       "date": "2026-05-13",
       "gap_pct": 0.041763,
       "vol_ratio": 1.7591,
-      "combined_weight": 0.090909,
+      "combined_weight": 0.333333,
       "n_rth_bars": 302,
       "entry_proxy_price": 4.39,
       "entry_proxy_time": "2026-05-13T09:33:00-04:00",
@@ -258,93 +113,93 @@
       "session_close": 4.32,
       "min_low": 4.265,
       "max_high": 4.5,
-      "weight_renorm": 0.090909
+      "weight_renorm": 0.333333
     }
   ],
   "skipped": [],
   "percentiles": {
     "scheme": "equal_weight",
     "mae": {
-      "p50": 0.060359,
-      "p75": 0.114014,
-      "p90": 0.142264
+      "p50": 0.042162,
+      "p75": 0.086294,
+      "p90": 0.086294
     },
     "mfe": {
-      "p50": 0.028409,
-      "p75": 0.07377,
-      "p90": 0.074799
+      "p50": 0.001081,
+      "p75": 0.025057,
+      "p90": 0.025057
     },
     "mae_finder_weights": {
-      "p50": 0.060359,
-      "p75": 0.114014,
-      "p90": 0.142264
+      "p50": 0.042162,
+      "p75": 0.086294,
+      "p90": 0.086294
     },
     "mfe_finder_weights": {
-      "p50": 0.028409,
-      "p75": 0.07377,
-      "p90": 0.074799
+      "p50": 0.001081,
+      "p75": 0.025057,
+      "p90": 0.025057
     }
   },
   "hit_rates": {
     "mfe_ge_3pct": {
       "threshold_pct": 0.03,
-      "equal_weight": 0.4545
+      "equal_weight": 0.0
     },
     "mfe_ge_5pct": {
       "threshold_pct": 0.05,
-      "equal_weight": 0.2727
+      "equal_weight": 0.0
     },
     "mfe_ge_8pct": {
       "threshold_pct": 0.08,
-      "equal_weight": 0.0909
+      "equal_weight": 0.0
     },
     "mfe_ge_10pct": {
       "threshold_pct": 0.1,
-      "equal_weight": 0.0909
+      "equal_weight": 0.0
     }
   },
   "bracket": {
-    "safe_max_stop_pct": 0.119715,
-    "safe_max_stop_pct_display": 11.971,
+    "safe_max_stop_pct": 0.090609,
+    "safe_max_stop_pct_display": 9.061,
     "tiers": {
-      "tier1_pct": 0.060359,
-      "tier1_pct_display": 6.036,
-      "tier2_pct": 0.114014,
-      "tier2_pct_display": 11.401,
-      "tier3_pct": 0.142264,
-      "tier3_pct_display": 14.226,
-      "tier4_pct": 0.149377,
-      "tier4_pct_display": 14.938
+      "tier1_pct": 0.042162,
+      "tier1_pct_display": 4.216,
+      "tier2_pct": 0.086294,
+      "tier2_pct_display": 8.629,
+      "tier3_pct": 0.086294,
+      "tier3_pct_display": 8.629,
+      "tier4_pct": 0.090609,
+      "tier4_pct_display": 9.061
     },
-    "target_pct": 0.028409,
-    "target_pct_display": 2.841,
+    "target_pct": 0.001081,
+    "target_pct_display": 0.108,
     "stop_beyond_mult": 1.05,
     "note": "INFORMATIONAL ONLY \u2014 not wired into order logic. Stops are % below entry; target is % above entry."
   },
   "outcomes": {
     "win_definition": "session_close > entry_proxy (held)",
-    "n_total": 11,
-    "n_winners": 3,
-    "n_losers": 8,
-    "win_rate": 0.2727,
-    "win_rate_pct_display": 27.3,
+    "n_total": 3,
+    "n_winners": 0,
+    "n_losers": 3,
+    "win_rate": 0.0,
+    "win_rate_pct_display": 0.0,
     "winner_mfe": {
-      "p50": 0.07377,
-      "p75": 0.074799,
-      "p90": 0.074799,
+      "p50": null,
+      "p75": null,
+      "p90": null,
+      "n": 0
+    },
+    "winner_mfe_p50_display": null,
+    "failure_mae": {
+      "p50": 0.042162,
+      "p75": 0.086294,
+      "p90": 0.086294,
       "n": 3
     },
-    "winner_mfe_p50_display": 7.377,
-    "failure_mae": {
-      "p50": 0.086294,
-      "p75": 0.114014,
-      "p90": 0.171674,
-      "n": 8
-    },
-    "failure_mae_p50_display": 8.629,
-    "reward_risk": 0.237,
+    "failure_mae_p50_display": 4.216,
+    "reward_risk": 0.012,
     "rr_warn_threshold": 1.5,
-    "rr_warning": "R:R 0.24 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
+    "rr_warning": "R:R 0.01 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
   },
   "sanity": {
     "ok": true,
@@ -352,7 +207,7 @@
       "OK: MAE p50 <= p75 <= p90 (equal-weight)",
       "OK: tier1 <= tier2 <= tier3 <= tier4",
       "OK: target > 0",
-      "WARN: R:R 0.24 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
+      "WARN: R:R 0.01 below 1.5 \u2014 median MFE target may not justify safe-max stop width (informational; not wired to orders)"
     ]
   }
 }

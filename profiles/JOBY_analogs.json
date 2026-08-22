@@ -4,143 +4,53 @@
   "flag": null,
   "history_flag": "",
   "confidence": "HIGH",
-  "analog_count": 26,
-  "actual_lookback_days": 1836,
-  "actual_lookback_start_date": "2021-08-11",
+  "lookback_note": null,
+  "lookback_extended": false,
+  "analog_count": 13,
+  "actual_lookback_days": 760,
+  "actual_lookback_years": 2.08,
+  "actual_lookback_start_date": "2024-07-22",
+  "analogs_at_2yr": 13,
+  "analogs_at_3yr": 17,
   "weighting": "equal",
   "ref_source": "median_analog",
-  "ref_gap": 0.077203,
-  "ref_vol_ratio": 2.7294,
+  "ref_gap": 0.071326,
+  "ref_vol_ratio": 2.575,
   "stats": {
-    "actual_lookback_days": 1836,
-    "actual_lookback_start_date": "2021-08-11",
-    "lookback_cap_days": 1855,
-    "trading_days_scanned": 1263,
-    "analog_count": 26,
+    "actual_lookback_days": 760,
+    "actual_lookback_years": 2.08,
+    "actual_lookback_start_date": "2024-07-22",
+    "lookback_default_days": 760,
+    "lookback_cap_days": 1125,
+    "lookback_window_days": 760,
+    "lookback_extended": false,
+    "lookback_note": null,
+    "analogs_at_2yr": 13,
+    "analogs_at_3yr": 17,
+    "min_analogs_target": 8,
+    "trading_days_scanned": 524,
+    "trading_days_fetched": 774,
+    "analog_count": 13,
     "history_flag": "",
     "confidence": "HIGH",
-    "gap_gt_min_days": 93,
-    "analog_days": 26,
+    "gap_gt_min_days": 65,
+    "analog_days": 13,
     "min_gap_pct": 0.03,
     "vol_mult": 1.75,
     "volume_baseline_days": 5,
-    "history_calendar_days": 1855,
+    "history_calendar_days": 760,
     "similarity_strength": 0.0,
     "similarity_floor": 0.25,
     "recency_weighting": false
   },
   "analogs": [
     {
-      "date": "2021-09-23",
-      "gap_pct": 0.08273,
-      "vol_ratio": 1.9879,
-      "age_days": 1793,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2022-02-15",
-      "gap_pct": 0.081933,
-      "vol_ratio": 2.1392,
-      "age_days": 1648,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2022-03-25",
-      "gap_pct": 0.045028,
-      "vol_ratio": 3.5126,
-      "age_days": 1610,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2022-05-26",
-      "gap_pct": 0.07619,
-      "vol_ratio": 2.9155,
-      "age_days": 1548,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2022-10-11",
-      "gap_pct": 0.14026,
-      "vol_ratio": 4.1077,
-      "age_days": 1410,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2022-11-30",
-      "gap_pct": 0.030075,
-      "vol_ratio": 3.8196,
-      "age_days": 1360,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2023-02-23",
-      "gap_pct": 0.04662,
-      "vol_ratio": 2.9361,
-      "age_days": 1275,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2023-06-28",
-      "gap_pct": 0.095462,
-      "vol_ratio": 7.3671,
-      "age_days": 1150,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2023-06-29",
-      "gap_pct": 0.199777,
-      "vol_ratio": 6.333,
-      "age_days": 1149,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2023-09-25",
-      "gap_pct": 0.045016,
-      "vol_ratio": 2.4878,
-      "age_days": 1061,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2023-11-02",
-      "gap_pct": 0.121269,
-      "vol_ratio": 3.0846,
-      "age_days": 1023,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2024-02-12",
-      "gap_pct": 0.092749,
-      "vol_ratio": 2.9832,
-      "age_days": 921,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
-      "date": "2024-07-11",
-      "gap_pct": 0.036609,
-      "vol_ratio": 5.0152,
-      "age_days": 771,
-      "similarity_weight": 1.0,
-      "combined_weight": 0.038462
-    },
-    {
       "date": "2024-10-02",
       "gap_pct": 0.185417,
       "vol_ratio": 11.1262,
       "age_days": 688,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2024-10-23",
@@ -148,7 +58,7 @@
       "vol_ratio": 1.8098,
       "age_days": 667,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2024-11-11",
@@ -156,7 +66,7 @@
       "vol_ratio": 2.7381,
       "age_days": 648,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2024-11-25",
@@ -164,7 +74,7 @@
       "vol_ratio": 2.0268,
       "age_days": 634,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-05-28",
@@ -172,7 +82,7 @@
       "vol_ratio": 9.8783,
       "age_days": 450,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-06-09",
@@ -180,7 +90,7 @@
       "vol_ratio": 1.9555,
       "age_days": 438,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-06-30",
@@ -188,7 +98,7 @@
       "vol_ratio": 2.6685,
       "age_days": 417,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-07-16",
@@ -196,7 +106,7 @@
       "vol_ratio": 2.575,
       "age_days": 401,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-08-04",
@@ -204,7 +114,7 @@
       "vol_ratio": 2.5984,
       "age_days": 382,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-08-15",
@@ -212,7 +122,7 @@
       "vol_ratio": 1.7668,
       "age_days": 371,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2025-09-12",
@@ -220,7 +130,7 @@
       "vol_ratio": 2.7207,
       "age_days": 343,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2026-02-26",
@@ -228,7 +138,7 @@
       "vol_ratio": 1.9506,
       "age_days": 176,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     },
     {
       "date": "2026-06-15",
@@ -236,8 +146,8 @@
       "vol_ratio": 1.9107,
       "age_days": 67,
       "similarity_weight": 1.0,
-      "combined_weight": 0.038462
+      "combined_weight": 0.076923
     }
   ],
-  "weight_sum": 1.000012
+  "weight_sum": 0.999999
 }

@@ -959,7 +959,7 @@ def tab_ticker_profiles() -> None:
         "This tab does **not** call Polygon on load."
     )
     st.caption(
-        "History flags: `*` limited history/small sample · "
+        "History flags: `*` limited history/small sample or extended past 2yr · "
         "`**` insufficient — informational only"
     )
 
@@ -1090,10 +1090,14 @@ def tab_ticker_profiles() -> None:
             f"⚠️ {ticker} — insufficient analogs; informational only."
         )
     elif hist_flag == "*":
-        st.info(
-            f"⚠️ {ticker} — limited history and/or small sample; "
-            "usable but less certain."
-        )
+        lb_note = profile.get("lookback_note")
+        if lb_note:
+            st.info(f"⚠️ {ticker} — {lb_note}")
+        else:
+            st.info(
+                f"⚠️ {ticker} — limited history and/or small sample; "
+                "usable but less certain."
+            )
 
     if profile.get("informational_only", True):
         st.caption("INFORMATIONAL ONLY — not wired into order / entry logic.")
