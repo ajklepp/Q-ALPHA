@@ -494,8 +494,6 @@ def tab_live_status(trades: list, pool_history: list) -> None:
     # Regime from today's watchlist (not legacy daily_scans).
     spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
     vix_regime = "NORMAL"
-    spy_price = 0.0
-    spy_sma50 = 0.0
 
     regime_color = "#00AA44" if spy_regime == "BULL" else "#CC2200"
     regime_emoji = "🐂" if spy_regime == "BULL" else "🐻"
@@ -517,8 +515,6 @@ def tab_live_status(trades: list, pool_history: list) -> None:
         {regime_emoji} {spy_regime} MARKET
     </div>
     <div style="color: #AAAAAA; font-size: 14px;">
-        SPY: <b style="color: white;">${spy_price:.2f}</b> &nbsp;|&nbsp;
-        SMA50: <b style="color: white;">${spy_sma50:.2f}</b> &nbsp;|&nbsp;
         VIX: <b style="color: {vix_color};">{vix_regime}</b> &nbsp;|&nbsp;
         Position sizing: <b style="color: white;">{sizing_pct}</b>
     </div>
