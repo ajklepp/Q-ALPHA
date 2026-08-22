@@ -49,6 +49,7 @@ from candidates.supabase_sync import SupabaseSync
 from dashboard_shared import SYSTEM_VERSION as SHARED_VERSION
 from dashboard_shared import (
     compute_and_save_profile,
+    ensure_polygon_key_from_secrets,
     et_today,
     format_profile_rr_cell,
     format_ticker_with_history,
@@ -1029,16 +1030,17 @@ def tab_ticker_profiles() -> None:
         else:
             st.caption(f"No cache at `{path.relative_to(ROOT)}`")
 
-    c1, c2, _ = st.columns([1, 1, 2])
-    with c1:
-        do_refresh = st.button(
+    do_refresh = False
+    if ensure_polygon_key_from_secrets():
+        # On-demand Polygon refresh — only when a key is available (local / secrets).
+        # Streamlit Cloud usually has no key; profiles come from committed JSON.
+        if st.button(
             f"🔄 Refresh profile — {ticker}",
             type="primary",
             key="profile_refresh_btn",
             help="Runs build_ticker_profile (Polygon 1-min). Slow. Not auto.",
-        )
-    with c2:
-        st.caption("Requires POLYGON_API_KEY in env or Streamlit secrets.")
+        ):
+            do_refresh = True
 
     if do_refresh:
         with st.spinner(
