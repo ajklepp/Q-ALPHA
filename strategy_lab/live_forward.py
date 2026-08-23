@@ -83,6 +83,7 @@ from ticker_profiler import _load_polygon_key as load_profiler_key  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 STATE_PATH = LAB / "results" / "forward_state.json"
+PREDICTIONS_PATH = LAB / "results" / "forward_predictions.json"
 EOD_DIR = LAB / "results"
 SETUPS_PATH = LAB / "results" / "setups.json"
 PREMARKET_JSON = LAB / "results" / "premarket.json"
@@ -91,6 +92,141 @@ SLEEP_SEC = 0.15
 ENTRY_MODEL = "immediate"
 MODE_LIVE = "live"
 MODE_REPLAY = "replay"
+
+
+# ---------------------------------------------------------------------------
+# Forward prediction log + rolling OOS R² (reuses oos_r2 math)
+# ---------------------------------------------------------------------------
+
+def load_forward_predictions() -> list[dict[str, Any]]:
+    """Growing cross-day log of {ticker, date, predicted_mfe, actual_mfe}."""
+    if not PREDICTIONS_PATH.exists():
+        return []
+    try:
+        doc = json.loads(PREDICTIONS_PATH.read_text(encoding="utf-8"))
+        rows = doc.get("predictions") if isinstance(doc, dict) else doc
+        return list(rows or [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def save_forward_predictions(rows: list[dict[str, Any]]) -> None:
+    """Persist prediction log locally (best-effort)."""
+    try:
+        PREDICTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "updated_at": _now_iso(),
+            "n": len(rows),
+            "predictions": rows,
+        }
+        PREDICTIONS_PATH.write_text(
+            json.dumps(payload, indent=2), encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"[live_forward] WARN: could not write predictions ({exc})")
+
+
+def _prediction_key(ticker: str, flag_date: str) -> str:
+    return f"{str(ticker).upper()}|{str(flag_date)[:10]}"
+
+
+def compute_forward_oos_stats(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Rolling OOS R² across completed forward pairs. True OOS by construction.
+    N<2 → collecting_data (R² undefined). Never raises.
+    """
+    completed = [
+        r for r in rows
+        if r.get("predicted_mfe") is not None
+        and r.get("actual_mfe") is not None
+    ]
+    n = len(completed)
+    base = {
+        "n": n,
+        "r2": None,
+        "correlation": None,
+        "rmse_pct": None,
+        "mean_predicted_mfe": None,
+        "mean_actual_mfe": None,
+        "status": "collecting_data",
+        "message": f"collecting data (N={n})",
+    }
+    if n < 2:
+        return base
+    try:
+        from oos_r2 import pearson, rmse, r_squared
+
+        y = [float(r["actual_mfe"]) for r in completed]
+        p = [float(r["predicted_mfe"]) for r in completed]
+        r2 = r_squared(y, p)
+        corr = pearson(y, p)
+        err = rmse(y, p)
+        base.update({
+            "r2": round(r2, 6) if r2 is not None else None,
+            "correlation": round(corr, 6) if corr is not None else None,
+            "rmse_pct": round(err, 4) if err is not None else None,
+            "mean_predicted_mfe": round(sum(p) / n, 4),
+            "mean_actual_mfe": round(sum(y) / n, 4),
+            "status": "ok" if r2 is not None else "undefined",
+            "message": (
+                f"forward OOS R²={r2:.4f} (N={n})"
+                if r2 is not None
+                else f"R² undefined (N={n})"
+            ),
+        })
+        if r2 is not None and r2 < 0:
+            base["message"] += (
+                " — negative R²: worse than predicting the average MFE"
+            )
+    except Exception as exc:
+        base["status"] = "error"
+        base["message"] = f"R² compute skipped ({exc})"
+    return base
+
+
+def upsert_forward_prediction(
+    rows: list[dict[str, Any]],
+    *,
+    ticker: str,
+    flag_date: str,
+    predicted_mfe: float | None,
+    actual_mfe: float | None,
+) -> list[dict[str, Any]]:
+    """Insert or update one ticker|date row; return new list."""
+    key = _prediction_key(ticker, flag_date)
+    out = [r for r in rows if _prediction_key(
+        str(r.get("ticker") or ""), str(r.get("date") or r.get("flag_date") or "")
+    ) != key]
+    out.append({
+        "ticker": str(ticker).upper(),
+        "date": str(flag_date)[:10],
+        "predicted_mfe": (
+            round(float(predicted_mfe), 4)
+            if predicted_mfe is not None
+            else None
+        ),
+        "actual_mfe": (
+            round(float(actual_mfe), 4)
+            if actual_mfe is not None
+            else None
+        ),
+        "updated_at": _now_iso(),
+    })
+    out.sort(key=lambda r: (str(r.get("date") or ""), str(r.get("ticker") or "")))
+    return out
+
+
+def refresh_forward_r2(state: dict[str, Any]) -> None:
+    """Recompute rolling R² from state predictions; sync file + state fields."""
+    rows = list(state.get("forward_predictions") or [])
+    stats = compute_forward_oos_stats(rows)
+    state["forward_predictions"] = rows
+    state["forward_oos_r2"] = stats.get("r2")
+    state["forward_oos_r2_n"] = stats.get("n")
+    state["forward_oos_r2_stats"] = stats
+    save_forward_predictions(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +242,8 @@ def _today_et() -> str:
 
 
 def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
+    prior = load_forward_predictions()
+    r2_stats = compute_forward_oos_stats(prior)
     return {
         "updated_at": _now_iso(),
         "mode": mode,
@@ -149,6 +287,10 @@ def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
         "scan": None,
         "premarket": {},
         "eod_summary": None,
+        "forward_predictions": prior,
+        "forward_oos_r2": r2_stats.get("r2"),
+        "forward_oos_r2_n": r2_stats.get("n"),
+        "forward_oos_r2_stats": r2_stats,
     }
 
 
@@ -606,6 +748,28 @@ def execute_dual_pools(
             f"levels={levels.get('source')}"
         )
 
+        # --- Profiler prediction at ENTRY (for rolling forward OOS R²) ---
+        predicted_mfe: float | None = None
+        try:
+            from oos_r2 import predicted_mfe_pct as _pred_mfe
+
+            predicted_mfe = _pred_mfe(profile)
+        except Exception:
+            predicted_mfe = None
+        if predicted_mfe is not None:
+            print(f"  predicted MFE p50 = {predicted_mfe:.2f}%")
+            rows = list(state.get("forward_predictions") or [])
+            state["forward_predictions"] = upsert_forward_prediction(
+                rows,
+                ticker=ticker,
+                flag_date=flag_date,
+                predicted_mfe=predicted_mfe,
+                actual_mfe=None,  # filled on close
+            )
+            refresh_forward_r2(state)
+        else:
+            print("  predicted MFE p50 = — (missing / insufficient)")
+
         # ---- Pool A ----
         a_rec: dict[str, Any] = {
             "pool": "A_trailing",
@@ -615,6 +779,7 @@ def execute_dual_pools(
             "entry_model": ENTRY_MODEL,
             "entry_price": entry_price,
             "entry_time": entry_time,
+            "predicted_mfe": predicted_mfe,
         }
         shares_a = size_for_pool(pool_a, entry_price, kill_pct)
         if slots_a >= MAX_SLOTS:
@@ -631,6 +796,7 @@ def execute_dual_pools(
                 "entry_time": entry_time,
                 "shares": shares_a,
                 "sweep_reclaim": sweep_tag,
+                "predicted_mfe": predicted_mfe,
             }
             state["pool_A_trailing"]["slots_open"] = slots_a
             state["pool_A_trailing"]["slots_peak"] = peak_a
@@ -663,6 +829,28 @@ def execute_dual_pools(
                 pnl_a = float(res_a.get("total_pnl_usd") or 0.0)
                 pool_a += pnl_a
                 slots_a = max(0, slots_a - 1)
+                strat_mfe = res_a.get("mfe_pct")
+                try:
+                    strat_mfe = (
+                        float(strat_mfe) if strat_mfe is not None else None
+                    )
+                except (TypeError, ValueError):
+                    strat_mfe = None
+                # Unrestricted hold-window MFE (same definition as oos_r2 backtest).
+                actual_mfe: float | None = None
+                try:
+                    from oos_r2 import actual_mfe_pct as _act_mfe
+
+                    actual_mfe = _act_mfe(
+                        entry_price=entry_price,
+                        entry_time=entry_time,
+                        flag_date=flag_date,
+                        minute_bars=minute_bars,
+                        daily_bars=daily_bars,
+                    )
+                except Exception:
+                    actual_mfe = strat_mfe
+
                 a_rec.update({
                     "taken": True,
                     "shares": int(res_a.get("n_shares") or shares_a),
@@ -670,7 +858,8 @@ def execute_dual_pools(
                     "return_pct": res_a.get("total_return_pct"),
                     "days_held": res_a.get("days_held"),
                     "exit_reason_counts": res_a.get("exit_reason_counts"),
-                    "mfe_pct": res_a.get("mfe_pct"),
+                    "mfe_pct": strat_mfe,
+                    "actual_mfe": actual_mfe,
                     "pool_after_usd": round(pool_a, 4),
                     "tranches": tranche_rows(res_a),
                 })
@@ -683,12 +872,34 @@ def execute_dual_pools(
                 _win_rate(pa)
                 pa["closed_trades"].append(a_rec)
                 _equity_append(pa, pool_a, "close", ticker)
-                print(
-                    f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
-                    f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
-                    f"slots {slots_a}/{MAX_SLOTS}  "
-                    f"exits={res_a.get('exit_reason_counts')}"
-                )
+
+                # Complete prediction pair + rolling R² (one row per ticker|date).
+                if predicted_mfe is not None and actual_mfe is not None:
+                    rows = list(state.get("forward_predictions") or [])
+                    state["forward_predictions"] = upsert_forward_prediction(
+                        rows,
+                        ticker=ticker,
+                        flag_date=flag_date,
+                        predicted_mfe=predicted_mfe,
+                        actual_mfe=actual_mfe,
+                    )
+                    refresh_forward_r2(state)
+                    r2s = state.get("forward_oos_r2_stats") or {}
+                    print(
+                        f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
+                        f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
+                        f"slots {slots_a}/{MAX_SLOTS}  "
+                        f"exits={res_a.get('exit_reason_counts')}  "
+                        f"MFE act={actual_mfe:.2f}% pred={predicted_mfe:.2f}%  "
+                        f"| forward R²: {r2s.get('message')}"
+                    )
+                else:
+                    print(
+                        f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
+                        f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
+                        f"slots {slots_a}/{MAX_SLOTS}  "
+                        f"exits={res_a.get('exit_reason_counts')}"
+                    )
             state["pool_A_trailing"]["slots_open"] = slots_a
             state["pool_A_trailing"]["value_usd"] = round(pool_a, 4)
             save_state(state)
@@ -781,6 +992,50 @@ def execute_dual_pools(
             state["pool_B_target"]["value_usd"] = round(pool_b, 4)
             save_state(state)
         trades_b.append(b_rec)
+
+        # EOD fill: if prediction logged but A never closed with actual, complete
+        # the pair from unrestricted hold-window MFE (same as oos_r2).
+        if predicted_mfe is not None:
+            rows = list(state.get("forward_predictions") or [])
+            key = _prediction_key(ticker, flag_date)
+            pending = next(
+                (
+                    r for r in rows
+                    if _prediction_key(
+                        str(r.get("ticker") or ""),
+                        str(r.get("date") or r.get("flag_date") or ""),
+                    ) == key
+                    and r.get("actual_mfe") is None
+                ),
+                None,
+            )
+            if pending is not None:
+                try:
+                    from oos_r2 import actual_mfe_pct as _act_mfe
+
+                    eod_mfe = _act_mfe(
+                        entry_price=entry_price,
+                        entry_time=entry_time,
+                        flag_date=flag_date,
+                        minute_bars=minute_bars,
+                        daily_bars=daily_bars,
+                    )
+                except Exception:
+                    eod_mfe = None
+                if eod_mfe is not None:
+                    state["forward_predictions"] = upsert_forward_prediction(
+                        rows,
+                        ticker=ticker,
+                        flag_date=flag_date,
+                        predicted_mfe=predicted_mfe,
+                        actual_mfe=eod_mfe,
+                    )
+                    refresh_forward_r2(state)
+                    r2s = state.get("forward_oos_r2_stats") or {}
+                    print(
+                        f"  EOD MFE act={eod_mfe:.2f}% pred={predicted_mfe:.2f}%  "
+                        f"| forward R²: {r2s.get('message')}"
+                    )
 
         print(
             f"  pool values → A ${pool_a:.2f}  |  B ${pool_b:.2f}  "
@@ -960,6 +1215,11 @@ def run_day(
     # --- 5) EOD ---
     set_phase(state, "eod", "writing end-of-day summary")
     state["status"] = "complete"
+    try:
+        refresh_forward_r2(state)
+    except Exception as exc:
+        print(f"[live_forward] WARN: forward R² refresh skipped ({exc})")
+    r2s = state.get("forward_oos_r2_stats") or {}
     state["eod_summary"] = {
         "n_candidates": len(candidates),
         "tickers": report["tickers"],
@@ -981,7 +1241,14 @@ def run_day(
             for row in report["per_ticker"]
             if not row.get("skipped")
         },
+        "forward_oos_r2": state.get("forward_oos_r2"),
+        "forward_oos_r2_n": state.get("forward_oos_r2_n"),
+        "forward_oos_r2_message": r2s.get("message"),
     }
+    print(
+        f"[live_forward] forward OOS R²: {r2s.get('message')}  "
+        f"(predictions file: {PREDICTIONS_PATH.name})"
+    )
     state["report"] = {
         "per_ticker": report["per_ticker"],
         "winner": report["winner"],

@@ -1,0 +1,1260 @@
+{
+  "generated_at": "2026-08-23T17:19:23.256768+00:00",
+  "informational_only": true,
+  "metric": "R2(predicted_mfe_p50, actual_mfe)",
+  "predicted": "profile.percentiles.mfe.p50 \u2192 percent",
+  "actual": "peak high vs entry over flag-day 1-min (post-entry) + up to 19 subsequent daily highs (MAX_HOLD_TRADING_DAYS=20)",
+  "train_frac": 0.7,
+  "max_hold_trading_days": 20,
+  "n_usable": 116,
+  "n_skipped": 24,
+  "skip_reasons": {
+    "no_mfe_p50": 24
+  },
+  "date_span": {
+    "first": "2023-11-15",
+    "last": "2026-08-21",
+    "n_unique_dates": 19,
+    "per_date_counts": {
+      "2023-11-15": 1,
+      "2024-10-02": 1,
+      "2024-10-23": 1,
+      "2024-11-11": 1,
+      "2024-11-25": 1,
+      "2025-05-28": 1,
+      "2025-06-09": 1,
+      "2025-06-30": 1,
+      "2025-07-16": 1,
+      "2025-08-04": 1,
+      "2025-08-15": 1,
+      "2025-09-12": 1,
+      "2026-02-26": 1,
+      "2026-06-15": 1,
+      "2026-08-12": 1,
+      "2026-08-18": 9,
+      "2026-08-19": 19,
+      "2026-08-20": 71,
+      "2026-08-21": 2
+    }
+  },
+  "in_sample": {
+    "label": "in_sample",
+    "n": 81,
+    "r2": -0.085525,
+    "correlation": 0.097399,
+    "rmse_pct": 58.3193,
+    "mean_actual_mfe_pct": 24.1614,
+    "mean_predicted_mfe_pct": 6.9577,
+    "flag_dates": [
+      "2023-11-15",
+      "2024-10-02",
+      "2024-10-23",
+      "2024-11-11",
+      "2024-11-25",
+      "2025-05-28",
+      "2025-06-09",
+      "2025-06-30",
+      "2025-07-16",
+      "2025-08-04",
+      "2025-08-15",
+      "2025-09-12",
+      "2026-02-26",
+      "2026-06-15",
+      "2026-08-12",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20"
+    ],
+    "n_unique_dates": 18
+  },
+  "out_of_sample": {
+    "label": "out_of_sample",
+    "n": 35,
+    "r2": -0.236705,
+    "correlation": 0.168336,
+    "rmse_pct": 9.9085,
+    "mean_actual_mfe_pct": 9.6007,
+    "mean_predicted_mfe_pct": 5.7175,
+    "flag_dates": [
+      "2026-08-20",
+      "2026-08-21"
+    ],
+    "n_unique_dates": 2
+  },
+  "r2_gap_is_minus_oos": 0.15118,
+  "gap_interpretation": "Moderate IS\u2192OOS drop: some optimism on the older slice; treat OOS as the honest number.",
+  "health_warning_lines": [
+    "N_usable=116 setups across only 19 unique flag dates (full setups.json has ~21 unique days historically).",
+    "Heavy clustering: 2026-08-20 alone has 71/116 usable pairs \u2014 one day can dominate either split.",
+    "This backtest R\u00b2 is a NOISY SANITY FLOOR, not a trustworthy estimate of live predictive power.",
+    "The real test is a FORWARD ROLLING R\u00b2: each new trading day, score yesterday's predictions vs realized MFE and accumulate \u2014 that is the number that earns trust.",
+    "OOS R\u00b2=-0.2367 is negative: on held-out dates the profiler is worse than predicting the average actual MFE."
+  ],
+  "plain_english": {
+    "r2": "Share of actual-MFE variance explained by predicted MFE p50. 1=perfect, 0=no better than mean, <0=worse than mean.",
+    "negative_oos_r2": "Negative OOS R\u00b2 means the profiler predicts worse than just guessing the average MFE.",
+    "gap": "Moderate IS\u2192OOS drop: some optimism on the older slice; treat OOS as the honest number."
+  },
+  "pairs": [
+    {
+      "ticker": "ABUS",
+      "flag_date": "2023-11-15",
+      "entry_price": 1.94,
+      "entry_time": "2023-11-15T09:30:00-05:00",
+      "predicted_mfe_pct": 4.4586,
+      "actual_mfe_pct": 10.8247,
+      "confidence": "MEDIUM",
+      "error_pct": -6.3661
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2024-10-02",
+      "entry_price": 5.56,
+      "entry_time": "2024-10-02T09:30:00-04:00",
+      "predicted_mfe_pct": 5.2521,
+      "actual_mfe_pct": 18.5252,
+      "confidence": "MEDIUM",
+      "error_pct": -13.2731
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2024-10-23",
+      "entry_price": 6.5185,
+      "entry_time": "2024-10-23T09:30:00-04:00",
+      "predicted_mfe_pct": 5.2521,
+      "actual_mfe_pct": 1.0969,
+      "confidence": "HIGH",
+      "error_pct": 4.1552
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2024-11-11",
+      "entry_price": 5.3799,
+      "entry_time": "2024-11-11T09:30:00-05:00",
+      "predicted_mfe_pct": 5.5244,
+      "actual_mfe_pct": 73.4233,
+      "confidence": "HIGH",
+      "error_pct": -67.8989
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2024-11-25",
+      "entry_price": 7.38,
+      "entry_time": "2024-11-25T09:30:00-05:00",
+      "predicted_mfe_pct": 6.9823,
+      "actual_mfe_pct": 26.4228,
+      "confidence": "HIGH",
+      "error_pct": -19.4405
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-05-28",
+      "entry_price": 8.2581,
+      "entry_time": "2025-05-28T09:30:00-04:00",
+      "predicted_mfe_pct": 13.9108,
+      "actual_mfe_pct": 24.4838,
+      "confidence": "HIGH",
+      "error_pct": -10.573
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-06-09",
+      "entry_price": 9.058,
+      "entry_time": "2025-06-09T09:30:00-04:00",
+      "predicted_mfe_pct": 13.9108,
+      "actual_mfe_pct": 29.278,
+      "confidence": "HIGH",
+      "error_pct": -15.3672
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-06-30",
+      "entry_price": 9.985,
+      "entry_time": "2025-06-30T09:30:00-04:00",
+      "predicted_mfe_pct": 13.9108,
+      "actual_mfe_pct": 85.7787,
+      "confidence": "HIGH",
+      "error_pct": -71.8679
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-07-16",
+      "entry_price": 14.54,
+      "entry_time": "2025-07-16T09:30:00-04:00",
+      "predicted_mfe_pct": 10.1678,
+      "actual_mfe_pct": 44.0853,
+      "confidence": "HIGH",
+      "error_pct": -33.9175
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-08-04",
+      "entry_price": 18.38,
+      "entry_time": "2025-08-04T09:30:00-04:00",
+      "predicted_mfe_pct": 9.4392,
+      "actual_mfe_pct": 13.9826,
+      "confidence": "HIGH",
+      "error_pct": -4.5434
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-08-15",
+      "entry_price": 18.4586,
+      "entry_time": "2025-08-15T09:30:00-04:00",
+      "predicted_mfe_pct": 8.3247,
+      "actual_mfe_pct": 2.3371,
+      "confidence": "HIGH",
+      "error_pct": 5.9876
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2025-09-12",
+      "entry_price": 14.6298,
+      "entry_time": "2025-09-12T09:30:00-04:00",
+      "predicted_mfe_pct": 8.3247,
+      "actual_mfe_pct": 36.5706,
+      "confidence": "HIGH",
+      "error_pct": -28.2459
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2026-02-26",
+      "entry_price": 10.635,
+      "entry_time": "2026-02-26T09:30:00-05:00",
+      "predicted_mfe_pct": 8.3247,
+      "actual_mfe_pct": 3.0559,
+      "confidence": "HIGH",
+      "error_pct": 5.2688
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2026-06-15",
+      "entry_price": 9.71,
+      "entry_time": "2026-06-15T09:30:00-04:00",
+      "predicted_mfe_pct": 8.3247,
+      "actual_mfe_pct": 6.0247,
+      "confidence": "HIGH",
+      "error_pct": 2.3
+    },
+    {
+      "ticker": "SMCI",
+      "flag_date": "2026-08-12",
+      "entry_price": 34.36,
+      "entry_time": "2026-08-12T09:30:00-04:00",
+      "predicted_mfe_pct": 6.0204,
+      "actual_mfe_pct": 23.1374,
+      "confidence": "HIGH",
+      "error_pct": -17.117
+    },
+    {
+      "ticker": "AMLX",
+      "flag_date": "2026-08-18",
+      "entry_price": 29.5899,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 6.6667,
+      "actual_mfe_pct": 39.0339,
+      "confidence": "MEDIUM",
+      "error_pct": -32.3672
+    },
+    {
+      "ticker": "AS",
+      "flag_date": "2026-08-18",
+      "entry_price": 33.695,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 3.1154,
+      "actual_mfe_pct": 3.3981,
+      "confidence": "MEDIUM",
+      "error_pct": -0.2827
+    },
+    {
+      "ticker": "ASYS",
+      "flag_date": "2026-08-18",
+      "entry_price": 17.4,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 4.8498,
+      "actual_mfe_pct": 1.6667,
+      "confidence": "HIGH",
+      "error_pct": 3.1831
+    },
+    {
+      "ticker": "BBWI",
+      "flag_date": "2026-08-18",
+      "entry_price": 19.18,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 3.3875,
+      "actual_mfe_pct": 8.5245,
+      "confidence": "MEDIUM",
+      "error_pct": -5.137
+    },
+    {
+      "ticker": "DUOT",
+      "flag_date": "2026-08-18",
+      "entry_price": 11.6501,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 8.3172,
+      "actual_mfe_pct": 10.1278,
+      "confidence": "HIGH",
+      "error_pct": -1.8106
+    },
+    {
+      "ticker": "KURA",
+      "flag_date": "2026-08-18",
+      "entry_price": 12.1999,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 3.7978,
+      "actual_mfe_pct": 5.7386,
+      "confidence": "MEDIUM",
+      "error_pct": -1.9408
+    },
+    {
+      "ticker": "SXTC",
+      "flag_date": "2026-08-18",
+      "entry_price": 4.789,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 12.1916,
+      "actual_mfe_pct": 19.0228,
+      "confidence": "HIGH",
+      "error_pct": -6.8312
+    },
+    {
+      "ticker": "TNON",
+      "flag_date": "2026-08-18",
+      "entry_price": 5.09,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 12.7743,
+      "actual_mfe_pct": 250.4912,
+      "confidence": "HIGH",
+      "error_pct": -237.7169
+    },
+    {
+      "ticker": "WEAV",
+      "flag_date": "2026-08-18",
+      "entry_price": 7.29,
+      "entry_time": "2026-08-18T09:30:00-04:00",
+      "predicted_mfe_pct": 5.0888,
+      "actual_mfe_pct": 0.4115,
+      "confidence": "MEDIUM",
+      "error_pct": 4.6773
+    },
+    {
+      "ticker": "AG",
+      "flag_date": "2026-08-19",
+      "entry_price": 19.87,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 6.4797,
+      "actual_mfe_pct": 10.8203,
+      "confidence": "MEDIUM",
+      "error_pct": -4.3406
+    },
+    {
+      "ticker": "ARCT",
+      "flag_date": "2026-08-19",
+      "entry_price": 10.2,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 6.4885,
+      "actual_mfe_pct": 32.3529,
+      "confidence": "MEDIUM",
+      "error_pct": -25.8644
+    },
+    {
+      "ticker": "BEAM",
+      "flag_date": "2026-08-19",
+      "entry_price": 28.1427,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 6.3492,
+      "actual_mfe_pct": 8.3762,
+      "confidence": "MEDIUM",
+      "error_pct": -2.027
+    },
+    {
+      "ticker": "CCXI",
+      "flag_date": "2026-08-19",
+      "entry_price": 16.2352,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 6.3042,
+      "actual_mfe_pct": 1.5078,
+      "confidence": "LOW",
+      "error_pct": 4.7964
+    },
+    {
+      "ticker": "CSTM",
+      "flag_date": "2026-08-19",
+      "entry_price": 28.25,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 3.2566,
+      "actual_mfe_pct": 2.2655,
+      "confidence": "MEDIUM",
+      "error_pct": 0.9911
+    },
+    {
+      "ticker": "DNA",
+      "flag_date": "2026-08-19",
+      "entry_price": 7.02,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 12.3318,
+      "actual_mfe_pct": 10.3775,
+      "confidence": "MEDIUM",
+      "error_pct": 1.9543
+    },
+    {
+      "ticker": "HYMC",
+      "flag_date": "2026-08-19",
+      "entry_price": 26.4311,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 6.4832,
+      "actual_mfe_pct": 6.579,
+      "confidence": "HIGH",
+      "error_pct": -0.0958
+    },
+    {
+      "ticker": "IAG",
+      "flag_date": "2026-08-19",
+      "entry_price": 19.77,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 4.1897,
+      "actual_mfe_pct": 8.0425,
+      "confidence": "MEDIUM",
+      "error_pct": -3.8528
+    },
+    {
+      "ticker": "IBRX",
+      "flag_date": "2026-08-19",
+      "entry_price": 8.19,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 8.1613,
+      "actual_mfe_pct": 0.9768,
+      "confidence": "HIGH",
+      "error_pct": 7.1845
+    },
+    {
+      "ticker": "KGC",
+      "flag_date": "2026-08-19",
+      "entry_price": 28.69,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 3.2762,
+      "actual_mfe_pct": 14.7264,
+      "confidence": "LOW",
+      "error_pct": -11.4502
+    },
+    {
+      "ticker": "MRVI",
+      "flag_date": "2026-08-19",
+      "entry_price": 7.015,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 2.834,
+      "actual_mfe_pct": 26.4433,
+      "confidence": "MEDIUM",
+      "error_pct": -23.6093
+    },
+    {
+      "ticker": "NTLA",
+      "flag_date": "2026-08-19",
+      "entry_price": 12.275,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 5.0434,
+      "actual_mfe_pct": 8.7576,
+      "confidence": "MEDIUM",
+      "error_pct": -3.7142
+    },
+    {
+      "ticker": "NVAX",
+      "flag_date": "2026-08-19",
+      "entry_price": 8.485,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 4.5117,
+      "actual_mfe_pct": 8.4207,
+      "confidence": "MEDIUM",
+      "error_pct": -3.909
+    },
+    {
+      "ticker": "PPC",
+      "flag_date": "2026-08-19",
+      "entry_price": 30.52,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 2.3066,
+      "actual_mfe_pct": 7.6343,
+      "confidence": "MEDIUM",
+      "error_pct": -5.3277
+    },
+    {
+      "ticker": "PSNL",
+      "flag_date": "2026-08-19",
+      "entry_price": 15.28,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 10.461,
+      "actual_mfe_pct": 23.6257,
+      "confidence": "MEDIUM",
+      "error_pct": -13.1647
+    },
+    {
+      "ticker": "SKK",
+      "flag_date": "2026-08-19",
+      "entry_price": 5.09,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 10.3846,
+      "actual_mfe_pct": 73.0845,
+      "confidence": "HIGH",
+      "error_pct": -62.6999
+    },
+    {
+      "ticker": "SRPT",
+      "flag_date": "2026-08-19",
+      "entry_price": 18.8313,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 3.9637,
+      "actual_mfe_pct": 7.2151,
+      "confidence": "MEDIUM",
+      "error_pct": -3.2514
+    },
+    {
+      "ticker": "STLA",
+      "flag_date": "2026-08-19",
+      "entry_price": 5.315,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 1.5044,
+      "actual_mfe_pct": 2.9163,
+      "confidence": "MEDIUM",
+      "error_pct": -1.4119
+    },
+    {
+      "ticker": "ZSTK",
+      "flag_date": "2026-08-19",
+      "entry_price": 2.29,
+      "entry_time": "2026-08-19T09:30:00-04:00",
+      "predicted_mfe_pct": 2.7027,
+      "actual_mfe_pct": 441.4847,
+      "confidence": "MEDIUM",
+      "error_pct": -438.782
+    },
+    {
+      "ticker": "ABTC",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.18,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.2396,
+      "actual_mfe_pct": 9.5355,
+      "confidence": "MEDIUM",
+      "error_pct": -1.2959
+    },
+    {
+      "ticker": "ADUR",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.4,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 7.7657,
+      "actual_mfe_pct": 8.0519,
+      "confidence": "MEDIUM",
+      "error_pct": -0.2862
+    },
+    {
+      "ticker": "AEHL",
+      "flag_date": "2026-08-20",
+      "entry_price": 5.85,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 20.1945,
+      "actual_mfe_pct": 22.7333,
+      "confidence": "HIGH",
+      "error_pct": -2.5388
+    },
+    {
+      "ticker": "AGRO",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.57,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.3301,
+      "actual_mfe_pct": 5.8657,
+      "confidence": "MEDIUM",
+      "error_pct": -2.5356
+    },
+    {
+      "ticker": "ALM",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.8,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.3667,
+      "actual_mfe_pct": 20.6329,
+      "confidence": "MEDIUM",
+      "error_pct": -18.2662
+    },
+    {
+      "ticker": "ARCT",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.25,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.4885,
+      "actual_mfe_pct": 31.7073,
+      "confidence": "MEDIUM",
+      "error_pct": -25.2188
+    },
+    {
+      "ticker": "ASST",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.43,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 19.7183,
+      "actual_mfe_pct": 23.72,
+      "confidence": "HIGH",
+      "error_pct": -4.0017
+    },
+    {
+      "ticker": "AUPH",
+      "flag_date": "2026-08-20",
+      "entry_price": 16.635,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.4804,
+      "actual_mfe_pct": 7.0033,
+      "confidence": "MEDIUM",
+      "error_pct": -3.5229
+    },
+    {
+      "ticker": "AZTA",
+      "flag_date": "2026-08-20",
+      "entry_price": 35.325,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.5197,
+      "actual_mfe_pct": 6.1288,
+      "confidence": "MEDIUM",
+      "error_pct": -2.6091
+    },
+    {
+      "ticker": "BALY",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.72,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.1406,
+      "actual_mfe_pct": 20.2982,
+      "confidence": "MEDIUM",
+      "error_pct": -16.1576
+    },
+    {
+      "ticker": "BMNR",
+      "flag_date": "2026-08-20",
+      "entry_price": 21.12,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.4665,
+      "actual_mfe_pct": 10.5114,
+      "confidence": "HIGH",
+      "error_pct": -2.0449
+    },
+    {
+      "ticker": "BTDR",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.23,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 12.9703,
+      "actual_mfe_pct": 15.2493,
+      "confidence": "HIGH",
+      "error_pct": -2.279
+    },
+    {
+      "ticker": "CARL",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.5,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 10.6807,
+      "actual_mfe_pct": 11.1613,
+      "confidence": "LOW",
+      "error_pct": -0.4806
+    },
+    {
+      "ticker": "CERT",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.43,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.5303,
+      "actual_mfe_pct": 5.3974,
+      "confidence": "MEDIUM",
+      "error_pct": -0.8671
+    },
+    {
+      "ticker": "CGAU",
+      "flag_date": "2026-08-20",
+      "entry_price": 22.59,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.9989,
+      "actual_mfe_pct": 6.9278,
+      "confidence": "MEDIUM",
+      "error_pct": -4.9289
+    },
+    {
+      "ticker": "CIFR",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.865,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 7.8998,
+      "actual_mfe_pct": 14.907,
+      "confidence": "HIGH",
+      "error_pct": -7.0072
+    },
+    {
+      "ticker": "CLSK",
+      "flag_date": "2026-08-20",
+      "entry_price": 12.21,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.0671,
+      "actual_mfe_pct": 9.2547,
+      "confidence": "HIGH",
+      "error_pct": -1.1876
+    },
+    {
+      "ticker": "CNH",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.325,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.9404,
+      "actual_mfe_pct": 15.3511,
+      "confidence": "LOW",
+      "error_pct": -13.4107
+    },
+    {
+      "ticker": "CXW",
+      "flag_date": "2026-08-20",
+      "entry_price": 32.2,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.5325,
+      "actual_mfe_pct": 5.7453,
+      "confidence": "MEDIUM",
+      "error_pct": -4.2128
+    },
+    {
+      "ticker": "EE",
+      "flag_date": "2026-08-20",
+      "entry_price": 38.06,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.7883,
+      "actual_mfe_pct": 5.5964,
+      "confidence": "MEDIUM",
+      "error_pct": -2.8081
+    },
+    {
+      "ticker": "ERO",
+      "flag_date": "2026-08-20",
+      "entry_price": 33.375,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.3297,
+      "actual_mfe_pct": 18.1609,
+      "confidence": "MEDIUM",
+      "error_pct": -15.8312
+    },
+    {
+      "ticker": "FNKO",
+      "flag_date": "2026-08-20",
+      "entry_price": 5.9,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.5172,
+      "actual_mfe_pct": 11.6797,
+      "confidence": "MEDIUM",
+      "error_pct": -10.1625
+    },
+    {
+      "ticker": "FRMI",
+      "flag_date": "2026-08-20",
+      "entry_price": 5.695,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 12.9521,
+      "actual_mfe_pct": 7.4627,
+      "confidence": "LOW",
+      "error_pct": 5.4894
+    },
+    {
+      "ticker": "FUBO",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.2929,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 10.1266,
+      "actual_mfe_pct": 5.8011,
+      "confidence": "HIGH",
+      "error_pct": 4.3255
+    },
+    {
+      "ticker": "GEO",
+      "flag_date": "2026-08-20",
+      "entry_price": 30.74,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.4113,
+      "actual_mfe_pct": 7.0917,
+      "confidence": "MEDIUM",
+      "error_pct": -4.6804
+    },
+    {
+      "ticker": "GLXY",
+      "flag_date": "2026-08-20",
+      "entry_price": 22.7801,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.1518,
+      "actual_mfe_pct": 10.1839,
+      "confidence": "MEDIUM",
+      "error_pct": -4.0321
+    },
+    {
+      "ticker": "GRRR",
+      "flag_date": "2026-08-20",
+      "entry_price": 14.81,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.4382,
+      "actual_mfe_pct": 9.0479,
+      "confidence": "HIGH",
+      "error_pct": -2.6097
+    },
+    {
+      "ticker": "HELP",
+      "flag_date": "2026-08-20",
+      "entry_price": 12.0794,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.0071,
+      "actual_mfe_pct": 7.2073,
+      "confidence": "MEDIUM",
+      "error_pct": -1.2002
+    },
+    {
+      "ticker": "HQ",
+      "flag_date": "2026-08-20",
+      "entry_price": 16.99,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 9.3846,
+      "actual_mfe_pct": 23.6021,
+      "confidence": "MEDIUM",
+      "error_pct": -14.2175
+    },
+    {
+      "ticker": "IAG",
+      "flag_date": "2026-08-20",
+      "entry_price": 19.675,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.1897,
+      "actual_mfe_pct": 8.5642,
+      "confidence": "MEDIUM",
+      "error_pct": -4.3745
+    },
+    {
+      "ticker": "IOVA",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.09,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 5.9554,
+      "actual_mfe_pct": 15.6984,
+      "confidence": "HIGH",
+      "error_pct": -9.743
+    },
+    {
+      "ticker": "IPI",
+      "flag_date": "2026-08-20",
+      "entry_price": 36.97,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.3189,
+      "actual_mfe_pct": 7.0327,
+      "confidence": "MEDIUM",
+      "error_pct": -0.7138
+    },
+    {
+      "ticker": "IPST",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.52,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 17.0838,
+      "actual_mfe_pct": 79.2453,
+      "confidence": "MEDIUM",
+      "error_pct": -62.1615
+    },
+    {
+      "ticker": "KGC",
+      "flag_date": "2026-08-20",
+      "entry_price": 29.7,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.2762,
+      "actual_mfe_pct": 10.8249,
+      "confidence": "LOW",
+      "error_pct": -7.5487
+    },
+    {
+      "ticker": "KIDZ",
+      "flag_date": "2026-08-20",
+      "entry_price": 4.6538,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 15.983,
+      "actual_mfe_pct": 13.8854,
+      "confidence": "MEDIUM",
+      "error_pct": 2.0976
+    },
+    {
+      "ticker": "LIF",
+      "flag_date": "2026-08-20",
+      "entry_price": 44.955,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.9936,
+      "actual_mfe_pct": 4.8604,
+      "confidence": "MEDIUM",
+      "error_pct": 0.1332
+    },
+    {
+      "ticker": "LWAY",
+      "flag_date": "2026-08-20",
+      "entry_price": 25.525,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.1767,
+      "actual_mfe_pct": 3.5064,
+      "confidence": "MEDIUM",
+      "error_pct": 2.6703
+    },
+    {
+      "ticker": "MARA",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.025,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.8094,
+      "actual_mfe_pct": 24.389,
+      "confidence": "HIGH",
+      "error_pct": -17.5796
+    },
+    {
+      "ticker": "MASS",
+      "flag_date": "2026-08-20",
+      "entry_price": 10.01,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 13.7329,
+      "actual_mfe_pct": 6.9201,
+      "confidence": "MEDIUM",
+      "error_pct": 6.8128
+    },
+    {
+      "ticker": "MOS",
+      "flag_date": "2026-08-20",
+      "entry_price": 22.3228,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.4561,
+      "actual_mfe_pct": 10.918,
+      "confidence": "LOW",
+      "error_pct": -8.4619
+    },
+    {
+      "ticker": "MRVI",
+      "flag_date": "2026-08-20",
+      "entry_price": 7.73,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.834,
+      "actual_mfe_pct": 14.7477,
+      "confidence": "MEDIUM",
+      "error_pct": -11.9137
+    },
+    {
+      "ticker": "NEXT",
+      "flag_date": "2026-08-20",
+      "entry_price": 6.86,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 5.6391,
+      "actual_mfe_pct": 5.3936,
+      "confidence": "MEDIUM",
+      "error_pct": 0.2455
+    },
+    {
+      "ticker": "NOG",
+      "flag_date": "2026-08-20",
+      "entry_price": 26.62,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.7915,
+      "actual_mfe_pct": 2.7423,
+      "confidence": "MEDIUM",
+      "error_pct": 1.0492
+    },
+    {
+      "ticker": "PGEN",
+      "flag_date": "2026-08-20",
+      "entry_price": 7.0101,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.0071,
+      "actual_mfe_pct": 6.9885,
+      "confidence": "HIGH",
+      "error_pct": 1.0186
+    },
+    {
+      "ticker": "PR",
+      "flag_date": "2026-08-20",
+      "entry_price": 23.54,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.0568,
+      "actual_mfe_pct": 2.3364,
+      "confidence": "MEDIUM",
+      "error_pct": -1.2796
+    },
+    {
+      "ticker": "PRLD",
+      "flag_date": "2026-08-20",
+      "entry_price": 5.73,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.8435,
+      "actual_mfe_pct": 18.9564,
+      "confidence": "HIGH",
+      "error_pct": -10.1129
+    },
+    {
+      "ticker": "PRPO",
+      "flag_date": "2026-08-20",
+      "entry_price": 27.54,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 7.881,
+      "actual_mfe_pct": 10.5664,
+      "confidence": "HIGH",
+      "error_pct": -2.6854
+    },
+    {
+      "ticker": "PSNL",
+      "flag_date": "2026-08-20",
+      "entry_price": 16.4699,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 10.461,
+      "actual_mfe_pct": 14.6941,
+      "confidence": "MEDIUM",
+      "error_pct": -4.2331
+    },
+    {
+      "ticker": "PURR",
+      "flag_date": "2026-08-20",
+      "entry_price": 8.97,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 5.8824,
+      "actual_mfe_pct": 25.641,
+      "confidence": "MEDIUM",
+      "error_pct": -19.7586
+    },
+    {
+      "ticker": "QDEL",
+      "flag_date": "2026-08-20",
+      "entry_price": 13.5155,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 6.741,
+      "actual_mfe_pct": 14.6831,
+      "confidence": "MEDIUM",
+      "error_pct": -7.9421
+    },
+    {
+      "ticker": "RIOT",
+      "flag_date": "2026-08-20",
+      "entry_price": 19.78,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.1538,
+      "actual_mfe_pct": 12.2346,
+      "confidence": "MEDIUM",
+      "error_pct": -10.0808
+    },
+    {
+      "ticker": "RRGB",
+      "flag_date": "2026-08-20",
+      "entry_price": 9.33,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 7.533,
+      "actual_mfe_pct": 7.1811,
+      "confidence": "HIGH",
+      "error_pct": 0.3519
+    },
+    {
+      "ticker": "RTB",
+      "flag_date": "2026-08-20",
+      "entry_price": 13.32,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 8.4239,
+      "actual_mfe_pct": 12.6126,
+      "confidence": "MEDIUM",
+      "error_pct": -4.1887
+    },
+    {
+      "ticker": "SBET",
+      "flag_date": "2026-08-20",
+      "entry_price": 7.43,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 10.935,
+      "actual_mfe_pct": 9.4886,
+      "confidence": "HIGH",
+      "error_pct": 1.4464
+    },
+    {
+      "ticker": "SDRL",
+      "flag_date": "2026-08-20",
+      "entry_price": 47.5,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.7061,
+      "actual_mfe_pct": 3.0526,
+      "confidence": "MEDIUM",
+      "error_pct": -1.3465
+    },
+    {
+      "ticker": "SGRY",
+      "flag_date": "2026-08-20",
+      "entry_price": 14.015,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 1.6916,
+      "actual_mfe_pct": 3.8173,
+      "confidence": "MEDIUM",
+      "error_pct": -2.1257
+    },
+    {
+      "ticker": "SM",
+      "flag_date": "2026-08-20",
+      "entry_price": 36.98,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 0.525,
+      "actual_mfe_pct": 3.4343,
+      "confidence": "LOW",
+      "error_pct": -2.9093
+    },
+    {
+      "ticker": "SOC",
+      "flag_date": "2026-08-20",
+      "entry_price": 5.26,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 7.7133,
+      "actual_mfe_pct": 3.327,
+      "confidence": "HIGH",
+      "error_pct": 4.3863
+    },
+    {
+      "ticker": "SSRM",
+      "flag_date": "2026-08-20",
+      "entry_price": 35.39,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.4714,
+      "actual_mfe_pct": 8.5052,
+      "confidence": "MEDIUM",
+      "error_pct": -6.0338
+    },
+    {
+      "ticker": "TALO",
+      "flag_date": "2026-08-20",
+      "entry_price": 17.665,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.7736,
+      "actual_mfe_pct": 4.3872,
+      "confidence": "MEDIUM",
+      "error_pct": -0.6136
+    },
+    {
+      "ticker": "TH",
+      "flag_date": "2026-08-20",
+      "entry_price": 17.555,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.7794,
+      "actual_mfe_pct": 2.1361,
+      "confidence": "HIGH",
+      "error_pct": 1.6433
+    },
+    {
+      "ticker": "TWFG",
+      "flag_date": "2026-08-20",
+      "entry_price": 27.5,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 0.6385,
+      "actual_mfe_pct": 5.9636,
+      "confidence": "MEDIUM",
+      "error_pct": -5.3251
+    },
+    {
+      "ticker": "TWIN",
+      "flag_date": "2026-08-20",
+      "entry_price": 24.9899,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 3.641,
+      "actual_mfe_pct": 0.8407,
+      "confidence": "LOW",
+      "error_pct": 2.8003
+    },
+    {
+      "ticker": "USAU",
+      "flag_date": "2026-08-20",
+      "entry_price": 16.05,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 5.0573,
+      "actual_mfe_pct": 7.0405,
+      "confidence": "MEDIUM",
+      "error_pct": -1.9832
+    },
+    {
+      "ticker": "VG",
+      "flag_date": "2026-08-20",
+      "entry_price": 14.185,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.9566,
+      "actual_mfe_pct": 3.2781,
+      "confidence": "MEDIUM",
+      "error_pct": 1.6785
+    },
+    {
+      "ticker": "WETO",
+      "flag_date": "2026-08-20",
+      "entry_price": 29.2301,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 13.587,
+      "actual_mfe_pct": 24.1528,
+      "confidence": "MEDIUM",
+      "error_pct": -10.5658
+    },
+    {
+      "ticker": "WULF",
+      "flag_date": "2026-08-20",
+      "entry_price": 15.6,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 5.1525,
+      "actual_mfe_pct": 12.1154,
+      "confidence": "HIGH",
+      "error_pct": -6.9629
+    },
+    {
+      "ticker": "XGN",
+      "flag_date": "2026-08-20",
+      "entry_price": 7.2,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 9.9115,
+      "actual_mfe_pct": 11.0097,
+      "confidence": "HIGH",
+      "error_pct": -1.0982
+    },
+    {
+      "ticker": "ZBIO",
+      "flag_date": "2026-08-20",
+      "entry_price": 30.72,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 16.0839,
+      "actual_mfe_pct": 6.7383,
+      "confidence": "MEDIUM",
+      "error_pct": 9.3456
+    },
+    {
+      "ticker": "ZIP",
+      "flag_date": "2026-08-20",
+      "entry_price": 4.95,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 4.7182,
+      "actual_mfe_pct": 6.9697,
+      "confidence": "MEDIUM",
+      "error_pct": -2.2515
+    },
+    {
+      "ticker": "ZSTK",
+      "flag_date": "2026-08-20",
+      "entry_price": 4.55,
+      "entry_time": "2026-08-20T09:30:00-04:00",
+      "predicted_mfe_pct": 2.7027,
+      "actual_mfe_pct": 48.1319,
+      "confidence": "MEDIUM",
+      "error_pct": -45.4292
+    },
+    {
+      "ticker": "ABUS",
+      "flag_date": "2026-08-21",
+      "entry_price": 5.2381,
+      "entry_time": "2026-08-21T09:30:00-04:00",
+      "predicted_mfe_pct": 0.1081,
+      "actual_mfe_pct": 4.0454,
+      "confidence": "LOW",
+      "error_pct": -3.9373
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2026-08-21",
+      "entry_price": 7.7,
+      "entry_time": "2026-08-21T09:30:00-04:00",
+      "predicted_mfe_pct": 5.5244,
+      "actual_mfe_pct": 0.974,
+      "confidence": "HIGH",
+      "error_pct": 4.5504
+    }
+  ]
+}

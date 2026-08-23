@@ -1323,6 +1323,133 @@ def _lab_tranche_exits(tranches: list | None) -> str:
     return ", ".join(uniq) if uniq else "—"
 
 
+OOS_R2_BACKTEST_PATH = ROOT / "strategy_lab" / "results" / "oos_r2_backtest.json"
+# Forward / gap R² is noise below this; still compute in runner, just don't show.
+OOS_R2_MIN_N = 20
+
+
+def _load_oos_r2_backtest() -> dict | None:
+    """Static historical OOS R² from oos_r2.py (best-effort)."""
+    if not OOS_R2_BACKTEST_PATH.exists():
+        return None
+    try:
+        data = json.loads(OOS_R2_BACKTEST_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _r2_gap_interpretation(
+    *,
+    backtest_r2: float | None,
+    forward_r2: float | None,
+    backtest_n: int,
+    forward_n: int,
+    min_n: int = OOS_R2_MIN_N,
+) -> str:
+    """
+    One-line gap read between backtest and live forward R².
+    Only when BOTH sides have >= min_n completed pairs.
+    """
+    if backtest_n < min_n or forward_n < min_n:
+        return "not enough forward data yet"
+    if backtest_r2 is None or forward_r2 is None:
+        return "not enough forward data yet"
+    gap = float(forward_r2) - float(backtest_r2)
+    if forward_r2 >= backtest_r2 and forward_r2 > 0:
+        return "edge holding out-of-sample"
+    if forward_r2 < 0 or gap < -0.15:
+        return "possible overfit — predictions not holding live"
+    if forward_r2 >= backtest_r2:
+        return "forward ≥ backtest but still weak (near/below zero)"
+    return "forward below backtest — watch as N grows"
+
+
+def _render_strategy_lab_r2_panel(state: dict) -> None:
+    """
+    Side-by-side Backtest OOS R² vs Forward rolling OOS R².
+    Never raises — missing/small-N → collecting-data UI.
+    """
+    st.subheader("Out-of-Sample R²")
+    st.caption(
+        "Negative R² means the profiler is worse than predicting the average MFE. "
+        f"R² needs a meaningful sample (>={OOS_R2_MIN_N}) to be trustworthy; "
+        "small-N values are noise. "
+        "Forward R² is true OOS by construction (live / replay setups the strategy "
+        "never trained on)."
+    )
+
+    bt = _load_oos_r2_backtest()
+    bt_oos = (bt or {}).get("out_of_sample") or {}
+    try:
+        bt_r2 = float(bt_oos["r2"]) if bt_oos.get("r2") is not None else None
+    except (TypeError, ValueError):
+        bt_r2 = None
+    try:
+        bt_n = int(bt_oos.get("n") or 0)
+    except (TypeError, ValueError):
+        bt_n = 0
+
+    fwd_stats = state.get("forward_oos_r2_stats") or {}
+    try:
+        fwd_n = int(
+            state.get("forward_oos_r2_n")
+            if state.get("forward_oos_r2_n") is not None
+            else fwd_stats.get("n") or 0
+        )
+    except (TypeError, ValueError):
+        fwd_n = 0
+    fwd_r2_raw = state.get("forward_oos_r2")
+    if fwd_r2_raw is None:
+        fwd_r2_raw = fwd_stats.get("r2")
+    try:
+        fwd_r2 = float(fwd_r2_raw) if fwd_r2_raw is not None else None
+    except (TypeError, ValueError):
+        fwd_r2 = None
+
+    fwd_ready = fwd_n >= OOS_R2_MIN_N and fwd_r2 is not None
+    gap_ready = (
+        bt_n >= OOS_R2_MIN_N
+        and fwd_n >= OOS_R2_MIN_N
+        and bt_r2 is not None
+        and fwd_r2 is not None
+    )
+
+    col_bt, col_fwd = st.columns(2)
+    with col_bt:
+        st.markdown("**Backtest (historical, noisy)**")
+        if bt_r2 is None:
+            st.info("collecting data — backtest file missing")
+        else:
+            st.metric("OOS R²", f"{bt_r2:.4f}", help=f"N={bt_n} temporal holdout")
+            st.caption(f"N={bt_n} · from `oos_r2_backtest.json`")
+
+    with col_fwd:
+        st.markdown(f"**Forward (live, N={fwd_n} trades)**")
+        if not fwd_ready:
+            st.info(
+                f"Forward: collecting data "
+                f"(N={fwd_n} / {OOS_R2_MIN_N} needed before R² is meaningful)"
+            )
+        else:
+            st.metric("OOS R²", f"{fwd_r2:.4f}")
+            msg = fwd_stats.get("message")
+            if msg:
+                st.caption(str(msg))
+
+    if not gap_ready:
+        st.markdown("**Gap:** not enough forward data yet")
+    else:
+        gap_txt = f"{fwd_r2 - bt_r2:+.4f}"
+        interp = _r2_gap_interpretation(
+            backtest_r2=bt_r2,
+            forward_r2=fwd_r2,
+            backtest_n=bt_n,
+            forward_n=fwd_n,
+        )
+        st.markdown(f"**Gap** (forward − backtest): `{gap_txt}` — {interp}")
+
+
 def tab_strategy_lab() -> None:
     """
     SIM / Polygon-paper A-vs-B forward test.
@@ -1400,6 +1527,9 @@ def tab_strategy_lab() -> None:
     if state.get("updated_at"):
         meta_bits.append(f"updated `{state['updated_at']}`")
     st.caption(" · ".join(meta_bits))
+
+    # --- Out-of-Sample R²: backtest (static) vs forward (live rolling) ---
+    _render_strategy_lab_r2_panel(state)
 
     # --- Who's ahead ---
     margin = abs(a_val - b_val)
