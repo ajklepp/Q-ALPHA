@@ -291,12 +291,20 @@ def run_strategy_a(
     minute_bars: list[dict],
     daily_bars: list[dict],
     profile: dict[str, Any],
+    n_shares: int | None = None,
+    close_at_data_end: bool = True,
 ) -> dict[str, Any]:
-    """Simulate Strategy A on one setup. Returns a structured trade result."""
+    """
+    Simulate Strategy A on one setup. Returns a structured trade result.
+
+    n_shares: if set, use this count (settle pass — do not resize).
+    close_at_data_end: if False (live settle), leave open tranches open when
+    bars run out before MAX_HOLD — do not phantom time_cap at last print.
+    """
     levels = extract_levels(profile)
     kill_pct = levels["kill_pct"]
     trail_pct = levels["trail_pct"]
-    n_shares = size_shares(entry_price, kill_pct)
+    n_shares = int(n_shares) if n_shares is not None else size_shares(entry_price, kill_pct)
     alloc = split_tranches(n_shares)
     trigs = triggers_for_n(levels["triggers_4"], len(alloc))
 
@@ -364,7 +372,11 @@ def run_strategy_a(
         if hit_cap:
             break
 
-    if not _all_closed(state) and state.last_close is not None:
+    if (
+        close_at_data_end
+        and not _all_closed(state)
+        and state.last_close is not None
+    ):
         _close_all(
             state,
             state.last_close,
@@ -423,9 +435,42 @@ def _build_result(
     pnl = 0.0
     tranche_rows: list[dict[str, Any]] = []
     last_exit_day = flag_date
+    all_closed = _all_closed(state)
+    open_shares = 0
 
     for t in state.tranches:
-        px = float(t.exit_price if t.exit_price is not None else entry_price)
+        if t.exit_price is None:
+            open_shares += int(t.shares)
+            mark = (
+                float(state.last_close)
+                if state.last_close is not None
+                else float(entry_price)
+            )
+            tranche_rows.append({
+                "id": t.id,
+                "shares": t.shares,
+                "weight": t.weight,
+                "trigger_pct": round(t.trigger_pct, 6),
+                "trigger_price": round(t.trigger_price, 4),
+                "trail_pct": round(t.trail_pct, 6),
+                "armed": t.trailing,
+                "activated_at": t.activated_at,
+                "activation_high": (
+                    None if t.activation_high is None
+                    else round(t.activation_high, 4)
+                ),
+                "run_high": round(t.run_high, 4) if t.run_high else None,
+                "trail_stop_at_exit": None,
+                "exit_price": None,
+                "exit_time": None,
+                "exit_reason": None,
+                "open": True,
+                "mark_price": round(mark, 4),
+                "return_pct": None,
+                "pnl_usd": None,
+            })
+            continue
+        px = float(t.exit_price)
         pnl += t.shares * (px - entry_price)
         ret_i = (px - entry_price) / entry_price if entry_price else 0.0
         exit_day = (t.exit_time or flag_date)[:10]
@@ -452,6 +497,7 @@ def _build_result(
             "exit_price": round(px, 4),
             "exit_time": t.exit_time,
             "exit_reason": t.exit_reason,
+            "open": False,
             "return_pct": round(ret_i * 100, 4),
             "pnl_usd": round(t.shares * (px - entry_price), 4),
         })
@@ -459,7 +505,7 @@ def _build_result(
     total_ret = (pnl / notional) if notional else 0.0
     mfe = (state.peak_high - entry_price) / entry_price if entry_price else 0.0
     days_held = _trading_days_inclusive(flag_date, last_exit_day)
-    reasons = [r["exit_reason"] for r in tranche_rows]
+    reasons = [r["exit_reason"] for r in tranche_rows if r.get("exit_reason")]
 
     return {
         "strategy": "A_trailing",
@@ -467,7 +513,12 @@ def _build_result(
         "flag_date": flag_date,
         "entry_price": round(entry_price, 4),
         "entry_time": entry_time,
-        "status": "ok",
+        "status": "ok" if all_closed else "open",
+        "still_open": not all_closed,
+        "open_shares": open_shares,
+        "last_close": (
+            None if state.last_close is None else round(float(state.last_close), 4)
+        ),
         "levels": {
             **levels,
             "kill_pct": round(levels["kill_pct"], 6),
@@ -481,7 +532,7 @@ def _build_result(
         "risk_frac": RISK_FRAC,
         "tranches": tranche_rows,
         "total_pnl_usd": round(pnl, 4),
-        "total_return_pct": round(total_ret * 100, 4),
+        "total_return_pct": round(total_ret * 100, 4) if all_closed else None,
         "mfe_pct": round(mfe * 100, 4),
         "days_held": days_held,
         "trading_day_at_end": state.trading_day,

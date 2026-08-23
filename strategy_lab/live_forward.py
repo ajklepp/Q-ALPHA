@@ -19,9 +19,17 @@ FLOW (current trading day, or replay of a past date via run_day):
      manage exits on 1-min bars (full-bar sim in replay / available bars live)
   4. Persist continuously to results/forward_state.json + EOD summary
 
+COMPOUNDING (LIVE only):
+  $3000 is a one-time start (set by reset_forward.py). Each new live date
+  RESUMES pool value, closed-trades history, equity curve, and the prediction
+  log from forward_state.json — it does NOT reset to $3000 each morning.
+  Replay/dry-run writes forward_state_replay.json and does not clobber the
+  live book or Supabase.
+
 Usage (from repo root):
   py -3 strategy_lab/live_forward.py --replay 2026-08-21   # dry-run
   py -3 strategy_lab/live_forward.py                       # live today (manual)
+  py -3 strategy_lab/reset_forward.py                      # wipe live book → $3000
   from live_forward import run_day
   run_day("2026-08-21")
 """
@@ -81,8 +89,45 @@ from full_market_scan import (  # noqa: E402
 from state_paths import is_trading_day  # noqa: E402
 from ticker_profiler import _load_polygon_key as load_profiler_key  # noqa: E402
 
+# Load .env so TELEGRAM_* is available when importing agent's send_telegram.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except Exception:
+    pass
+
+
+def lab_telegram(message: str, *, dry_run: bool = False) -> bool:
+    """
+    Best-effort Strategy Lab Telegram via autonomous_agent.send_telegram.
+    Never raises. Returns True if send was attempted without exception.
+    Dry-run / replay messages are prefixed with [DRY-RUN].
+    """
+    try:
+        # Import inside try so a missing agent dep never kills the runner.
+        from autonomous_agent import send_telegram
+
+        text = str(message or "").strip()
+        if not text:
+            return False
+        if dry_run and not text.startswith("[DRY-RUN]"):
+            text = f"[DRY-RUN] {text}"
+        send_telegram(text)
+        return True
+    except Exception as exc:
+        print(f"[live_forward] WARN: Telegram skipped ({exc})")
+        return False
+
+
+def _is_dry_run(mode: str | None = None, state: dict[str, Any] | None = None) -> bool:
+    m = (mode or (state or {}).get("mode") or "").lower()
+    return m == MODE_REPLAY
+
+
 ET = ZoneInfo("America/New_York")
 STATE_PATH = LAB / "results" / "forward_state.json"
+REPLAY_STATE_PATH = LAB / "results" / "forward_state_replay.json"
 PREDICTIONS_PATH = LAB / "results" / "forward_predictions.json"
 EOD_DIR = LAB / "results"
 SETUPS_PATH = LAB / "results" / "setups.json"
@@ -226,7 +271,9 @@ def refresh_forward_r2(state: dict[str, Any]) -> None:
     state["forward_oos_r2"] = stats.get("r2")
     state["forward_oos_r2_n"] = stats.get("n")
     state["forward_oos_r2_stats"] = stats
-    save_forward_predictions(rows)
+    # Replay must not pollute the live prediction log on disk.
+    if str(state.get("mode") or "").lower() != MODE_REPLAY:
+        save_forward_predictions(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +289,16 @@ def _today_et() -> str:
 
 
 def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
-    prior = load_forward_predictions()
+    """
+    Brand-new book at START_POOL_USD.
+
+    LIVE production must prefer resume_live_book() — only reset_forward.py
+    (or a missing file on first live day) should mint a fresh $3000 book.
+    """
+    # Replay stays isolated from the live prediction log.
+    prior = (
+        [] if str(mode).lower() == MODE_REPLAY else load_forward_predictions()
+    )
     r2_stats = compute_forward_oos_stats(prior)
     return {
         "updated_at": _now_iso(),
@@ -287,6 +343,7 @@ def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
         "scan": None,
         "premarket": {},
         "eod_summary": None,
+        "report": None,
         "forward_predictions": prior,
         "forward_oos_r2": r2_stats.get("r2"),
         "forward_oos_r2_n": r2_stats.get("n"),
@@ -294,17 +351,131 @@ def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
     }
 
 
+def load_state_file() -> dict[str, Any] | None:
+    """Load results/forward_state.json. None if missing/unreadable."""
+    if not STATE_PATH.exists():
+        return None
+    try:
+        raw = STATE_PATH.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def resume_live_book(prior: dict[str, Any], flag_date: str) -> dict[str, Any]:
+    """
+    Carry pools, closed-trade history, equity curves, and prediction log
+    into a new live session day. Does NOT reset value_usd to $3000.
+    """
+    state = dict(prior)
+    state["updated_at"] = _now_iso()
+    state["mode"] = MODE_LIVE
+    state["flag_date"] = flag_date
+    state["entry_model"] = ENTRY_MODEL
+    state["phase"] = "init"
+    state["status"] = "running"
+    state["message"] = (
+        f"resumed live book from prior session "
+        f"(prior_date={prior.get('flag_date')})"
+    )
+    state["candidates"] = []
+    state["n_candidates"] = 0
+    state["scan"] = None
+    state["premarket"] = {}
+    state["eod_summary"] = None
+    state["report"] = None
+
+    for key, label in (
+        ("pool_A_trailing", "Strategy A (Trailing)"),
+        ("pool_B_target", "Strategy B (Target)"),
+    ):
+        pool = dict(state.get(key) or {})
+        pool.setdefault("label", label)
+        pool.setdefault("start_usd", START_POOL_USD)
+        pool["value_usd"] = float(pool.get("value_usd") or START_POOL_USD)
+        # Preserve overnight opens across live days (settle owns closing them).
+        pool["open_positions"] = dict(pool.get("open_positions") or {})
+        pool["slots_open"] = len(pool["open_positions"])
+        pool.setdefault("closed_trades", [])
+        pool.setdefault("equity_curve", [])
+        pool.setdefault("slots_peak", 0)
+        pool.setdefault("wins", 0)
+        pool.setdefault("trades_taken", 0)
+        # Mark day boundary on the multi-day equity curve.
+        pool["equity_curve"] = list(pool.get("equity_curve") or [])
+        pool["equity_curve"].append({
+            "t": _now_iso(),
+            "value_usd": round(float(pool["value_usd"]), 4),
+            "event": "day_open",
+            "flag_date": flag_date,
+        })
+        state[key] = pool
+
+    # Predictions file is source of truth across days; refresh R² fields.
+    rows = load_forward_predictions()
+    if not rows:
+        rows = list(state.get("forward_predictions") or [])
+    state["forward_predictions"] = rows
+    stats = compute_forward_oos_stats(rows)
+    state["forward_oos_r2"] = stats.get("r2")
+    state["forward_oos_r2_n"] = stats.get("n")
+    state["forward_oos_r2_stats"] = stats
+    return state
+
+
+def begin_day_state(flag_date: str, mode: str) -> dict[str, Any]:
+    """
+    LIVE: resume persisted book (compound). Missing file → fresh $3000 once.
+    REPLAY: isolated empty book (does not load the live multi-day pools).
+    """
+    if mode == MODE_LIVE:
+        prior = load_state_file()
+        if prior and isinstance(prior.get("pool_A_trailing"), dict):
+            a = float((prior.get("pool_A_trailing") or {}).get("value_usd") or 0)
+            b = float((prior.get("pool_B_target") or {}).get("value_usd") or 0)
+            n_closed = len(
+                (prior.get("pool_A_trailing") or {}).get("closed_trades") or []
+            )
+            print(
+                f"[live_forward] RESUME live book  "
+                f"A=${a:.2f}  B=${b:.2f}  "
+                f"closed_A={n_closed}  "
+                f"prior_date={prior.get('flag_date')}  "
+                f"→ session {flag_date}"
+            )
+            return resume_live_book(prior, flag_date)
+        print(
+            f"[live_forward] no prior live book — starting fresh "
+            f"${START_POOL_USD:.0f} / ${START_POOL_USD:.0f}"
+        )
+        return empty_state(flag_date, mode)
+    # Replay / dry-run: never inherit live compounding pools.
+    print(
+        f"[live_forward] REPLAY isolated book @ ${START_POOL_USD:.0f} "
+        f"(will not overwrite live forward_state.json)"
+    )
+    return empty_state(flag_date, mode)
+
+
 def save_state(state: dict[str, Any], *, force_sync: bool = False) -> None:
     """
     Persist continuously so a crash mid-day still leaves a readable snapshot.
 
-    Also best-effort upserts to Supabase (strategy_lab_state) for Cloud
-    dashboard — throttled ~45s unless force_sync (use at EOD / terminal).
-    Local file write always happens; Supabase failure never raises.
+    LIVE → results/forward_state.json + Supabase.
+    REPLAY → results/forward_state_replay.json only (never clobber the live book
+    or Cloud dashboard with dry-run artifacts).
     """
     state["updated_at"] = _now_iso()
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    mode = str(state.get("mode") or "").lower()
+    path = STATE_PATH if mode != MODE_REPLAY else REPLAY_STATE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    if mode == MODE_REPLAY:
+        return
 
     try:
         from lab_state_sync import upsert_forward_state
@@ -315,6 +486,7 @@ def save_state(state: dict[str, Any], *, force_sync: bool = False) -> None:
             "complete",
             "market_closed",
             "no_candidates",
+            "awaiting_first_live_run",
         )
         upsert_forward_state(state, force=force)
     except Exception as exc:
@@ -626,456 +798,129 @@ def _win_rate(pool: dict[str, Any]) -> None:
     pool["win_rate_pct"] = round(100.0 * w / n, 2) if n else None
 
 
+
 def execute_dual_pools(
     candidates: list[dict[str, Any]],
     flag_date: str,
     state: dict[str, Any],
+    *,
+    settle_after: bool = False,
+    close_at_data_end: bool = True,
+    refresh_bars: bool | None = None,
 ) -> dict[str, Any]:
     """
-    Shared immediate entry → fork Strategy A + Strategy B.
-    sweep_reclaim is logged as a quality tag only (never blocks entry).
-    """
-    hist_doc = {}
-    if HISTORY_PATH.exists():
-        hist_doc = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-    history = hist_doc.get("history") or {}
+    ENTRY-only dual-pool open (no sync strategy run / no P and L).
 
+    If settle_after=True (replay / tests): immediately settle with full data
+    so one-shot results match the pre-split regression baseline.
+    LIVE morning entry uses settle_after=False; --settle (and morning
+    auto-settle of overnight opens) books P and L later.
+    """
+    from forward_book import entry_open_positions, settle_open_positions, settle_ticker
+
+    mode = str(state.get("mode") or MODE_LIVE).lower()
+    if refresh_bars is None:
+        refresh_bars = mode == MODE_LIVE
+
+    def _after(ticker: str) -> None:
+        if not settle_after:
+            return
+        settle_ticker(
+            state,
+            ticker,
+            close_at_data_end=close_at_data_end,
+            refresh_data=False,
+            upsert_prediction=upsert_forward_prediction,
+            refresh_r2=refresh_forward_r2,
+            allow_finalize_mfe=(mode != MODE_REPLAY),
+        )
+        save_state(state)
+
+    entry_report = entry_open_positions(
+        candidates,
+        flag_date,
+        state,
+        refresh_bars=refresh_bars,
+        lab_telegram=lab_telegram,
+        dry_run=_is_dry_run(state=state),
+        save_state=save_state,
+        upsert_prediction=upsert_forward_prediction,
+        refresh_r2=refresh_forward_r2,
+        after_ticker=_after if settle_after else None,
+    )
+
+    settle_report = None
+    if settle_after:
+        # Per-ticker settle already ran; summarize remaining opens (should be 0).
+        settle_report = {
+            "mode": "per_ticker_sequential",
+            "open_A": list((state["pool_A_trailing"].get("open_positions") or {}).keys()),
+            "open_B": list((state["pool_B_target"].get("open_positions") or {}).keys()),
+            "pool_A_usd": float(state["pool_A_trailing"]["value_usd"]),
+            "pool_B_usd": float(state["pool_B_target"]["value_usd"]),
+        }
+        save_state(state)
+
+    from replay import pool_stats
+
+    day_start_a = float(
+        entry_report.get("day_start_A_usd")
+        or state["pool_A_trailing"].get("start_usd")
+        or START_POOL_USD
+    )
+    day_start_b = float(
+        entry_report.get("day_start_B_usd")
+        or state["pool_B_target"].get("start_usd")
+        or START_POOL_USD
+    )
     pool_a = float(state["pool_A_trailing"]["value_usd"])
     pool_b = float(state["pool_B_target"]["value_usd"])
-    slots_a = 0
-    slots_b = 0
+    trades_a = [
+        t for t in (state["pool_A_trailing"].get("closed_trades") or [])
+        if str(t.get("flag_date") or flag_date)[:10] == flag_date and t.get("taken")
+    ]
+    trades_b = [
+        t for t in (state["pool_B_target"].get("closed_trades") or [])
+        if str(t.get("flag_date") or flag_date)[:10] == flag_date and t.get("taken")
+    ]
     peak_a = int(state["pool_A_trailing"].get("slots_peak") or 0)
     peak_b = int(state["pool_B_target"].get("slots_peak") or 0)
 
-    per_ticker: list[dict[str, Any]] = []
-    trades_a: list[dict[str, Any]] = []
-    trades_b: list[dict[str, Any]] = []
-
-    print()
-    print("=" * 78)
-    print(f"LIVE FORWARD — ENTER + FORK  {flag_date}")
-    print(f"Entry model: {ENTRY_MODEL}  |  sweep_reclaim = quality tag only")
-    print(
-        f"Pools: A Trailing + B Target  |  ${START_POOL_USD:.0f} each  |  "
-        f"cap {MAX_SLOTS} slots/pool"
-    )
-    print(f"Candidates: {len(candidates)} → {[c['ticker'] for c in candidates]}")
-    print("=" * 78)
-
-    for c in candidates:
-        ticker = c["ticker"]
-        key = f"{ticker}|{flag_date}"
-        hist_row = history.get(key)
-        print(f"\n--- entering {ticker} | {flag_date} ---")
-
-        bars_path = _ensure_bars(ticker, flag_date, hist_row)
-        if bars_path is None:
-            print("  SKIP — missing bars")
-            per_ticker.append({
-                "ticker": ticker,
-                "flag_date": flag_date,
-                "skipped": True,
-                "skip_reason": "missing_bars",
-                "sweep_reclaim": None,
-            })
-            save_state(state)
-            continue
-
-        minute_bars = load_minute_bars(bars_path)
-        if not minute_bars:
-            print("  SKIP — empty bars")
-            per_ticker.append({
-                "ticker": ticker,
-                "flag_date": flag_date,
-                "skipped": True,
-                "skip_reason": "empty_bars",
-                "sweep_reclaim": None,
-            })
-            save_state(state)
-            continue
-
-        sig = immediate(minute_bars)
-        if sig is None:
-            print("  SKIP — no immediate (09:30) bar yet")
-            per_ticker.append({
-                "ticker": ticker,
-                "flag_date": flag_date,
-                "skipped": True,
-                "skip_reason": "no_0930_bar",
-                "sweep_reclaim": None,
-            })
-            save_state(state)
-            continue
-
-        entry_price = float(sig.entry_price)
-        entry_time = str(sig.entry_time)
-
-        # Quality tag — informational only.
-        sw = sweep_reclaim(minute_bars)
-        sweep_tag = "pass" if sw is not None else "fail"
-        print(
-            f"  SHARED ENTRY  ${entry_price:.4f} @ {entry_time}  "
-            f"[immediate]  sweep_reclaim={sweep_tag}"
-            + (
-                f" (would @{sw.entry_time} ${sw.entry_price:.4f})"
-                if sw is not None
-                else ""
-            )
-        )
-
-        profile_path = LAB / "profiles" / f"{ticker}_{flag_date}.json"
-        if profile_path.exists():
-            profile = load_profile(ticker, flag_date)
-        else:
-            print("  WARN — missing profile; INSUFFICIENT fallbacks")
-            profile = {
-                "ticker": ticker,
-                "as_of_date": flag_date,
-                "confidence": "INSUFFICIENT",
-                "stats_meaningful": False,
-                "bracket": {},
-                "percentiles": {},
-            }
-
-        levels = extract_levels(profile)
-        kill_pct = float(levels["kill_pct"])
-        confidence = str(
-            profile.get("confidence") or levels.get("confidence") or "?"
-        )
-        daily_bars = load_daily_cached(ticker, flag_date)
-        print(
-            f"  kill={kill_pct * 100:.2f}%  conf={confidence}  "
-            f"levels={levels.get('source')}"
-        )
-
-        # --- Profiler prediction at ENTRY (for rolling forward OOS R²) ---
-        predicted_mfe: float | None = None
-        try:
-            from oos_r2 import predicted_mfe_pct as _pred_mfe
-
-            predicted_mfe = _pred_mfe(profile)
-        except Exception:
-            predicted_mfe = None
-        if predicted_mfe is not None:
-            print(f"  predicted MFE p50 = {predicted_mfe:.2f}%")
-            rows = list(state.get("forward_predictions") or [])
-            state["forward_predictions"] = upsert_forward_prediction(
-                rows,
-                ticker=ticker,
-                flag_date=flag_date,
-                predicted_mfe=predicted_mfe,
-                actual_mfe=None,  # filled on close
-            )
-            refresh_forward_r2(state)
-        else:
-            print("  predicted MFE p50 = — (missing / insufficient)")
-
-        # ---- Pool A ----
-        a_rec: dict[str, Any] = {
-            "pool": "A_trailing",
-            "ticker": ticker,
-            "taken": False,
-            "sweep_reclaim": sweep_tag,
-            "entry_model": ENTRY_MODEL,
-            "entry_price": entry_price,
-            "entry_time": entry_time,
-            "predicted_mfe": predicted_mfe,
-        }
-        shares_a = size_for_pool(pool_a, entry_price, kill_pct)
-        if slots_a >= MAX_SLOTS:
-            a_rec["skip_reason"] = "slots_full"
-            print(f"  A  SKIP slots full ({slots_a}/{MAX_SLOTS})")
-        elif shares_a < 1:
-            a_rec["skip_reason"] = "size_lt_1"
-            print(f"  A  SKIP size < 1 (pool=${pool_a:.2f})")
-        else:
-            slots_a += 1
-            peak_a = max(peak_a, slots_a)
-            state["pool_A_trailing"]["open_positions"][ticker] = {
-                "entry_price": entry_price,
-                "entry_time": entry_time,
-                "shares": shares_a,
-                "sweep_reclaim": sweep_tag,
-                "predicted_mfe": predicted_mfe,
-            }
-            state["pool_A_trailing"]["slots_open"] = slots_a
-            state["pool_A_trailing"]["slots_peak"] = peak_a
-            state["pool_A_trailing"]["value_usd"] = round(pool_a, 4)
-            save_state(state)
-            print(
-                f"  A  OPEN  slots {slots_a}/{MAX_SLOTS}  "
-                f"size={shares_a} sh  pool=${pool_a:.2f}  "
-                f"risk=${pool_a * RISK_FRAC:.2f}"
-            )
-            res_a = run_with_pool_sizing(
-                run_strategy_a,
-                pool_value=pool_a,
-                ticker=ticker,
-                flag_date=flag_date,
-                entry_price=entry_price,
-                entry_time=entry_time,
-                minute_bars=minute_bars,
-                daily_bars=daily_bars,
-                profile=profile,
-            )
-            state["pool_A_trailing"]["open_positions"].pop(ticker, None)
-            if res_a.get("status") != "ok":
-                a_rec["skip_reason"] = (
-                    res_a.get("skip_reason") or str(res_a.get("status"))
-                )
-                print(f"  A  SKIP run status={res_a.get('status')}")
-                slots_a = max(0, slots_a - 1)
-            else:
-                pnl_a = float(res_a.get("total_pnl_usd") or 0.0)
-                pool_a += pnl_a
-                slots_a = max(0, slots_a - 1)
-                strat_mfe = res_a.get("mfe_pct")
-                try:
-                    strat_mfe = (
-                        float(strat_mfe) if strat_mfe is not None else None
-                    )
-                except (TypeError, ValueError):
-                    strat_mfe = None
-                # Unrestricted hold-window MFE (same definition as oos_r2 backtest).
-                actual_mfe: float | None = None
-                try:
-                    from oos_r2 import actual_mfe_pct as _act_mfe
-
-                    actual_mfe = _act_mfe(
-                        entry_price=entry_price,
-                        entry_time=entry_time,
-                        flag_date=flag_date,
-                        minute_bars=minute_bars,
-                        daily_bars=daily_bars,
-                    )
-                except Exception:
-                    actual_mfe = strat_mfe
-
-                a_rec.update({
-                    "taken": True,
-                    "shares": int(res_a.get("n_shares") or shares_a),
-                    "pnl_usd": round(pnl_a, 4),
-                    "return_pct": res_a.get("total_return_pct"),
-                    "days_held": res_a.get("days_held"),
-                    "exit_reason_counts": res_a.get("exit_reason_counts"),
-                    "mfe_pct": strat_mfe,
-                    "actual_mfe": actual_mfe,
-                    "pool_after_usd": round(pool_a, 4),
-                    "tranches": tranche_rows(res_a),
-                })
-                pa = state["pool_A_trailing"]
-                pa["value_usd"] = round(pool_a, 4)
-                pa["slots_open"] = slots_a
-                pa["trades_taken"] = int(pa.get("trades_taken") or 0) + 1
-                if pnl_a > 0:
-                    pa["wins"] = int(pa.get("wins") or 0) + 1
-                _win_rate(pa)
-                pa["closed_trades"].append(a_rec)
-                _equity_append(pa, pool_a, "close", ticker)
-
-                # Complete prediction pair + rolling R² (one row per ticker|date).
-                if predicted_mfe is not None and actual_mfe is not None:
-                    rows = list(state.get("forward_predictions") or [])
-                    state["forward_predictions"] = upsert_forward_prediction(
-                        rows,
-                        ticker=ticker,
-                        flag_date=flag_date,
-                        predicted_mfe=predicted_mfe,
-                        actual_mfe=actual_mfe,
-                    )
-                    refresh_forward_r2(state)
-                    r2s = state.get("forward_oos_r2_stats") or {}
-                    print(
-                        f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
-                        f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
-                        f"slots {slots_a}/{MAX_SLOTS}  "
-                        f"exits={res_a.get('exit_reason_counts')}  "
-                        f"MFE act={actual_mfe:.2f}% pred={predicted_mfe:.2f}%  "
-                        f"| forward R²: {r2s.get('message')}"
-                    )
-                else:
-                    print(
-                        f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
-                        f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
-                        f"slots {slots_a}/{MAX_SLOTS}  "
-                        f"exits={res_a.get('exit_reason_counts')}"
-                    )
-            state["pool_A_trailing"]["slots_open"] = slots_a
-            state["pool_A_trailing"]["value_usd"] = round(pool_a, 4)
-            save_state(state)
-        trades_a.append(a_rec)
-
-        # ---- Pool B ----
-        b_rec: dict[str, Any] = {
-            "pool": "B_target",
-            "ticker": ticker,
-            "taken": False,
-            "sweep_reclaim": sweep_tag,
-            "entry_model": ENTRY_MODEL,
-            "entry_price": entry_price,
-            "entry_time": entry_time,
-        }
-        shares_b = size_for_pool(pool_b, entry_price, kill_pct)
-        if slots_b >= MAX_SLOTS:
-            b_rec["skip_reason"] = "slots_full"
-            print(f"  B  SKIP slots full ({slots_b}/{MAX_SLOTS})")
-        elif shares_b < 1:
-            b_rec["skip_reason"] = "size_lt_1"
-            print(f"  B  SKIP size < 1 (pool=${pool_b:.2f})")
-        else:
-            slots_b += 1
-            peak_b = max(peak_b, slots_b)
-            state["pool_B_target"]["open_positions"][ticker] = {
-                "entry_price": entry_price,
-                "entry_time": entry_time,
-                "shares": shares_b,
-                "sweep_reclaim": sweep_tag,
-            }
-            state["pool_B_target"]["slots_open"] = slots_b
-            state["pool_B_target"]["slots_peak"] = peak_b
-            state["pool_B_target"]["value_usd"] = round(pool_b, 4)
-            save_state(state)
-            print(
-                f"  B  OPEN  slots {slots_b}/{MAX_SLOTS}  "
-                f"size={shares_b} sh  pool=${pool_b:.2f}  "
-                f"risk=${pool_b * RISK_FRAC:.2f}"
-            )
-            res_b = run_with_pool_sizing(
-                run_strategy_b,
-                pool_value=pool_b,
-                ticker=ticker,
-                flag_date=flag_date,
-                entry_price=entry_price,
-                entry_time=entry_time,
-                minute_bars=minute_bars,
-                daily_bars=daily_bars,
-                profile=profile,
-            )
-            state["pool_B_target"]["open_positions"].pop(ticker, None)
-            if res_b.get("status") != "ok":
-                b_rec["skip_reason"] = (
-                    res_b.get("skip_reason") or str(res_b.get("status"))
-                )
-                print(f"  B  SKIP run status={res_b.get('status')}")
-                slots_b = max(0, slots_b - 1)
-            else:
-                pnl_b = float(res_b.get("total_pnl_usd") or 0.0)
-                pool_b += pnl_b
-                slots_b = max(0, slots_b - 1)
-                b_rec.update({
-                    "taken": True,
-                    "shares": int(res_b.get("n_shares") or shares_b),
-                    "pnl_usd": round(pnl_b, 4),
-                    "return_pct": res_b.get("total_return_pct"),
-                    "days_held": res_b.get("days_held"),
-                    "exit_reason_counts": res_b.get("exit_reason_counts"),
-                    "mfe_pct": res_b.get("mfe_pct"),
-                    "pool_after_usd": round(pool_b, 4),
-                    "tranches": tranche_rows(res_b),
-                })
-                pb = state["pool_B_target"]
-                pb["value_usd"] = round(pool_b, 4)
-                pb["slots_open"] = slots_b
-                pb["trades_taken"] = int(pb.get("trades_taken") or 0) + 1
-                if pnl_b > 0:
-                    pb["wins"] = int(pb.get("wins") or 0) + 1
-                _win_rate(pb)
-                pb["closed_trades"].append(b_rec)
-                _equity_append(pb, pool_b, "close", ticker)
-                print(
-                    f"  B  CLOSE ret={res_b.get('total_return_pct'):+.2f}%  "
-                    f"pnl=${pnl_b:+.2f}  pool->${pool_b:.2f}  "
-                    f"slots {slots_b}/{MAX_SLOTS}  "
-                    f"exits={res_b.get('exit_reason_counts')}"
-                )
-            state["pool_B_target"]["slots_open"] = slots_b
-            state["pool_B_target"]["value_usd"] = round(pool_b, 4)
-            save_state(state)
-        trades_b.append(b_rec)
-
-        # EOD fill: if prediction logged but A never closed with actual, complete
-        # the pair from unrestricted hold-window MFE (same as oos_r2).
-        if predicted_mfe is not None:
-            rows = list(state.get("forward_predictions") or [])
-            key = _prediction_key(ticker, flag_date)
-            pending = next(
-                (
-                    r for r in rows
-                    if _prediction_key(
-                        str(r.get("ticker") or ""),
-                        str(r.get("date") or r.get("flag_date") or ""),
-                    ) == key
-                    and r.get("actual_mfe") is None
-                ),
-                None,
-            )
-            if pending is not None:
-                try:
-                    from oos_r2 import actual_mfe_pct as _act_mfe
-
-                    eod_mfe = _act_mfe(
-                        entry_price=entry_price,
-                        entry_time=entry_time,
-                        flag_date=flag_date,
-                        minute_bars=minute_bars,
-                        daily_bars=daily_bars,
-                    )
-                except Exception:
-                    eod_mfe = None
-                if eod_mfe is not None:
-                    state["forward_predictions"] = upsert_forward_prediction(
-                        rows,
-                        ticker=ticker,
-                        flag_date=flag_date,
-                        predicted_mfe=predicted_mfe,
-                        actual_mfe=eod_mfe,
-                    )
-                    refresh_forward_r2(state)
-                    r2s = state.get("forward_oos_r2_stats") or {}
-                    print(
-                        f"  EOD MFE act={eod_mfe:.2f}% pred={predicted_mfe:.2f}%  "
-                        f"| forward R²: {r2s.get('message')}"
-                    )
-
-        print(
-            f"  pool values → A ${pool_a:.2f}  |  B ${pool_b:.2f}  "
-            f"| sweep_reclaim={sweep_tag}"
-        )
-
-        per_ticker.append({
-            "ticker": ticker,
-            "flag_date": flag_date,
-            "skipped": False,
-            "entry_price": entry_price,
-            "entry_time": entry_time,
-            "entry_model": ENTRY_MODEL,
-            "sweep_reclaim": sweep_tag,
-            "kill_pct": round(kill_pct, 6),
-            "confidence": confidence,
-            "levels_source": levels.get("source"),
-            "candidate_source": c.get("source"),
-            "A": a_rec,
-            "B": b_rec,
-        })
-        save_state(state)
-
     report = {
         "generated_at": _now_iso(),
-        "mode": state["mode"],
+        "mode": state.get("mode"),
         "flag_date": flag_date,
         "entry_model": ENTRY_MODEL,
-        "start_pool_usd": START_POOL_USD,
+        "start_pool_usd": float(
+            state["pool_A_trailing"].get("start_usd") or START_POOL_USD
+        ),
+        "day_start_A_usd": round(day_start_a, 4),
+        "day_start_B_usd": round(day_start_b, 4),
         "max_slots": MAX_SLOTS,
         "n_setups": len(candidates),
-        "tickers": [c["ticker"] for c in candidates],
-        "per_ticker": per_ticker,
+        "tickers": entry_report.get("tickers") or [c["ticker"] for c in candidates],
+        "per_ticker": entry_report.get("per_ticker") or [],
+        "entry": entry_report,
+        "settle": settle_report,
         "pool_A_trailing": {
-            **pool_stats(trades_a, START_POOL_USD, pool_a, peak_a),
+            **pool_stats(trades_a, day_start_a, pool_a, peak_a),
+            "lifetime_start_usd": float(
+                state["pool_A_trailing"].get("start_usd") or START_POOL_USD
+            ),
             "trades": trades_a,
+            "open_positions": list(
+                (state["pool_A_trailing"].get("open_positions") or {}).keys()
+            ),
         },
         "pool_B_target": {
-            **pool_stats(trades_b, START_POOL_USD, pool_b, peak_b),
+            **pool_stats(trades_b, day_start_b, pool_b, peak_b),
+            "lifetime_start_usd": float(
+                state["pool_B_target"].get("start_usd") or START_POOL_USD
+            ),
             "trades": trades_b,
+            "open_positions": list(
+                (state["pool_B_target"].get("open_positions") or {}).keys()
+            ),
         },
     }
     if pool_a > pool_b:
@@ -1093,25 +938,101 @@ def execute_dual_pools(
     return report
 
 
-# ---------------------------------------------------------------------------
+def run_settle(
+    *,
+    close_at_data_end: bool = False,
+    refresh_data: bool = True,
+) -> dict[str, Any]:
+    """
+    Settle pass: refresh bars and re-run strategies on open_positions.
+    LIVE default: close_at_data_end=False (no phantom time_cap at last print).
+    """
+    from forward_book import settle_open_positions
+    from forward_runtime import acquire_live_lock, release_live_lock
+
+    state = load_state_file()
+    if not state:
+        print("[live_forward] settle: no forward_state.json — nothing to do")
+        return {"status": "no_state"}
+
+    mode = str(state.get("mode") or MODE_LIVE).lower()
+    dry = mode == MODE_REPLAY
+    locked = False
+    try:
+        if mode == MODE_LIVE:
+            acquire_live_lock("settle")
+            locked = True
+        set_phase(state, "settle", "settling open positions")
+        result = settle_open_positions(
+            state,
+            close_at_data_end=close_at_data_end,
+            refresh_data=refresh_data and mode == MODE_LIVE,
+            upsert_prediction=upsert_forward_prediction,
+            refresh_r2=refresh_forward_r2,
+            allow_finalize_mfe=(mode != MODE_REPLAY),
+        )
+        state["phase"] = "settle_done"
+        n_open = int(result.get("open_positions") or 0)
+        if n_open:
+            state["status"] = "open_positions"
+        elif str(state.get("status")) in ("running", "open_positions"):
+            state["status"] = "complete"
+        state["last_settle"] = {
+            "at": _now_iso(),
+            **{
+                k: result[k]
+                for k in (
+                    "closed_A", "closed_B", "pool_A_usd", "pool_B_usd",
+                    "open_positions",
+                )
+                if k in result
+            },
+        }
+        save_state(state, force_sync=(mode == MODE_LIVE))
+        a = float(result.get("pool_A_usd") or 0)
+        b = float(result.get("pool_B_usd") or 0)
+        lab_telegram(
+            f"🧪 SETTLE: Pool A ${a:.2f}, Pool B ${b:.2f}, "
+            f"closed A={result.get('closed_A')} B={result.get('closed_B')}, "
+            f"still open={n_open}. "
+            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+            dry_run=dry,
+        )
+        print(f"[live_forward] settle done: {result}")
+        return {"status": "ok", **result}
+    finally:
+        if locked:
+            release_live_lock()
+
+
 # run_day — public API (replay past day OR drive live today)
 # ---------------------------------------------------------------------------
+
 
 def run_day(
     day: str | None = None,
     *,
     mode: str | None = None,
+    force_rerun: bool = False,
 ) -> dict[str, Any]:
     """
-    Full scan → profile → premarket → immediate entry → dual-pool fork.
+    Scan → profile → premarket → ENTRY (open positions only).
 
-    Pass a past YYYY-MM-DD for replay/dry-run (uses scan archive + cached
-    profiles/bars). Omit day (or pass today) for live Polygon-paper mode.
+    LIVE: does not settle same morning (use --settle / 16:40 task). Auto-runs
+    settle first for any overnight opens. REPLAY: entry then settle inline
+    (close_at_data_end=True) for regression parity.
     """
+    from forward_runtime import (
+        acquire_live_lock,
+        release_live_lock,
+        same_day_entry_blocked,
+        wait_for_0930_bar,
+    )
+    from forward_book import load_bars_for_entry
+    from entry_models import immediate as _immediate
+
     flag_date = str(day or _today_et())[:10]
     session_day = datetime.strptime(flag_date, "%Y-%m-%d").date()
-
-    # Infer mode: past date → replay; today → live (unless overridden).
     today = datetime.now(ET).date()
     if mode is None:
         mode = MODE_REPLAY if session_day != today else MODE_LIVE
@@ -1121,159 +1042,270 @@ def run_day(
 
     print("=" * 78)
     print(f"Q-ALPHA LIVE FORWARD  |  {flag_date}  |  mode={mode}")
-    print("Polygon-paper  |  NO IBKR  |  NO auto-scheduler")
+    print("Polygon-paper  |  NO IBKR  |  entry/settle split")
     print(
         f"Entry={ENTRY_MODEL}  |  exits=A Trailing + B Target  |  "
         f"${START_POOL_USD:.0f} × 2 pools  |  max {MAX_SLOTS} slots each"
     )
     print("=" * 78)
 
-    # Weekend / holiday guard (ET calendar).
-    if not is_trading_day(session_day):
-        msg = "Market closed today"
-        print(f"[live_forward] {msg} ({flag_date})")
-        state = empty_state(flag_date, mode)
-        state["status"] = "market_closed"
-        state["phase"] = "stopped"
-        state["message"] = msg
-        save_state(state)
-        return {
-            "status": "market_closed",
-            "flag_date": flag_date,
-            "mode": mode,
-            "message": msg,
-        }
+    dry = _is_dry_run(mode)
+    locked = False
 
-    state = empty_state(flag_date, mode)
     try:
-        from lab_state_sync import reset_throttle
-        reset_throttle()
-    except Exception:
-        pass
-    save_state(state, force_sync=True)
+        if mode == MODE_LIVE:
+            acquire_live_lock("entry")
+            locked = True
+            prior = load_state_file()
+            if same_day_entry_blocked(prior, flag_date) and not force_rerun:
+                msg = (
+                    f"same-day guard: status=complete for {flag_date} — "
+                    "refusing re-entry (pass --force-rerun to override)"
+                )
+                print(f"[live_forward] {msg}")
+                lab_telegram(f"🧪 Strategy Lab — {msg}", dry_run=False)
+                return {"status": "skipped_same_day", "flag_date": flag_date, "message": msg}
+            # Auto-settle overnight opens before new entries.
+            n_open_prior = 0
+            if prior:
+                n_open_prior = (
+                    len((prior.get("pool_A_trailing") or {}).get("open_positions") or {})
+                    + len((prior.get("pool_B_target") or {}).get("open_positions") or {})
+                )
+            if n_open_prior:
+                print(f"[live_forward] auto-settle {n_open_prior} overnight open(s) first")
+                from forward_book import settle_open_positions
+                # Already hold entry lock — settle inline (do not nest run_settle lock).
+                prior = load_state_file() or prior
+                settle_open_positions(
+                    prior,
+                    close_at_data_end=False,
+                    refresh_data=True,
+                    upsert_prediction=upsert_forward_prediction,
+                    refresh_r2=refresh_forward_r2,
+                    allow_finalize_mfe=True,
+                )
+                save_state(prior, force_sync=True)
 
-    # --- 1) Scan ---
-    set_phase(state, "scan", "running full-market gap scan")
-    candidates = run_scan_phase(flag_date, mode)
-    state["candidates"] = candidates
-    state["n_candidates"] = len(candidates)
-    state["scan"] = {
-        "n_candidates": len(candidates),
-        "tickers": [c["ticker"] for c in candidates],
-        "sources": sorted({str(c.get("source")) for c in candidates}),
-    }
-    save_state(state)
-    print(f"[live_forward] {len(candidates)} candidates ready")
+        lab_telegram(
+            f"🧪 Strategy Lab STARTED — {flag_date}, entry={ENTRY_MODEL}, "
+            f"dual ${START_POOL_USD:.0f} pools.",
+            dry_run=dry,
+        )
 
-    if not candidates:
-        set_phase(state, "eod", "no candidates — nothing to trade")
-        state["status"] = "no_candidates"
-        state["eod_summary"] = {"n_candidates": 0, "message": "no candidates"}
+        if not is_trading_day(session_day):
+            msg = "Market closed today"
+            print(f"[live_forward] {msg} ({flag_date})")
+            lab_telegram(
+                "🧪 Strategy Lab — market closed today, not running.",
+                dry_run=dry,
+            )
+            state = begin_day_state(flag_date, mode)
+            state["status"] = "market_closed"
+            state["phase"] = "stopped"
+            state["message"] = msg
+            save_state(state, force_sync=(mode == MODE_LIVE))
+            return {
+                "status": "market_closed",
+                "flag_date": flag_date,
+                "mode": mode,
+                "message": msg,
+            }
+
+        state = begin_day_state(flag_date, mode)
+        try:
+            from lab_state_sync import reset_throttle
+            reset_throttle()
+        except Exception:
+            pass
+        save_state(state, force_sync=(mode == MODE_LIVE))
+
+        set_phase(state, "scan", "running full-market gap scan")
+        candidates = run_scan_phase(flag_date, mode)
+        state["candidates"] = candidates
+        state["n_candidates"] = len(candidates)
+        tickers = [c["ticker"] for c in candidates]
+        state["scan"] = {
+            "n_candidates": len(candidates),
+            "tickers": tickers,
+            "sources": sorted({str(c.get("source")) for c in candidates}),
+        }
         save_state(state)
-        print("[live_forward] No candidates — stopping.")
-        return {
-            "status": "no_candidates",
-            "flag_date": flag_date,
-            "mode": mode,
-            "n_candidates": 0,
-        }
+        print(f"[live_forward] {len(candidates)} candidates ready")
+        lab_telegram(
+            f"🧪 Scan complete — {len(candidates)} candidates: "
+            f"{', '.join(tickers) if tickers else '(none)'}.",
+            dry_run=dry,
+        )
 
-    # --- 2) Profile ---
-    set_phase(state, "profile", f"profiling {len(candidates)} candidates")
-    run_profile_phase(candidates, flag_date)
-    save_state(state)
-
-    # --- 3) Premarket ---
-    set_phase(state, "premarket", "fetching/reusing premarket bars")
-    pm = run_premarket_phase(candidates, flag_date, mode=mode)
-    state["premarket"] = {
-        k: {
-            "premarket_available": v.get("premarket_available"),
-            "premarket_median": v.get("premarket_median"),
-            "premarket_vwap": v.get("premarket_vwap"),
-            "open_0930": v.get("open_0930"),
-            "n_premarket_bars": v.get("n_premarket_bars"),
-        }
-        for k, v in pm.items()
-    }
-    save_state(state)
-
-    # --- 4) Enter + fork dual pools ---
-    set_phase(
-        state,
-        "trading",
-        f"entering {len(candidates)} names @ immediate; forking A+B",
-    )
-    print(
-        f"[live_forward] entering {len(candidates)} candidates  |  "
-        f"pool A=${state['pool_A_trailing']['value_usd']:.2f}  "
-        f"pool B=${state['pool_B_target']['value_usd']:.2f}"
-    )
-    report = execute_dual_pools(candidates, flag_date, state)
-    print_summary(report)
-
-    # --- 5) EOD ---
-    set_phase(state, "eod", "writing end-of-day summary")
-    state["status"] = "complete"
-    try:
-        refresh_forward_r2(state)
-    except Exception as exc:
-        print(f"[live_forward] WARN: forward R² refresh skipped ({exc})")
-    r2s = state.get("forward_oos_r2_stats") or {}
-    state["eod_summary"] = {
-        "n_candidates": len(candidates),
-        "tickers": report["tickers"],
-        "winner": report["winner"],
-        "pool_A": {
-            "end_usd": report["pool_A_trailing"]["end_usd"],
-            "return_pct": report["pool_A_trailing"]["return_pct"],
-            "trades_taken": report["pool_A_trailing"]["trades_taken"],
-            "win_rate_pct": report["pool_A_trailing"]["win_rate_pct"],
-        },
-        "pool_B": {
-            "end_usd": report["pool_B_target"]["end_usd"],
-            "return_pct": report["pool_B_target"]["return_pct"],
-            "trades_taken": report["pool_B_target"]["trades_taken"],
-            "win_rate_pct": report["pool_B_target"]["win_rate_pct"],
-        },
-        "sweep_reclaim_tags": {
-            row["ticker"]: row.get("sweep_reclaim")
-            for row in report["per_ticker"]
-            if not row.get("skipped")
-        },
-        "forward_oos_r2": state.get("forward_oos_r2"),
-        "forward_oos_r2_n": state.get("forward_oos_r2_n"),
-        "forward_oos_r2_message": r2s.get("message"),
-    }
-    print(
-        f"[live_forward] forward OOS R²: {r2s.get('message')}  "
-        f"(predictions file: {PREDICTIONS_PATH.name})"
-    )
-    state["report"] = {
-        "per_ticker": report["per_ticker"],
-        "winner": report["winner"],
-        "pool_A_trailing": {
-            k: report["pool_A_trailing"][k]
-            for k in (
-                "start_usd", "end_usd", "realized_pnl_usd", "return_pct",
-                "trades_taken", "win_rate_pct", "slots_used_peak",
+        if not candidates:
+            set_phase(state, "eod", "no candidates — nothing to trade")
+            state["status"] = "no_candidates"
+            state["eod_summary"] = {"n_candidates": 0, "message": "no candidates"}
+            save_state(state)
+            lab_telegram(
+                f"🧪 EOD: Pool A ${float(state['pool_A_trailing']['value_usd']):.2f} "
+                f"(0.00%), Pool B ${float(state['pool_B_target']['value_usd']):.2f} "
+                f"(0.00%), trades today: 0, winner: tie. "
+                f"open=0. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+                dry_run=dry,
             )
-        },
-        "pool_B_target": {
-            k: report["pool_B_target"][k]
-            for k in (
-                "start_usd", "end_usd", "realized_pnl_usd", "return_pct",
-                "trades_taken", "win_rate_pct", "slots_used_peak",
-            )
-        },
-    }
-    save_state(state)
+            return {
+                "status": "no_candidates",
+                "flag_date": flag_date,
+                "mode": mode,
+                "n_candidates": 0,
+            }
 
-    eod_path = EOD_DIR / f"forward_{flag_date}.json"
-    eod_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"\n[live_forward] Wrote {STATE_PATH.relative_to(ROOT)}")
-    print(f"[live_forward] Wrote {eod_path.relative_to(ROOT)}")
-    return report
+        set_phase(state, "profile", f"profiling {len(candidates)} candidates")
+        run_profile_phase(candidates, flag_date)
+        save_state(state)
+
+        set_phase(state, "premarket", "fetching/reusing premarket bars")
+        pm = run_premarket_phase(candidates, flag_date, mode=mode)
+        state["premarket"] = {
+            k: {
+                "premarket_available": v.get("premarket_available"),
+                "premarket_median": v.get("premarket_median"),
+                "premarket_vwap": v.get("premarket_vwap"),
+                "open_0930": v.get("open_0930"),
+                "n_premarket_bars": v.get("n_premarket_bars"),
+            }
+            for k, v in pm.items()
+        }
+        save_state(state)
+
+        # W1 — wait for 09:30 bar (LIVE polls; replay single-shot).
+        def _load_bars(t: str, d: str, refresh: bool = False):
+            return load_bars_for_entry(t, d, refresh=refresh, hist_row=None)
+
+        ok_0930, waited = wait_for_0930_bar(
+            candidates,
+            flag_date,
+            mode=mode,
+            load_bars_fn=_load_bars,
+            immediate_fn=_immediate,
+        )
+        if not ok_0930:
+            state["status"] = "no_0930_bar_timeout"
+            state["message"] = f"no_0930_bar_timeout waited={waited:.0f}s"
+            save_state(state, force_sync=(mode == MODE_LIVE))
+            lab_telegram(
+                f"🧪 Strategy Lab — no 09:30 bar (timeout {waited:.0f}s), not entering.",
+                dry_run=dry,
+            )
+            return {
+                "status": "no_0930_bar_timeout",
+                "flag_date": flag_date,
+                "waited_sec": waited,
+            }
+
+        set_phase(
+            state,
+            "trading",
+            f"entering {len(candidates)} names @ immediate (entry-only)",
+        )
+        # Replay: settle inline with close_at_data_end=True (full history).
+        # Live: leave opens for --settle / 16:40.
+        settle_after = mode == MODE_REPLAY
+        report = execute_dual_pools(
+            candidates,
+            flag_date,
+            state,
+            settle_after=settle_after,
+            close_at_data_end=True,
+            refresh_bars=(mode == MODE_LIVE),
+        )
+        try:
+            print_summary(report)
+        except Exception as exc:
+            print(f"[live_forward] WARN: print_summary skipped ({exc})")
+
+        n_open = (
+            len(state["pool_A_trailing"].get("open_positions") or {})
+            + len(state["pool_B_target"].get("open_positions") or {})
+        )
+        set_phase(state, "eod", "writing end-of-day / entry summary")
+        if mode == MODE_LIVE and n_open:
+            state["status"] = "open_positions"
+        else:
+            state["status"] = "complete"
+        try:
+            refresh_forward_r2(state)
+        except Exception as exc:
+            print(f"[live_forward] WARN: forward R² refresh skipped ({exc})")
+        r2s = state.get("forward_oos_r2_stats") or {}
+        state["eod_summary"] = {
+            "n_candidates": len(candidates),
+            "tickers": report.get("tickers"),
+            "winner": report.get("winner"),
+            "open_positions": n_open,
+            "pool_A": {
+                "end_usd": report["pool_A_trailing"]["end_usd"],
+                "return_pct": report["pool_A_trailing"]["return_pct"],
+                "trades_taken": report["pool_A_trailing"]["trades_taken"],
+            },
+            "pool_B": {
+                "end_usd": report["pool_B_target"]["end_usd"],
+                "return_pct": report["pool_B_target"]["return_pct"],
+                "trades_taken": report["pool_B_target"]["trades_taken"],
+            },
+            "forward_oos_r2": state.get("forward_oos_r2"),
+            "forward_oos_r2_n": state.get("forward_oos_r2_n"),
+            "forward_oos_r2_message": r2s.get("message"),
+        }
+        state["report"] = {
+            "per_ticker": report.get("per_ticker"),
+            "winner": report.get("winner"),
+            "pool_A_trailing": {
+                k: report["pool_A_trailing"][k]
+                for k in (
+                    "start_usd", "end_usd", "realized_pnl_usd", "return_pct",
+                    "trades_taken", "win_rate_pct", "slots_used_peak",
+                )
+                if k in report["pool_A_trailing"]
+            },
+            "pool_B_target": {
+                k: report["pool_B_target"][k]
+                for k in (
+                    "start_usd", "end_usd", "realized_pnl_usd", "return_pct",
+                    "trades_taken", "win_rate_pct", "slots_used_peak",
+                )
+                if k in report["pool_B_target"]
+            },
+        }
+        save_state(state, force_sync=(mode == MODE_LIVE))
+
+        a_end = float(report["pool_A_trailing"]["end_usd"])
+        b_end = float(report["pool_B_target"]["end_usd"])
+        a_ret = report["pool_A_trailing"].get("return_pct")
+        b_ret = report["pool_B_target"].get("return_pct")
+        n_trades = int(report["pool_A_trailing"].get("trades_taken") or 0)
+        w_pool = (report.get("winner") or {}).get("pool") or "tie"
+        winner_label = (
+            "A" if w_pool == "A_trailing"
+            else "B" if w_pool == "B_target"
+            else "tie"
+        )
+        a_ret_s = f"{float(a_ret):+.2f}%" if a_ret is not None else "—"
+        b_ret_s = f"{float(b_ret):+.2f}%" if b_ret is not None else "—"
+        lab_telegram(
+            f"🧪 EOD: Pool A ${a_end:.2f} ({a_ret_s}), "
+            f"Pool B ${b_end:.2f} ({b_ret_s}), "
+            f"trades today: {n_trades}, winner: {winner_label}, "
+            f"open={n_open}. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+            dry_run=dry,
+        )
+
+        eod_path = EOD_DIR / f"forward_{flag_date}.json"
+        eod_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        state_written = STATE_PATH if mode != MODE_REPLAY else REPLAY_STATE_PATH
+        print(f"\n[live_forward] Wrote {state_written.relative_to(ROOT)}")
+        print(f"[live_forward] Wrote {eod_path.relative_to(ROOT)}")
+        return report
+    finally:
+        if locked:
+            release_live_lock()
 
 
 # ---------------------------------------------------------------------------
@@ -1294,16 +1326,41 @@ def main() -> int:
         metavar="YYYY-MM-DD",
         help="Alias for run_day(date); live if date==today else replay",
     )
+    parser.add_argument(
+        "--settle",
+        action="store_true",
+        help="Settle open positions (refresh bars, re-run strategies)",
+    )
+    parser.add_argument(
+        "--force-rerun",
+        action="store_true",
+        help="Override same-day complete guard on LIVE entry",
+    )
     args = parser.parse_args()
+    dry = bool(args.replay) or (
+        bool(args.date) and str(args.date)[:10] != _today_et()
+    )
 
-    if args.replay:
-        run_day(args.replay, mode=MODE_REPLAY)
-    elif args.date:
-        run_day(args.date)
-    else:
-        # Manual Monday start — live today. No sleep/scheduler loop.
-        run_day(_today_et(), mode=MODE_LIVE)
-    return 0
+    try:
+        if args.settle:
+            run_settle(close_at_data_end=False, refresh_data=True)
+        elif args.replay:
+            run_day(args.replay, mode=MODE_REPLAY)
+        elif args.date:
+            run_day(args.date, force_rerun=args.force_rerun)
+        else:
+            run_day(_today_et(), mode=MODE_LIVE, force_rerun=args.force_rerun)
+        return 0
+    except Exception as exc:
+        reason = str(exc).strip() or type(exc).__name__
+        if len(reason) > 180:
+            reason = reason[:177] + "..."
+        lab_telegram(
+            f"🧪 Strategy Lab ERROR: {reason}",
+            dry_run=dry,
+        )
+        print(f"[live_forward] FATAL: {exc}")
+        raise
 
 
 if __name__ == "__main__":

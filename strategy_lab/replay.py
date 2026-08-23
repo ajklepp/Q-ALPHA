@@ -70,11 +70,16 @@ def bars_path_for(ticker: str, flag_date: str, hist_row: dict | None) -> Path:
     return BARS_DIR / f"{ticker.upper()}_{flag_date}.json"
 
 
-def load_daily_cached(ticker: str, flag_date: str) -> list[dict]:
+def load_daily_cached(
+    ticker: str,
+    flag_date: str,
+    *,
+    refresh: bool = False,
+) -> list[dict]:
     """Fetch daily bars once per setup; cache under results/daily_cache/."""
     DAILY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = DAILY_CACHE_DIR / f"{ticker.upper()}_{flag_date}.json"
-    if cache_path.exists():
+    if cache_path.exists() and not refresh:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
         return list(data.get("bars") or [])
     bars = fetch_daily_after(ticker, flag_date)
@@ -131,12 +136,15 @@ def run_with_pool_sizing(
     minute_bars: list[dict],
     daily_bars: list[dict],
     profile: dict[str, Any],
+    n_shares: int | None = None,
+    close_at_data_end: bool = True,
 ) -> dict[str, Any]:
     """
     Call strategy_a/b run sized to this pool's equity.
 
     size_shares() reads sa.POOL_USD; temporarily set it so both strategies
     size off the live pool without editing those modules.
+    Pass n_shares / close_at_data_end through for live settle.
     """
     old = sa.POOL_USD
     sa.POOL_USD = float(pool_value)
@@ -149,6 +157,8 @@ def run_with_pool_sizing(
             minute_bars=minute_bars,
             daily_bars=daily_bars,
             profile=profile,
+            n_shares=n_shares,
+            close_at_data_end=close_at_data_end,
         )
     finally:
         sa.POOL_USD = old
