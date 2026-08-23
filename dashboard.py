@@ -24,10 +24,11 @@
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
 #
-# MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles and
-# Strategy Lab (not pages/ sidebar routes). Profiler reads precomputed
-# profiles/*.json; "Refresh profile" is on-demand only — never on load/autorefresh.
-# Strategy Lab reads strategy_lab/results/forward_state.json (SIM paper only).
+# MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles,
+# Strategy Lab, and Glossary (not pages/ sidebar routes). Profiler reads
+# precomputed profiles/*.json; "Refresh profile" is on-demand only — never on
+# load/autorefresh. Strategy Lab reads strategy_lab/results/forward_state.json
+# (SIM paper only). Glossary tab renders repo-root GLOSSARY.md.
 # =============================================================================
 from __future__ import annotations
 
@@ -1789,6 +1790,36 @@ def tab_strategy_lab() -> None:
         )
 
 
+GLOSSARY_PATH = ROOT / "GLOSSARY.md"
+
+
+def tab_glossary() -> None:
+    """
+    Render repo-root GLOSSARY.md — same content as the markdown file.
+    Leave agent code untouched; best-effort if the file is missing.
+    """
+    st.header("📖 Glossary")
+    st.caption(
+        "Q-ALPHA / Strategy Lab terms · same content as `GLOSSARY.md` in the repo root"
+    )
+    if not GLOSSARY_PATH.exists():
+        st.warning(
+            "GLOSSARY.md not found in the repo root. "
+            "Pull latest main or add the file locally."
+        )
+        return
+    try:
+        body = GLOSSARY_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        st.error(f"Could not read GLOSSARY.md: {exc}")
+        return
+    # Skip the duplicate H1 when the tab already has a header.
+    lines = body.splitlines()
+    if lines and lines[0].startswith("# "):
+        body = "\n".join(lines[1:]).lstrip("\n")
+    st.markdown(body)
+
+
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
@@ -1814,7 +1845,7 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
@@ -1822,6 +1853,7 @@ def main() -> None:
         "📓 Daily Reviews",
         "🔬 Ticker Profiles",
         "🧪 Strategy Lab",
+        "📖 Glossary",
     ])
 
     with tab1:
@@ -1838,6 +1870,8 @@ def main() -> None:
         tab_ticker_profiles()
     with tab7:
         tab_strategy_lab()
+    with tab8:
+        tab_glossary()
 
     render_footer()
 
