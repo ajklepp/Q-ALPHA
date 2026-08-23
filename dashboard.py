@@ -24,12 +24,14 @@
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
 #
-# MULTI-PAGE NOTE: single-file app. Ticker Profiles is the 6th tab in st.tabs
-# (not a pages/ sidebar route). Profiler reads precomputed profiles/*.json;
-# "Refresh profile" is on-demand only — never on load/autorefresh.
+# MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles and
+# Strategy Lab (not pages/ sidebar routes). Profiler reads precomputed
+# profiles/*.json; "Refresh profile" is on-demand only — never on load/autorefresh.
+# Strategy Lab reads strategy_lab/results/forward_state.json (SIM paper only).
 # =============================================================================
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
@@ -1234,6 +1236,406 @@ def tab_ticker_profiles() -> None:
         st.write(f"overall={'PASS' if san.get('ok') else 'FAIL'}")
 
 
+# ---------------------------------------------------------------------------
+# Strategy Lab — A vs B forward paper (reads strategy_lab/results/forward_state.json)
+# ---------------------------------------------------------------------------
+
+FORWARD_STATE_PATH = ROOT / "strategy_lab" / "results" / "forward_state.json"
+LAB_MAX_SLOTS = 10
+
+
+def _load_forward_state() -> dict | None:
+    """Load live_forward.py state. None if missing/empty/unreadable."""
+    if not FORWARD_STATE_PATH.exists():
+        return None
+    try:
+        raw = FORWARD_STATE_PATH.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if not isinstance(data, dict) or not data:
+            return None
+        return data
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _lab_exit_summary(counts: dict | None) -> str:
+    """Format exit_reason_counts like 'kill×4' (nonzero only)."""
+    if not counts:
+        return "—"
+    parts = []
+    for reason in ("trail", "target", "kill", "time_cap"):
+        n = int((counts or {}).get(reason) or 0)
+        if n > 0:
+            parts.append(f"{reason}×{n}")
+    # Any unexpected keys
+    for k, v in (counts or {}).items():
+        if k in ("trail", "target", "kill", "time_cap"):
+            continue
+        n = int(v or 0)
+        if n > 0:
+            parts.append(f"{k}×{n}")
+    return ", ".join(parts) if parts else "—"
+
+
+def _lab_tranche_exits(tranches: list | None) -> str:
+    """Compact exit prices from tranches."""
+    if not tranches:
+        return "—"
+    prices = []
+    for t in tranches:
+        px = t.get("exit_price")
+        if px is None:
+            continue
+        try:
+            prices.append(f"{float(px):.4f}")
+        except (TypeError, ValueError):
+            continue
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    uniq = []
+    for p in prices:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return ", ".join(uniq) if uniq else "—"
+
+
+def tab_strategy_lab() -> None:
+    """
+    SIM / Polygon-paper A-vs-B forward test.
+
+    Binds to real fields written by strategy_lab/live_forward.py →
+    strategy_lab/results/forward_state.json. Does not touch live agent state.
+    """
+    state = _load_forward_state()
+    if state is None:
+        st.info(
+            "No forward-test data yet — start `live_forward.py` "
+            "(or run a replay dry-run) to populate "
+            "`strategy_lab/results/forward_state.json`."
+        )
+        return
+
+    # --- Banner: never confuse with live IBKR agent ---
+    st.markdown(
+        """
+<div style="
+    background: #1a3a5c;
+    border: 2px solid #3d8bfd;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 12px;
+">
+  <div style="font-size: 18px; font-weight: 700; color: #7ec8ff;">
+    SIM · Polygon paper · not IBKR / not real money
+  </div>
+  <div style="font-size: 13px; color: #b8d4f0; margin-top: 4px;">
+    Strategy Lab forward test — dual pools from <code>live_forward.py</code>.
+    Independent of the live agent / Supabase paper book.
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    pool_a = state.get("pool_A_trailing") or {}
+    pool_b = state.get("pool_B_target") or {}
+    eod = state.get("eod_summary") or {}
+    winner = eod.get("winner") or (state.get("report") or {}).get("winner") or {}
+
+    a_val = float(pool_a.get("value_usd") or pool_a.get("start_usd") or 0)
+    b_val = float(pool_b.get("value_usd") or pool_b.get("start_usd") or 0)
+    a_start = float(pool_a.get("start_usd") or 3000.0)
+    b_start = float(pool_b.get("start_usd") or 3000.0)
+    a_pnl = a_val - a_start
+    b_pnl = b_val - b_start
+    a_ret = (a_pnl / a_start * 100.0) if a_start else 0.0
+    b_ret = (b_pnl / b_start * 100.0) if b_start else 0.0
+    # Prefer stored win_rate_pct when present
+    a_wr = pool_a.get("win_rate_pct")
+    b_wr = pool_b.get("win_rate_pct")
+    if a_wr is None and eod.get("pool_A"):
+        a_wr = eod["pool_A"].get("win_rate_pct")
+    if b_wr is None and eod.get("pool_B"):
+        b_wr = eod["pool_B"].get("win_rate_pct")
+    a_slots = int(pool_a.get("slots_open") or 0)
+    b_slots = int(pool_b.get("slots_open") or 0)
+    a_closed = len(pool_a.get("closed_trades") or [])
+    b_closed = len(pool_b.get("closed_trades") or [])
+    a_taken = int(pool_a.get("trades_taken") or a_closed)
+    b_taken = int(pool_b.get("trades_taken") or b_closed)
+
+    meta_bits = [
+        f"date **{state.get('flag_date') or '—'}**",
+        f"mode **{state.get('mode') or '—'}**",
+        f"phase **{state.get('phase') or '—'}**",
+        f"entry **{state.get('entry_model') or '—'}**",
+        f"status **{state.get('status') or '—'}**",
+    ]
+    if state.get("updated_at"):
+        meta_bits.append(f"updated `{state['updated_at']}`")
+    st.caption(" · ".join(meta_bits))
+
+    # --- Who's ahead ---
+    margin = abs(a_val - b_val)
+    if a_val > b_val:
+        ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
+        ahead_color = "#00AA44"
+    elif b_val > a_val:
+        ahead_label = pool_b.get("label") or "Strategy B (Target)"
+        ahead_color = "#3d8bfd"
+    else:
+        ahead_label = "TIE"
+        ahead_color = "#888888"
+    # Prefer eod winner label when present and pools still match
+    w_pool = winner.get("pool")
+    if w_pool == "A_trailing" and a_val >= b_val:
+        ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
+        margin = float(winner.get("margin_usd") or margin)
+        ahead_color = "#00AA44"
+    elif w_pool == "B_target" and b_val >= a_val:
+        ahead_label = pool_b.get("label") or "Strategy B (Target)"
+        margin = float(winner.get("margin_usd") or margin)
+        ahead_color = "#3d8bfd"
+    elif w_pool == "tie":
+        ahead_label = "TIE"
+        margin = 0.0
+        ahead_color = "#888888"
+
+    st.markdown(
+        f"""
+<div style="
+    background: {ahead_color}18;
+    border-left: 5px solid {ahead_color};
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 8px 0 16px 0;
+">
+  <div style="font-size: 26px; font-weight: 800; color: {ahead_color};">
+    {"🤝 TIE" if ahead_label == "TIE" else f"🏆 {ahead_label} ahead by ${margin:,.2f}"}
+  </div>
+  <div style="font-size: 14px; color: #666; margin-top: 4px;">
+    A ${a_val:,.2f} &nbsp;vs&nbsp; B ${b_val:,.2f}
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- Side-by-side pool cards ---
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown(f"### {pool_a.get('label') or 'Strategy A (Trailing)'}")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+        m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
+        m3.metric(
+            "Win rate",
+            f"{float(a_wr):.1f}%" if a_wr is not None else "—",
+        )
+        m4, m5 = st.columns(2)
+        m4.metric("Open slots", f"{a_slots}/{LAB_MAX_SLOTS}")
+        m5.metric("Closed trades", str(a_taken))
+    with col_b:
+        st.markdown(f"### {pool_b.get('label') or 'Strategy B (Target)'}")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Pool value", f"${b_val:,.2f}", f"{b_ret:+.2f}%")
+        m2.metric("Realized P&L", f"${b_pnl:+,.2f}")
+        m3.metric(
+            "Win rate",
+            f"{float(b_wr):.1f}%" if b_wr is not None else "—",
+        )
+        m4, m5 = st.columns(2)
+        m4.metric("Open slots", f"{b_slots}/{LAB_MAX_SLOTS}")
+        m5.metric("Closed trades", str(b_taken))
+
+    # --- Equity curves (overlaid) ---
+    st.markdown("### Equity curves")
+    fig = go.Figure()
+    for label, curve, color in (
+        (
+            pool_a.get("label") or "A Trailing",
+            pool_a.get("equity_curve") or [],
+            "#00AA44",
+        ),
+        (
+            pool_b.get("label") or "B Target",
+            pool_b.get("equity_curve") or [],
+            "#3d8bfd",
+        ),
+    ):
+        if not curve:
+            continue
+        xs = list(range(len(curve)))
+        ys = [float(pt.get("value_usd") or 0) for pt in curve]
+        hover = []
+        for i, pt in enumerate(curve):
+            ev = pt.get("event") or ""
+            tk = pt.get("ticker") or ""
+            hover.append(
+                f"{label}<br>#{i} {ev}"
+                + (f" {tk}" if tk else "")
+                + f"<br>${float(pt.get('value_usd') or 0):,.2f}"
+            )
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=ys,
+                mode="lines+markers",
+                name=label,
+                line=dict(color=color, width=2),
+                hovertext=hover,
+                hoverinfo="text",
+            )
+        )
+    fig.update_layout(
+        height=320,
+        margin=dict(l=40, r=20, t=20, b=40),
+        xaxis_title="Event #",
+        yaxis_title="Pool value ($)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        hovermode="closest",
+    )
+    if fig.data:
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.caption("No equity curve points yet.")
+
+    # --- Open positions ---
+    st.markdown("### Open Positions")
+    open_a = pool_a.get("open_positions") or {}
+    open_b = pool_b.get("open_positions") or {}
+    tickers_open = sorted(set(open_a.keys()) | set(open_b.keys()))
+    if not tickers_open:
+        st.caption("No open positions (all flat).")
+    else:
+        open_rows = []
+        for t in tickers_open:
+            oa = open_a.get(t) or {}
+            ob = open_b.get(t) or {}
+            open_rows.append({
+                "Ticker": t,
+                "A entry": (
+                    f"${float(oa['entry_price']):.4f}"
+                    if oa.get("entry_price") is not None
+                    else "—"
+                ),
+                "A shares": oa.get("shares") if oa else "—",
+                "A unrealized": "open (no mark)" if oa else "—",
+                "B entry": (
+                    f"${float(ob['entry_price']):.4f}"
+                    if ob.get("entry_price") is not None
+                    else "—"
+                ),
+                "B shares": ob.get("shares") if ob else "—",
+                "B unrealized": "open (no mark)" if ob else "—",
+                "sweep_reclaim": (
+                    oa.get("sweep_reclaim")
+                    or ob.get("sweep_reclaim")
+                    or "—"
+                ),
+            })
+        st.dataframe(
+            pd.DataFrame(open_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # --- Closed trades (side-by-side A vs B) ---
+    st.markdown("### Closed Trades")
+    # Prefer report.per_ticker (aligned A/B); else zip closed_trades by ticker.
+    per = (state.get("report") or {}).get("per_ticker") or []
+    closed_rows = []
+    if per:
+        for row in per:
+            if row.get("skipped"):
+                continue
+            ar = row.get("A") or {}
+            br = row.get("B") or {}
+            if not ar.get("taken") and not br.get("taken"):
+                continue
+            closed_rows.append({
+                "Ticker": row.get("ticker"),
+                "Entry": (
+                    f"${float(row['entry_price']):.4f}"
+                    if row.get("entry_price") is not None
+                    else "—"
+                ),
+                "A exits": _lab_tranche_exits(ar.get("tranches")),
+                "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
+                "A ret%": (
+                    f"{float(ar['return_pct']):+.2f}%"
+                    if ar.get("return_pct") is not None
+                    else "—"
+                ),
+                "B exits": _lab_tranche_exits(br.get("tranches")),
+                "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
+                "B ret%": (
+                    f"{float(br['return_pct']):+.2f}%"
+                    if br.get("return_pct") is not None
+                    else "—"
+                ),
+                "sweep_reclaim": row.get("sweep_reclaim") or "—",
+            })
+    else:
+        # Fallback: index closed_trades by ticker
+        by_a = {
+            t.get("ticker"): t
+            for t in (pool_a.get("closed_trades") or [])
+            if t.get("taken")
+        }
+        by_b = {
+            t.get("ticker"): t
+            for t in (pool_b.get("closed_trades") or [])
+            if t.get("taken")
+        }
+        for t in sorted(set(by_a) | set(by_b)):
+            ar = by_a.get(t) or {}
+            br = by_b.get(t) or {}
+            entry = ar.get("entry_price", br.get("entry_price"))
+            closed_rows.append({
+                "Ticker": t,
+                "Entry": f"${float(entry):.4f}" if entry is not None else "—",
+                "A exits": _lab_tranche_exits(ar.get("tranches")),
+                "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
+                "A ret%": (
+                    f"{float(ar['return_pct']):+.2f}%"
+                    if ar.get("return_pct") is not None
+                    else "—"
+                ),
+                "B exits": _lab_tranche_exits(br.get("tranches")),
+                "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
+                "B ret%": (
+                    f"{float(br['return_pct']):+.2f}%"
+                    if br.get("return_pct") is not None
+                    else "—"
+                ),
+                "sweep_reclaim": (
+                    ar.get("sweep_reclaim") or br.get("sweep_reclaim") or "—"
+                ),
+            })
+
+    if closed_rows:
+        st.dataframe(
+            pd.DataFrame(closed_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No closed trades yet.")
+
+    # Candidates footer
+    n_c = state.get("n_candidates")
+    scan = state.get("scan") or {}
+    if n_c or scan.get("tickers"):
+        st.caption(
+            f"Candidates: {n_c or len(scan.get('tickers') or [])} — "
+            f"{', '.join(scan.get('tickers') or [])}"
+        )
+
+
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
@@ -1259,13 +1661,14 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
         "📓 Daily Reviews",
         "🔬 Ticker Profiles",
+        "🧪 Strategy Lab",
     ])
 
     with tab1:
@@ -1280,6 +1683,8 @@ def main() -> None:
         tab_daily_reviews()
     with tab6:
         tab_ticker_profiles()
+    with tab7:
+        tab_strategy_lab()
 
     render_footer()
 

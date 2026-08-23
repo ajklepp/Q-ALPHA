@@ -1,0 +1,950 @@
+{
+  "updated_at": "2026-08-23T02:36:18.175907+00:00",
+  "mode": "replay",
+  "flag_date": "2026-08-21",
+  "entry_model": "immediate",
+  "phase": "eod",
+  "status": "complete",
+  "message": "writing end-of-day summary",
+  "candidates": [
+    {
+      "ticker": "USDE",
+      "flag_date": "2026-08-21",
+      "gap_pct": 0.2825,
+      "pm_vol_ratio": 44.45,
+      "ref_price": 5.13,
+      "source": "full_scan_archive",
+      "quality_score": 1.0
+    },
+    {
+      "ticker": "ABUS",
+      "flag_date": "2026-08-21",
+      "gap_pct": 0.09852999999999999,
+      "pm_vol_ratio": 2.76,
+      "ref_price": 5.24,
+      "source": "full_scan_archive",
+      "quality_score": 0.2434
+    },
+    {
+      "ticker": "JOBY",
+      "flag_date": "2026-08-21",
+      "gap_pct": null,
+      "pm_vol_ratio": null,
+      "ref_price": null,
+      "source": "profile_ticker",
+      "quality_score": null
+    }
+  ],
+  "n_candidates": 3,
+  "pool_A_trailing": {
+    "label": "Strategy A (Trailing)",
+    "value_usd": 2966.4206,
+    "start_usd": 3000.0,
+    "open_positions": {},
+    "closed_trades": [
+      {
+        "pool": "A_trailing",
+        "ticker": "USDE",
+        "taken": true,
+        "sweep_reclaim": "pass",
+        "entry_model": "immediate",
+        "entry_price": 4.97,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 86,
+        "pnl_usd": -29.9194,
+        "return_pct": -7.0,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "trail": 0,
+          "kill": 4,
+          "time_cap": 0
+        },
+        "mfe_pct": 2.6157,
+        "pool_after_usd": 2970.0806,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 34,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -11.8286
+          },
+          {
+            "id": "T2",
+            "shares": 26,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -9.0454
+          },
+          {
+            "id": "T3",
+            "shares": 17,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -5.9143
+          },
+          {
+            "id": "T4",
+            "shares": 9,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -3.1311
+          }
+        ]
+      },
+      {
+        "pool": "A_trailing",
+        "ticker": "ABUS",
+        "taken": true,
+        "sweep_reclaim": "fail",
+        "entry_model": "immediate",
+        "entry_price": 5.2381,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 62,
+        "pnl_usd": 3.1,
+        "return_pct": 0.9545,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "trail": 0,
+          "kill": 0,
+          "time_cap": 4
+        },
+        "mfe_pct": 4.0454,
+        "pool_after_usd": 2973.1806,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 25,
+            "exit_price": 5.2881,
+            "exit_time": "2026-08-21T19:52:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": 0.9545,
+            "pnl_usd": 1.25
+          },
+          {
+            "id": "T2",
+            "shares": 19,
+            "exit_price": 5.2881,
+            "exit_time": "2026-08-21T19:52:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": 0.9545,
+            "pnl_usd": 0.95
+          },
+          {
+            "id": "T3",
+            "shares": 12,
+            "exit_price": 5.2881,
+            "exit_time": "2026-08-21T19:52:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": 0.9545,
+            "pnl_usd": 0.6
+          },
+          {
+            "id": "T4",
+            "shares": 6,
+            "exit_price": 5.2881,
+            "exit_time": "2026-08-21T19:52:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": 0.9545,
+            "pnl_usd": 0.3
+          }
+        ]
+      },
+      {
+        "pool": "A_trailing",
+        "ticker": "JOBY",
+        "taken": true,
+        "sweep_reclaim": "pass",
+        "entry_model": "immediate",
+        "entry_price": 7.7,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 52,
+        "pnl_usd": -6.76,
+        "return_pct": -1.6883,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "trail": 0,
+          "kill": 0,
+          "time_cap": 4
+        },
+        "mfe_pct": 0.974,
+        "pool_after_usd": 2966.4206,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 21,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -2.73
+          },
+          {
+            "id": "T2",
+            "shares": 16,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -2.08
+          },
+          {
+            "id": "T3",
+            "shares": 10,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -1.3
+          },
+          {
+            "id": "T4",
+            "shares": 5,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -0.65
+          }
+        ]
+      }
+    ],
+    "equity_curve": [
+      {
+        "t": "2026-08-23T02:36:18.116498+00:00",
+        "value_usd": 3000.0,
+        "event": "start"
+      },
+      {
+        "t": "2026-08-23T02:36:18.148570+00:00",
+        "value_usd": 2970.0806,
+        "event": "close",
+        "ticker": "USDE"
+      },
+      {
+        "t": "2026-08-23T02:36:18.158422+00:00",
+        "value_usd": 2973.1806,
+        "event": "close",
+        "ticker": "ABUS"
+      },
+      {
+        "t": "2026-08-23T02:36:18.168754+00:00",
+        "value_usd": 2966.4206,
+        "event": "close",
+        "ticker": "JOBY"
+      }
+    ],
+    "slots_open": 0,
+    "slots_peak": 1,
+    "wins": 1,
+    "trades_taken": 3,
+    "win_rate_pct": 33.33
+  },
+  "pool_B_target": {
+    "label": "Strategy B (Target)",
+    "value_usd": 2969.1404,
+    "start_usd": 3000.0,
+    "open_positions": {},
+    "closed_trades": [
+      {
+        "pool": "B_target",
+        "ticker": "USDE",
+        "taken": true,
+        "sweep_reclaim": "pass",
+        "entry_model": "immediate",
+        "entry_price": 4.97,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 86,
+        "pnl_usd": -29.9194,
+        "return_pct": -7.0,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "target": 0,
+          "kill": 4,
+          "time_cap": 0,
+          "trail": 0
+        },
+        "mfe_pct": 2.6157,
+        "pool_after_usd": 2970.0806,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 34,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -11.8286
+          },
+          {
+            "id": "T2",
+            "shares": 26,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -9.0454
+          },
+          {
+            "id": "T3",
+            "shares": 17,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -5.9143
+          },
+          {
+            "id": "T4",
+            "shares": 9,
+            "exit_price": 4.6221,
+            "exit_time": "2026-08-21T09:32:00-04:00",
+            "exit_reason": "kill",
+            "return_pct": -7.0,
+            "pnl_usd": -3.1311
+          }
+        ]
+      },
+      {
+        "pool": "B_target",
+        "ticker": "ABUS",
+        "taken": true,
+        "sweep_reclaim": "fail",
+        "entry_model": "immediate",
+        "entry_price": 5.2381,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 62,
+        "pnl_usd": 5.8198,
+        "return_pct": 1.792,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "target": 4,
+          "kill": 0,
+          "time_cap": 0,
+          "trail": 0
+        },
+        "mfe_pct": 2.6135,
+        "pool_after_usd": 2975.9004,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 25,
+            "exit_price": 5.3167,
+            "exit_time": "2026-08-21T09:31:00-04:00",
+            "exit_reason": "target",
+            "return_pct": 1.5,
+            "pnl_usd": 1.9643
+          },
+          {
+            "id": "T2",
+            "shares": 19,
+            "exit_price": 5.3167,
+            "exit_time": "2026-08-21T09:31:00-04:00",
+            "exit_reason": "target",
+            "return_pct": 1.5001,
+            "pnl_usd": 1.493
+          },
+          {
+            "id": "T3",
+            "shares": 12,
+            "exit_price": 5.3694,
+            "exit_time": "2026-08-21T09:31:00-04:00",
+            "exit_reason": "target",
+            "return_pct": 2.5057,
+            "pnl_usd": 1.575
+          },
+          {
+            "id": "T4",
+            "shares": 6,
+            "exit_price": 5.3694,
+            "exit_time": "2026-08-21T09:31:00-04:00",
+            "exit_reason": "target",
+            "return_pct": 2.5058,
+            "pnl_usd": 0.7875
+          }
+        ]
+      },
+      {
+        "pool": "B_target",
+        "ticker": "JOBY",
+        "taken": true,
+        "sweep_reclaim": "pass",
+        "entry_model": "immediate",
+        "entry_price": 7.7,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "shares": 52,
+        "pnl_usd": -6.76,
+        "return_pct": -1.6883,
+        "days_held": 1,
+        "exit_reason_counts": {
+          "target": 0,
+          "kill": 0,
+          "time_cap": 4,
+          "trail": 0
+        },
+        "mfe_pct": 0.974,
+        "pool_after_usd": 2969.1404,
+        "tranches": [
+          {
+            "id": "T1",
+            "shares": 21,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -2.73
+          },
+          {
+            "id": "T2",
+            "shares": 16,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -2.08
+          },
+          {
+            "id": "T3",
+            "shares": 10,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -1.3
+          },
+          {
+            "id": "T4",
+            "shares": 5,
+            "exit_price": 7.57,
+            "exit_time": "2026-08-21T19:58:00-04:00",
+            "exit_reason": "time_cap",
+            "return_pct": -1.6883,
+            "pnl_usd": -0.65
+          }
+        ]
+      }
+    ],
+    "equity_curve": [
+      {
+        "t": "2026-08-23T02:36:18.116504+00:00",
+        "value_usd": 3000.0,
+        "event": "start"
+      },
+      {
+        "t": "2026-08-23T02:36:18.150967+00:00",
+        "value_usd": 2970.0806,
+        "event": "close",
+        "ticker": "USDE"
+      },
+      {
+        "t": "2026-08-23T02:36:18.160685+00:00",
+        "value_usd": 2975.9004,
+        "event": "close",
+        "ticker": "ABUS"
+      },
+      {
+        "t": "2026-08-23T02:36:18.172658+00:00",
+        "value_usd": 2969.1404,
+        "event": "close",
+        "ticker": "JOBY"
+      }
+    ],
+    "slots_open": 0,
+    "slots_peak": 1,
+    "wins": 1,
+    "trades_taken": 3,
+    "win_rate_pct": 33.33
+  },
+  "scan": {
+    "n_candidates": 3,
+    "tickers": [
+      "USDE",
+      "ABUS",
+      "JOBY"
+    ],
+    "sources": [
+      "full_scan_archive",
+      "profile_ticker"
+    ]
+  },
+  "premarket": {
+    "USDE|2026-08-21": {
+      "premarket_available": true,
+      "premarket_median": 4.7175,
+      "premarket_vwap": 5.0442,
+      "open_0930": 5.04,
+      "n_premarket_bars": 330
+    },
+    "ABUS|2026-08-21": {
+      "premarket_available": true,
+      "premarket_median": 5.25,
+      "premarket_vwap": 5.2706,
+      "open_0930": 5.2,
+      "n_premarket_bars": 96
+    },
+    "JOBY|2026-08-21": {
+      "premarket_available": true,
+      "premarket_median": 7.69,
+      "premarket_vwap": 7.6823,
+      "open_0930": 7.7,
+      "n_premarket_bars": 152
+    }
+  },
+  "eod_summary": {
+    "n_candidates": 3,
+    "tickers": [
+      "USDE",
+      "ABUS",
+      "JOBY"
+    ],
+    "winner": {
+      "pool": "B_target",
+      "margin_usd": 2.7198,
+      "A_end_usd": 2966.4206,
+      "B_end_usd": 2969.1404
+    },
+    "pool_A": {
+      "end_usd": 2966.4206,
+      "return_pct": -1.1193,
+      "trades_taken": 3,
+      "win_rate_pct": 33.33
+    },
+    "pool_B": {
+      "end_usd": 2969.1404,
+      "return_pct": -1.0287,
+      "trades_taken": 3,
+      "win_rate_pct": 33.33
+    },
+    "sweep_reclaim_tags": {
+      "USDE": "pass",
+      "ABUS": "fail",
+      "JOBY": "pass"
+    }
+  },
+  "report": {
+    "per_ticker": [
+      {
+        "ticker": "USDE",
+        "flag_date": "2026-08-21",
+        "skipped": false,
+        "entry_price": 4.97,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "entry_model": "immediate",
+        "sweep_reclaim": "pass",
+        "kill_pct": 0.07,
+        "confidence": "INSUFFICIENT",
+        "levels_source": "fallback_insufficient",
+        "candidate_source": "full_scan_archive",
+        "A": {
+          "pool": "A_trailing",
+          "ticker": "USDE",
+          "taken": true,
+          "sweep_reclaim": "pass",
+          "entry_model": "immediate",
+          "entry_price": 4.97,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 86,
+          "pnl_usd": -29.9194,
+          "return_pct": -7.0,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "trail": 0,
+            "kill": 4,
+            "time_cap": 0
+          },
+          "mfe_pct": 2.6157,
+          "pool_after_usd": 2970.0806,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 34,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -11.8286
+            },
+            {
+              "id": "T2",
+              "shares": 26,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -9.0454
+            },
+            {
+              "id": "T3",
+              "shares": 17,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -5.9143
+            },
+            {
+              "id": "T4",
+              "shares": 9,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -3.1311
+            }
+          ]
+        },
+        "B": {
+          "pool": "B_target",
+          "ticker": "USDE",
+          "taken": true,
+          "sweep_reclaim": "pass",
+          "entry_model": "immediate",
+          "entry_price": 4.97,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 86,
+          "pnl_usd": -29.9194,
+          "return_pct": -7.0,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "target": 0,
+            "kill": 4,
+            "time_cap": 0,
+            "trail": 0
+          },
+          "mfe_pct": 2.6157,
+          "pool_after_usd": 2970.0806,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 34,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -11.8286
+            },
+            {
+              "id": "T2",
+              "shares": 26,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -9.0454
+            },
+            {
+              "id": "T3",
+              "shares": 17,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -5.9143
+            },
+            {
+              "id": "T4",
+              "shares": 9,
+              "exit_price": 4.6221,
+              "exit_time": "2026-08-21T09:32:00-04:00",
+              "exit_reason": "kill",
+              "return_pct": -7.0,
+              "pnl_usd": -3.1311
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "ABUS",
+        "flag_date": "2026-08-21",
+        "skipped": false,
+        "entry_price": 5.2381,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "entry_model": "immediate",
+        "sweep_reclaim": "fail",
+        "kill_pct": 0.090609,
+        "confidence": "LOW",
+        "levels_source": "profile",
+        "candidate_source": "full_scan_archive",
+        "A": {
+          "pool": "A_trailing",
+          "ticker": "ABUS",
+          "taken": true,
+          "sweep_reclaim": "fail",
+          "entry_model": "immediate",
+          "entry_price": 5.2381,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 62,
+          "pnl_usd": 3.1,
+          "return_pct": 0.9545,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "trail": 0,
+            "kill": 0,
+            "time_cap": 4
+          },
+          "mfe_pct": 4.0454,
+          "pool_after_usd": 2973.1806,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 25,
+              "exit_price": 5.2881,
+              "exit_time": "2026-08-21T19:52:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": 0.9545,
+              "pnl_usd": 1.25
+            },
+            {
+              "id": "T2",
+              "shares": 19,
+              "exit_price": 5.2881,
+              "exit_time": "2026-08-21T19:52:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": 0.9545,
+              "pnl_usd": 0.95
+            },
+            {
+              "id": "T3",
+              "shares": 12,
+              "exit_price": 5.2881,
+              "exit_time": "2026-08-21T19:52:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": 0.9545,
+              "pnl_usd": 0.6
+            },
+            {
+              "id": "T4",
+              "shares": 6,
+              "exit_price": 5.2881,
+              "exit_time": "2026-08-21T19:52:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": 0.9545,
+              "pnl_usd": 0.3
+            }
+          ]
+        },
+        "B": {
+          "pool": "B_target",
+          "ticker": "ABUS",
+          "taken": true,
+          "sweep_reclaim": "fail",
+          "entry_model": "immediate",
+          "entry_price": 5.2381,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 62,
+          "pnl_usd": 5.8198,
+          "return_pct": 1.792,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "target": 4,
+            "kill": 0,
+            "time_cap": 0,
+            "trail": 0
+          },
+          "mfe_pct": 2.6135,
+          "pool_after_usd": 2975.9004,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 25,
+              "exit_price": 5.3167,
+              "exit_time": "2026-08-21T09:31:00-04:00",
+              "exit_reason": "target",
+              "return_pct": 1.5,
+              "pnl_usd": 1.9643
+            },
+            {
+              "id": "T2",
+              "shares": 19,
+              "exit_price": 5.3167,
+              "exit_time": "2026-08-21T09:31:00-04:00",
+              "exit_reason": "target",
+              "return_pct": 1.5001,
+              "pnl_usd": 1.493
+            },
+            {
+              "id": "T3",
+              "shares": 12,
+              "exit_price": 5.3694,
+              "exit_time": "2026-08-21T09:31:00-04:00",
+              "exit_reason": "target",
+              "return_pct": 2.5057,
+              "pnl_usd": 1.575
+            },
+            {
+              "id": "T4",
+              "shares": 6,
+              "exit_price": 5.3694,
+              "exit_time": "2026-08-21T09:31:00-04:00",
+              "exit_reason": "target",
+              "return_pct": 2.5058,
+              "pnl_usd": 0.7875
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "JOBY",
+        "flag_date": "2026-08-21",
+        "skipped": false,
+        "entry_price": 7.7,
+        "entry_time": "2026-08-21T09:30:00-04:00",
+        "entry_model": "immediate",
+        "sweep_reclaim": "pass",
+        "kill_pct": 0.074192,
+        "confidence": "HIGH",
+        "levels_source": "profile",
+        "candidate_source": "profile_ticker",
+        "A": {
+          "pool": "A_trailing",
+          "ticker": "JOBY",
+          "taken": true,
+          "sweep_reclaim": "pass",
+          "entry_model": "immediate",
+          "entry_price": 7.7,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 52,
+          "pnl_usd": -6.76,
+          "return_pct": -1.6883,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "trail": 0,
+            "kill": 0,
+            "time_cap": 4
+          },
+          "mfe_pct": 0.974,
+          "pool_after_usd": 2966.4206,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 21,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -2.73
+            },
+            {
+              "id": "T2",
+              "shares": 16,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -2.08
+            },
+            {
+              "id": "T3",
+              "shares": 10,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -1.3
+            },
+            {
+              "id": "T4",
+              "shares": 5,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -0.65
+            }
+          ]
+        },
+        "B": {
+          "pool": "B_target",
+          "ticker": "JOBY",
+          "taken": true,
+          "sweep_reclaim": "pass",
+          "entry_model": "immediate",
+          "entry_price": 7.7,
+          "entry_time": "2026-08-21T09:30:00-04:00",
+          "shares": 52,
+          "pnl_usd": -6.76,
+          "return_pct": -1.6883,
+          "days_held": 1,
+          "exit_reason_counts": {
+            "target": 0,
+            "kill": 0,
+            "time_cap": 4,
+            "trail": 0
+          },
+          "mfe_pct": 0.974,
+          "pool_after_usd": 2969.1404,
+          "tranches": [
+            {
+              "id": "T1",
+              "shares": 21,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -2.73
+            },
+            {
+              "id": "T2",
+              "shares": 16,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -2.08
+            },
+            {
+              "id": "T3",
+              "shares": 10,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -1.3
+            },
+            {
+              "id": "T4",
+              "shares": 5,
+              "exit_price": 7.57,
+              "exit_time": "2026-08-21T19:58:00-04:00",
+              "exit_reason": "time_cap",
+              "return_pct": -1.6883,
+              "pnl_usd": -0.65
+            }
+          ]
+        }
+      }
+    ],
+    "winner": {
+      "pool": "B_target",
+      "margin_usd": 2.7198,
+      "A_end_usd": 2966.4206,
+      "B_end_usd": 2969.1404
+    },
+    "pool_A_trailing": {
+      "start_usd": 3000.0,
+      "end_usd": 2966.4206,
+      "realized_pnl_usd": -33.5794,
+      "return_pct": -1.1193,
+      "trades_taken": 3,
+      "win_rate_pct": 33.33,
+      "slots_used_peak": 1
+    },
+    "pool_B_target": {
+      "start_usd": 3000.0,
+      "end_usd": 2969.1404,
+      "realized_pnl_usd": -30.8596,
+      "return_pct": -1.0287,
+      "trades_taken": 3,
+      "win_rate_pct": 33.33,
+      "slots_used_peak": 1
+    }
+  }
+}
