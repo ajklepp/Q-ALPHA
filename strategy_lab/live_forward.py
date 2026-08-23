@@ -152,17 +152,38 @@ def empty_state(flag_date: str, mode: str) -> dict[str, Any]:
     }
 
 
-def save_state(state: dict[str, Any]) -> None:
-    """Persist continuously so a crash mid-day still leaves a readable snapshot."""
+def save_state(state: dict[str, Any], *, force_sync: bool = False) -> None:
+    """
+    Persist continuously so a crash mid-day still leaves a readable snapshot.
+
+    Also best-effort upserts to Supabase (strategy_lab_state) for Cloud
+    dashboard — throttled ~45s unless force_sync (use at EOD / terminal).
+    Local file write always happens; Supabase failure never raises.
+    """
     state["updated_at"] = _now_iso()
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    try:
+        from lab_state_sync import upsert_forward_state
+
+        phase = str(state.get("phase") or "")
+        status = str(state.get("status") or "")
+        force = force_sync or phase in ("eod", "stopped") or status in (
+            "complete",
+            "market_closed",
+            "no_candidates",
+        )
+        upsert_forward_state(state, force=force)
+    except Exception as exc:
+        print(f"[live_forward] WARN: Supabase sync skipped ({exc})")
 
 
 def set_phase(state: dict[str, Any], phase: str, message: str = "") -> None:
     state["phase"] = phase
     state["message"] = message
-    save_state(state)
+    # Force sync on phase boundaries so Cloud sees scan/profile/trading/eod.
+    save_state(state, force_sync=True)
     print(f"[live_forward] phase={phase}" + (f"  {message}" if message else ""))
 
 
@@ -869,7 +890,12 @@ def run_day(
         }
 
     state = empty_state(flag_date, mode)
-    save_state(state)
+    try:
+        from lab_state_sync import reset_throttle
+        reset_throttle()
+    except Exception:
+        pass
+    save_state(state, force_sync=True)
 
     # --- 1) Scan ---
     set_phase(state, "scan", "running full-market gap scan")

@@ -1244,8 +1244,8 @@ FORWARD_STATE_PATH = ROOT / "strategy_lab" / "results" / "forward_state.json"
 LAB_MAX_SLOTS = 10
 
 
-def _load_forward_state() -> dict | None:
-    """Load live_forward.py state. None if missing/empty/unreadable."""
+def _load_forward_state_local() -> dict | None:
+    """Load local forward_state.json. None if missing/empty/unreadable."""
     if not FORWARD_STATE_PATH.exists():
         return None
     try:
@@ -1255,9 +1255,30 @@ def _load_forward_state() -> dict | None:
         data = json.loads(raw)
         if not isinstance(data, dict) or not data:
             return None
+        data = dict(data)
+        data.setdefault("_lab_state_source", "local_file")
         return data
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _load_forward_state() -> dict | None:
+    """
+    Prefer Supabase strategy_lab_state via ANON key (Cloud-safe), else local JSON.
+
+    Same field names either way — tab binds to pool_A_trailing / pool_B_target / …
+    Never uses SUPABASE_SECRET_KEY for this tab.
+    """
+    try:
+        sys.path.insert(0, str(ROOT / "strategy_lab"))
+        from lab_state_sync import fetch_latest_forward_state_anon
+
+        remote = fetch_latest_forward_state_anon()
+        if remote:
+            return remote
+    except Exception:
+        pass
+    return _load_forward_state_local()
 
 
 def _lab_exit_summary(counts: dict | None) -> str:
@@ -1313,11 +1334,12 @@ def tab_strategy_lab() -> None:
     if state is None:
         st.info(
             "No forward-test data yet — start `live_forward.py` "
-            "(or run a replay dry-run) to populate "
-            "`strategy_lab/results/forward_state.json`."
+            "(or run a replay dry-run). State syncs to Supabase for Cloud; "
+            "local fallback is `strategy_lab/results/forward_state.json`."
         )
         return
 
+    src = state.get("_lab_state_source") or "unknown"
     # --- Banner: never confuse with live IBKR agent ---
     st.markdown(
         """
@@ -1373,6 +1395,7 @@ def tab_strategy_lab() -> None:
         f"phase **{state.get('phase') or '—'}**",
         f"entry **{state.get('entry_model') or '—'}**",
         f"status **{state.get('status') or '—'}**",
+        f"source **{src}**",
     ]
     if state.get("updated_at"):
         meta_bits.append(f"updated `{state['updated_at']}`")
