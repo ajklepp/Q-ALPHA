@@ -90,7 +90,7 @@ def load_daily_cached(
         ),
         encoding="utf-8",
     )
-    time.sleep(0.12)
+    # No sleep: Stocks Developer = unlimited REST (15-min delayed feed).
     return bars
 
 

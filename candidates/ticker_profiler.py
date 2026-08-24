@@ -65,7 +65,7 @@ RTH_CLOSE_HOUR, RTH_CLOSE_MIN = 16, 0
 # "Just beyond" multiplier for safe-max / Tier4 (applied to the MAE percentile)
 STOP_BEYOND_MULT = 1.05
 MFE_HIT_BUCKETS = (0.03, 0.05, 0.08, 0.10)    # absolute % move hit-rate thresholds
-POLYGON_SLEEP_SEC = 0.12                      # rate limit between minute-bar pulls
+POLYGON_SLEEP_SEC = 0.12  # optional pacing only; Stocks Developer = unlimited REST (15-min delayed). Not a free-tier 5 req/min limit.
 # Warn when informational target / safe-max-stop reward:risk is thin
 RR_WARN_THRESHOLD = 1.5
 
