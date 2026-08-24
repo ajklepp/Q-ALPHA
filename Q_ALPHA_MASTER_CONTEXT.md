@@ -76,9 +76,13 @@ collect_setups → fetch_history → fetch_premarket → batch_profile
 - **Actual:** peak favorable excursion vs entry over Strategy A hold window (not truncated by stops) — same definition in `oos_r2.actual_mfe_pct`
 - **Backtest artifact:** `strategy_lab/results/oos_r2_backtest.json`  
   - Temporal holdout OOS **R² ≈ −0.2367 (N=35)** — noisy baseline; **keep this file**
-- **Forward rolling R²:** grows from live/replay completed pairs in `forward_predictions.json` + state blob  
-  - Dashboard **MIN_N = 20**: do not show forward R² or gap “holding/overfit” verdicts until N ≥ 20  
-  - **Negative R²** = worse than predicting the **average** MFE every time
+- **Forward rolling R²:** grows from **LIVE** completed prediction pairs only
+  (`forward_predictions.json` + state blob). Replay is isolated and does **not**
+  write the live prediction log. Dashboard **MIN_N = 20** before showing forward R²
+  or gap verdicts.
+  - **Negative R²** = worse than predicting the **average** MFE every time.
+  - Forward benchmark to beat is **R² = 0** (the mean). The backtest −0.24 number is
+    **context only**, not the live pass/fail bar.
 
 ### Lab infra decisions
 - Dual pools **compound** across live days: `$3000` is a **one-time** start (`reset_forward.py` only). `live_forward` LIVE mode **resumes** pools, closed trades, equity curve, and prediction log.
@@ -93,9 +97,13 @@ collect_setups → fetch_history → fetch_premarket → batch_profile
 | Source | What works | What fails |
 |--------|------------|------------|
 | **IBKR paper** | Historical requests | **No usable live market data** — Error **420**; live + delayed + realtime bars fail. Paid L1/L2 need funded live entitlement. |
-| **Polygon $79/mo** | 1-min aggregates, news, scans, **Strategy Lab** | ~**15-min delayed** for “live”; fine for lab forward test and research |
+| **Polygon / Massive Stocks Developer ($79/mo)** | 1-min aggregates, news, scans, **Strategy Lab** — see `strategy_lab/polygon_tier.py` | **15-min delayed** (not real-time; real-time is Stocks Advanced ~$199). Unlimited REST. WebSockets carry the **same** delay. |
 
-**Implication:** Strategy Lab is the correct venue for exit research until IBKR data works. Agent still needs TWS open for orders when paper-trading.
+**Confirmed tier facts** (2026-08-23): plan `stocks_developer_79`, brand Massive (Polygon), `DELAY_MINUTES=15`, `REST_CALLS=unlimited`, minute/second aggregates, Snapshot, Corporate Actions, Flat Files — constants in `polygon_tier.py`. Docs: [massive.com](https://massive.com) (llms.txt/.md); client `massive-com/client-python`. API base still `api.polygon.io` unless Step 0 dashboard shows otherwise.
+
+**ENTRY-CONVENTION LIMITATION:** SIM entries fill at the 09:30 1-min close, which on the 15-min delayed tier is not visible until ~09:45 — fills are therefore not executable at that price in real money. Real-money transition requires the real-time tier OR re-basing entry fills to the first executable visible bar. Deferred: latency-cost study quantifying the gap.
+
+**Implication:** Strategy Lab is the correct venue for exit research until IBKR data works. Agent still needs TWS open for orders when paper-trading. P0 wait-for-0930-bar is **LOAD-BEARING** under this delay.
 
 ---
 
@@ -214,7 +222,7 @@ Reuse from EXP-0012: `process_stock()`, `BracketPosition`, `classify_profile()`,
 | Sharpe | ~1.64 | ≥ 1.5 |
 | Max DD | ~−3% | ≥ −15% |
 | Walk-forward | Strong / partial | ≥ 3/4 |
-| Lab forward R² | — | Meaningful only at **N ≥ 20**; compare to backtest −0.24 baseline |
+| Lab forward R² | — | Meaningful only at **N ≥ 20**; live bar is **R² ≥ 0** (beat the mean); −0.24 is backtest context only |
 
 ---
 

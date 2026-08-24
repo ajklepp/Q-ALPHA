@@ -51,11 +51,12 @@ After Monday’s first live trades, pools **compound** — do **not** call `rese
 ### A) Automatic (preferred)
 Windows Task Scheduler task **`QAlpha Strategy Lab`**:
 - Trigger: **Mon–Fri 09:35** local (= **9:35 ET** on this PC)
-- Action: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "…\strategy_lab\start_lab_scheduled.ps1"`
-- Start in: repo root `C:\Users\ajkle\OneDrive\Documents\Q-ALPHA`
-- Logon: **Interactive only** · user **`ajkle`** · Limited · don’t start on batteries
-- Launcher uses **`venv\Scripts\python.exe`** (never system `py`)
-- Logs: `strategy_lab/logs/lab_YYYY-MM-DD.log`
+- Action: `powershell.exe … -File "…\strategy_lab\start_lab_scheduled.ps1"`
+- Launcher: **`venv\Scripts\python.exe strategy_lab\live_forward.py`** (ENTRY only — opens positions, no phantom same-morning settle)
+
+**Settle task** (register similarly): **`QAlpha Strategy Lab Settle`** · **Mon–Fri 16:40 ET** ·
+`start_lab_settle_scheduled.ps1` → `live_forward.py --settle`  
+(Morning entry also auto-settles any overnight opens first.)
 
 **Unattended needs:** PC on, awake, **logged in as ajkle**, network, `.env` present.
 
@@ -190,8 +191,20 @@ Q-ALPHA/
 - Entry = **`immediate`**. `sweep_reclaim` = quality tag only.  
 - Exit comparison = A Trailing vs B Target, dual $3k pools, max 10 slots each, ~1% risk.  
 - LIVE **resumes/compounds**; only `reset_forward.py` zeros to $3000.  
-- Forward R² UI gated at **N≥20**; backtest R² always shown (noisy).  
+- Forward R² UI gated at **N≥20**; forward bar is **R² ≥ 0** (beat the mean); backtest −0.24 is context only.  
+- AT1 regression (**Option A**): tip scan-merge order is authoritative — see `strategy_lab/AT1_BASELINE.md`.  
 - AI entry engine **deferred** (need Level 2).
+
+---
+
+## KNOWN DEBT (do not implement from this list without a dedicated spec)
+
+- **ENTRY-CONVENTION LIMITATION:** SIM entries fill at the 09:30 1-min close, which on the 15-min delayed tier is not visible until ~09:45 — fills are therefore not executable at that price in real money. Real-money transition requires the real-time tier OR re-basing entry fills to the first executable visible bar. Deferred: latency-cost study quantifying the gap.
+- **Latency-cost study:** for historical flagged gappers, recompute entries with fills at (i) 09:30 close vs (ii) first bar visible under 15-min delay; report per-trade and aggregate P&L difference → informs $199 Stocks Advanced upgrade decision.
+- **Monitor marks:** with Snapshot, all open-position marks cost ONE call; marks will be ~15 min stale (acceptable — settle is source of truth).
+- **Split hygiene:** use Corporate Actions endpoint to adjust cached bars when a flagged ticker splits mid-hold.
+- **Second Aggregates:** available for future fill/slippage modeling at the open.
+- Cloud secrets still include service key for most tabs (Lab tab uses anon+RLS).
 
 ---
 

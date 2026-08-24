@@ -47,5 +47,7 @@ def is_trading_day(check_date: date | None = None) -> bool:
         date(2026, 11, 27),
         date(2026, 12, 25),
     ]
+    # TODO(2027): extend / replace with a 2027 NYSE holiday list before Jan 2027.
+    # Behavior unchanged — 2026 list only for now.
 
     return today not in holidays_2026
