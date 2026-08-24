@@ -250,6 +250,12 @@ Polygon: use for Strategy Lab and research aggregates
 # Task checks
 schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST
 schtasks /Query /TN "QAlpha Autonomous Agent" /V /FO LIST
+schtasks /Query /TN "QAlpha Strategy Lab Settle" /FO LIST
+schtasks /Query /TN "QAlpha Readonly Mirror Sync" /FO LIST
+
+# Read-only mirror for Cursor Chat A (reference); Chat B edits Q-ALPHA
+.\tools\sync_readonly_mirror.ps1
+# Open sibling folder: Documents\Q-ALPHA-READONLY
 ```
 
 ---
