@@ -15,6 +15,7 @@ from typing import Any, Callable
 from entry_models import immediate, sweep_reclaim
 from forward_runtime import (
     cache_stale_for_settle,
+    log_feed_lag,
     mfe_hold_window_ready,
     refresh_daily_bars,
     refresh_minute_bars,
@@ -161,6 +162,9 @@ def entry_open_positions(
                 "skip_reason": "missing_bars",
             })
             continue
+
+        # Feed-lag probe (logging only; expected ~15 min delayed entitlement).
+        log_feed_lag(ticker, flag_date, minute_bars)
 
         sig = immediate(minute_bars)
         if sig is None:
@@ -384,7 +388,8 @@ def _settle_one_pool(
     pool = state[pool_key]
     opens = dict(pool.get("open_positions") or {})
     newly_closed: list[dict[str, Any]] = []
-    pool_val = float(pool.get("value_usd") or START_POOL_USD)
+    raw_pool = pool.get("value_usd")
+    pool_val = float(START_POOL_USD if raw_pool is None else raw_pool)
 
     for ticker, pos in list(opens.items()):
         flag_date = str(pos.get("flag_date") or state.get("flag_date") or "")[:10]

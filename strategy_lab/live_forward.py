@@ -15,9 +15,13 @@ FLOW (current trading day, or replay of a past date via run_day):
   1. is_trading_day guard (ET weekend/holiday) → "Market closed today" + stop
   2. ~09:35: full-market gap scan (agent Polygon scan) → profile candidates
      into strategy_lab/profiles/ → fetch premarket bars for the day
-  3. ~09:40+: enter at first available 09:30 1-min close; fork into A and B;
-     manage exits on 1-min bars (full-bar sim in replay / available bars live)
-  4. Persist continuously to results/forward_state.json + EOD summary
+  3. Wait for 09:30 1-min bar (LOAD-BEARING: 15-min delayed feed) → ENTRY ONLY
+     (store open_positions; do not run strategies / book P&L)
+  4. Settle pass (--settle / 16:40 ET / next-morning auto): refresh bars,
+     re-run A/B, book P&L only when open → closed
+  5. Persist continuously to results/forward_state.json + EOD summary
+
+Feed: Polygon/Massive Stocks Developer — 15-min DELAYED, unlimited REST.
 
 COMPOUNDING (LIVE only):
   $3000 is a one-time start (set by reset_forward.py). Each new live date
@@ -180,6 +184,9 @@ def compute_forward_oos_stats(
 ) -> dict[str, Any]:
     """
     Rolling OOS R² across completed forward pairs. True OOS by construction.
+
+    Only rows with both predicted_mfe and actual_mfe count. Display-only
+    actual_mfe_provisional is never a completion signal and is ignored here.
     N<2 → collecting_data (R² undefined). Never raises.
     """
     completed = [
@@ -1175,7 +1182,8 @@ def run_day(
         }
         save_state(state)
 
-        # W1 — wait for 09:30 bar (LIVE polls; replay single-shot).
+        # W1 — LOAD-BEARING wait for 09:30 bar under 15-min delayed feed
+        # (bar visible ~09:45–09:50 ET). LIVE polls; replay single-shot.
         def _load_bars(t: str, d: str, refresh: bool = False):
             return load_bars_for_entry(t, d, refresh=refresh, hist_row=None)
 
