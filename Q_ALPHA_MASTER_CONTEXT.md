@@ -1,7 +1,7 @@
 # Q-ALPHA MASTER CONTEXT
 ## Durable architecture & decisions — read before changing the system
 
-*Last updated: 2026-08-23. Companion ops doc: `Q_ALPHA_HANDOFF.md`.*
+*Last updated: 2026-08-24. Companion ops doc: `Q_ALPHA_HANDOFF.md`.*
 
 ---
 
@@ -22,7 +22,7 @@ The lab answers: *Given a shared entry, does Strategy A (Trailing) beat Strategy
 ## STRATEGY LAB (core new subsystem)
 
 ### Purpose
-- Forward-test **exit** designs on real Polygon bars without IBKR market-data entitlements.
+- Forward-test **exit** designs on real Polygon bars (IBKR-free by design — Lab does not share the agent book).
 - Dual independent **$3,000** SIM pools (A and B), same entry, different exits.
 - Accumulate a **true out-of-sample** prediction log (profiler MFE p50 vs realized MFE) for rolling OOS R².
 
@@ -69,7 +69,7 @@ collect_setups → fetch_history → fetch_premarket → batch_profile
 ### Key findings (evidence-based — do not re-litigate without new data)
 1. **Entry = `immediate`.** Across three tested dimensions (timing, filters, premarket-median / premarket-VWAP limits), entry logic showed **no reliable edge**. Lab live entry is locked to immediate; `sweep_reclaim` is a **quality tag only** (not a gate).
 2. **Exit A likely > B**, driven by the **>25% MFE** tail bucket — but **provisional** (small, clustered calendar: ~21 days / limited independent regimes).
-3. **AI / decision entry engine is DEFERRED** until IBKR Level 2 / live order-flow exists. Do not build “smart entry v2” on delayed aggregates alone.
+3. **AI / decision entry engine is DEFERRED** until we deliberately build on IBKR Level 2 / live order-flow (paper L2 is now partially available — see DATA REALITY). Do not build “smart entry v2” on delayed Polygon aggregates alone.
 
 ### OOS R² (Narang-style prediction quality)
 - **Predicted:** profile `percentiles.mfe.p50` → percent  
@@ -94,16 +94,18 @@ collect_setups → fetch_history → fetch_premarket → batch_profile
 
 ## DATA REALITY (critical)
 
-| Source | What works | What fails |
-|--------|------------|------------|
-| **IBKR paper** | Historical requests | **No usable live market data** — Error **420**; live + delayed + realtime bars fail. Paid L1/L2 need funded live entitlement. |
+| Source | What works | Caveats |
+|--------|------------|---------|
+| **IBKR paper** (TWS **7497**, e.g. DUR857496) | **Streaming + historical + realtime bars + smart depth** — verified **2026-08-24 ~19:34 EDT** probe (SPY, clientId 98, read-only). `reqMktData` valid bid/ask/last; `reqHistoricalData` 1-min; `reqRealTimeBars` 5s; `reqMktDepth` 5 levels. **Error 420 not observed.** | Depth via smart/IEX path; IB **2152** flags missing depth perms on NASDAQ/BATS/ARCA/NYSE/BEX — L2 usable but may be **partial** vs full TotalView on paper. Informational **2104/2106/2158**; transient **2108** normal. |
 | **Polygon / Massive Stocks Developer ($79/mo)** | 1-min aggregates, news, scans, **Strategy Lab** — see `strategy_lab/polygon_tier.py` | **15-min delayed** (not real-time; real-time is Stocks Advanced ~$199). Unlimited REST. WebSockets carry the **same** delay. |
 
-**Confirmed tier facts** (2026-08-23): plan `stocks_developer_79`, brand Massive (Polygon), `DELAY_MINUTES=15`, `REST_CALLS=unlimited`, minute/second aggregates, Snapshot, Corporate Actions, Flat Files — constants in `polygon_tier.py`. Docs: [massive.com](https://massive.com) (llms.txt/.md); client `massive-com/client-python`. API base still `api.polygon.io` unless Step 0 dashboard shows otherwise.
+**Prior IBKR paper state (historical):** live + delayed + realtime bars failed with **Error 420**; historical always worked. Recovery likely from live North America equity streaming + L2/Snapshot entitlements **shared to paper**.
+
+**Confirmed Polygon tier facts** (2026-08-23): plan `stocks_developer_79`, brand Massive (Polygon), `DELAY_MINUTES=15`, `REST_CALLS=unlimited`, minute/second aggregates, Snapshot, Corporate Actions, Flat Files — constants in `polygon_tier.py`. Docs: [massive.com](https://massive.com) (llms.txt/.md); client `massive-com/client-python`. API base still `api.polygon.io` unless Step 0 dashboard shows otherwise.
 
 **ENTRY-CONVENTION LIMITATION:** SIM entries fill at the 09:30 1-min close, which on the 15-min delayed tier is not visible until ~09:45 — fills are therefore not executable at that price in real money. Real-money transition requires the real-time tier OR re-basing entry fills to the first executable visible bar. Deferred: latency-cost study quantifying the gap.
 
-**Implication:** Strategy Lab is the correct venue for exit research until IBKR data works. Agent still needs TWS open for orders when paper-trading. P0 wait-for-0930-bar is **LOAD-BEARING** under this delay.
+**Implication:** Agent **MAY** use IBKR live/streaming bars when we choose. Strategy Lab remains on **Polygon** (15-min delayed OK) — **do not mix** Lab SIM and IBKR agent books. Lab P0 wait-for-0930-bar stays **LOAD-BEARING** under Polygon delay.
 
 ---
 
@@ -136,7 +138,7 @@ See historical sections below — still the research contract for Modal experime
 
 ## DEFERRED / KNOWN DEBT
 
-**(a) Entry-engine v2** — deferred until Level 2 / live order-flow (IBKR).
+**(a) Entry-engine v2** — deferred until we choose to build on IBKR L2 / live order-flow (paper MD/L2 probe OK as of 2026-08-24; full NASDAQ TotalView on paper may still be partial — see **2152**).
 
 **(b) SECURITY — Streamlit Cloud + service role**  
 Most dashboard tabs still use **SUPABASE_SECRET_KEY** on a **public** Streamlit app. Strategy Lab tab correctly prefers **anon + RLS** for `strategy_lab_state`.  

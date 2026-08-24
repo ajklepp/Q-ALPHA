@@ -4,7 +4,8 @@
 **Version focus:** Strategy Lab live forward + agent paper path  
 **Calendar note:** First Strategy Lab **live** session target = **Monday 2026-08-24**  
 **Companion architecture doc:** `Q_ALPHA_MASTER_CONTEXT.md`  
-**Glossary:** `GLOSSARY.md` (also **📖 Glossary** dashboard tab)
+**Glossary:** `GLOSSARY.md` (also **📖 Glossary** dashboard tab)  
+**Last updated:** 2026-08-24
 
 ---
 
@@ -26,7 +27,7 @@ Starting SIM capital per lab pool: **$3,000** (compounds). Broker: IBKR Canada p
 | Money | IBKR paper + `candidates/pool_state.json` | SIM dual pools in `forward_state.json` / Supabase |
 | Schedule | Task **QAlpha Autonomous Agent** · **9:20 ET** | Task **QAlpha Strategy Lab** · **9:35 ET** weekdays |
 | Telegram | Q-ALPHA agent messages | Prefixed **🧪 Strategy Lab** |
-| Data | Needs TWS; IBKR **live MD broken** (Error 420) | Polygon 1-min (delayed OK) |
+| Data | Needs TWS; **IBKR paper MD usable** (probe 2026-08-24 — see IBKR section) | Polygon 1-min (15-min delayed OK) |
 
 ---
 
@@ -222,10 +223,19 @@ Q-ALPHA/
 
 ```
 TWS paper port: 7497
-Client IDs: ibkr_connector=1 · autonomous_agent=5 (keep separate)
-IBKR paper MD: Error 420 — live/delayed/realtime bars fail; historical OK
-Polygon: use for Strategy Lab and research aggregates
+Account (paper): DUR857496
+Client IDs: ibkr_connector=1 · autonomous_agent=5 · MD probes use a free id (e.g. 98)
 ```
+
+**Paper market data — verified 2026-08-24 ~19:34 EDT** (read-only probe, SPY, clientId 98):
+- **PASS:** `reqMktData` streaming (valid bid/ask/last), `reqHistoricalData` 1-min, `reqRealTimeBars` 5s, `reqMktDepth` 5 levels.
+- **Error 420:** not observed.
+- Informational OK: **2104**, **2106**, **2158**; transient **2108** is normal.
+- **Depth / L2:** smart depth returned 5 levels via the **IEX** path; IB **2152** notes additional permissions needed for depth on NASDAQ / BATS / ARCA / NYSE / BEX — L2 is **usable but may be partial** vs full TotalView on paper. Re-check if full NASDAQ L2 is required.
+- **Likely cause:** live North America equity streaming + L2 / Snapshot entitlements **shared to paper** (“share market data with paper”).
+- **Prior state (historical):** paper live + delayed + realtime bars failed with **Error 420**; historical requests always worked.
+
+**Implications:** Agent **MAY** use IBKR live/streaming bars again when we choose. Strategy Lab stays on **Polygon** (15-min delayed OK). **Do not mix** Lab SIM books with the IBKR agent book.
 
 ---
 
@@ -288,4 +298,4 @@ Do not run reset_forward.py after live forward trades have started unless I expl
 
 ---
 
-*Handoff updated: 2026-08-23 · First Lab live target: 2026-08-24 09:35 ET*
+*Handoff updated: 2026-08-24 · IBKR paper MD probe verified; Lab/agent books remain separate*
