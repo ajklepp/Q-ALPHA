@@ -953,9 +953,28 @@ def run_settle(
     """
     Settle pass: refresh bars and re-run strategies on open_positions.
     LIVE default: close_at_data_end=False (no phantom time_cap at last print).
+
+    Weekend/holiday: ET is_trading_day guard (same calendar as run_day entry).
     """
     from forward_book import settle_open_positions
     from forward_runtime import acquire_live_lock, release_live_lock
+
+    today_et = datetime.now(ET).date()
+    if not is_trading_day(today_et):
+        msg = (
+            f"market closed ({today_et.isoformat()}) — nothing to settle"
+        )
+        print(f"[live_forward] settle: {msg}")
+        # Always live-labeled Telegram (no [DRY-RUN]) — this is the scheduled settle path.
+        lab_telegram(
+            "🧪 Strategy Lab Settle — market closed, nothing to settle",
+            dry_run=False,
+        )
+        return {
+            "status": "market_closed",
+            "flag_date": today_et.isoformat(),
+            "message": msg,
+        }
 
     state = load_state_file()
     if not state:
