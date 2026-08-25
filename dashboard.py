@@ -62,6 +62,19 @@ from dashboard_shared import (
     load_todays_watchlist,
     profile_path,
 )
+from dashboard_theme import (
+    ACCENT,
+    ACCENT_2,
+    BG,
+    BORDER,
+    MUTED,
+    NEGATIVE,
+    POSITIVE,
+    SURFACE,
+    TEXT,
+    WARN,
+    inject_theme,
+)
 
 STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
@@ -82,6 +95,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+inject_theme()
 
 # Autorefresh so Live Status + Strategy Lab pick up Supabase marks without
 # manual rerun / redeploy. 90s sits in the 60–120s band; Lab marks push ~30m.
@@ -203,18 +217,18 @@ def _next_scan_countdown() -> str:
 def _style_pnl(val):
     if pd.isna(val):
         return ""
-    color = "#00FF88" if val >= 0 else "#FF4444"
-    return f"color: {color}; font-weight: bold"
+    color = POSITIVE if val >= 0 else NEGATIVE
+    return f"color: {color}; font-weight: 600"
 
 
 def _color_gap(val: str) -> str:
     try:
         pct = float(str(val).replace("%", "").replace("+", "").strip())
         if pct > 0:
-            return "color: #00FF88; font-weight: bold"
+            return f"color: {POSITIVE}; font-weight: 600"
         if pct < 0:
-            return "color: #FF4444; font-weight: bold"
-        return "color: #AAAAAA"
+            return f"color: {NEGATIVE}; font-weight: 600"
+        return f"color: {MUTED}"
     except Exception:
         return ""
 
@@ -362,28 +376,26 @@ def _style_watchlist(df: pd.DataFrame):
     def _pnl_cell(val: str) -> str:
         text = str(val)
         if text in {"—", "", "None"}:
-            return "color: #666666"
+            return f"color: {MUTED}"
         if text.startswith("$-") or "-$" in text or text.startswith("-$"):
-            return "color: #FF4444; font-weight: bold"
-        # "$+12.00" or positive without explicit +
+            return f"color: {NEGATIVE}; font-weight: 600"
         if "+$" in text or text.startswith("$+"):
-            return "color: #00FF88; font-weight: bold"
+            return f"color: {POSITIVE}; font-weight: 600"
         if text.startswith("$") and not text.startswith("$-"):
-            # bare "$12.00" — treat leading digit after $ as positive if no minus
             rest = text[1:].lstrip("+")
             if rest and rest[0].isdigit():
-                return "color: #00FF88; font-weight: bold"
+                return f"color: {POSITIVE}; font-weight: 600"
         return ""
 
     def _rr_cell(val: str) -> str:
         text = str(val)
         if text in {"", "—", "None"}:
-            return "color: #666666"
+            return f"color: {MUTED}"
         if text == "n/a":
-            return "color: #888888"
+            return f"color: {MUTED}"
         if "⚠️" in text:
-            return "color: #FFAA33; font-weight: bold"
-        return "color: #00FF88"
+            return f"color: {WARN}; font-weight: 600"
+        return f"color: {POSITIVE}"
 
     styled = df.style.map(_color_gap, subset=["Gap %"])
     if "P&L" in df.columns:
@@ -426,18 +438,27 @@ def _style_watchlist(df: pd.DataFrame):
 def render_header() -> None:
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
-        st.markdown("# 📈 Q-ALPHA Dashboard")
-        st.caption("Quantitative Momentum Trading System")
+        live_line = ""
         try:
             last_intraday = get_sync().get_last_health("intraday_monitor")
             if last_intraday and last_intraday.get("last_run"):
                 ts = last_intraday["last_run"]
-                st.caption(
-                    f"📡 Live data updated: {ts[11:16]} ET "
-                    f"(every 30 min during market hours)"
+                live_line = (
+                    f'<div class="qa-live-pill">Live data · '
+                    f'{ts[11:16]} ET · every 30m RTH</div>'
                 )
         except Exception:
             pass
+        st.markdown(
+            f"""
+<div class="qa-brand">
+  <div class="qa-brand-mark">Q-<span>ALPHA</span></div>
+  <div class="qa-brand-sub">Quantitative momentum · paper console</div>
+  {live_line}
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
     with col2:
         st.metric("Version", f"v{SYSTEM_VERSION}")
     with col3:
@@ -504,28 +525,31 @@ def tab_live_status(trades: list, pool_history: list) -> None:
     spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
     vix_regime = "NORMAL"
 
-    regime_color = "#00AA44" if spy_regime == "BULL" else "#CC2200"
+    regime_color = POSITIVE if spy_regime == "BULL" else NEGATIVE
     regime_emoji = "🐂" if spy_regime == "BULL" else "🐻"
-    vix_color = "#FFaa00" if vix_regime == "ELEVATED" else "#00AA44"
+    vix_color = WARN if vix_regime == "ELEVATED" else POSITIVE
     sizing_pct = "100%" if vix_regime == "NORMAL" else "50%"
 
     st.markdown(
         f"""
-<div style="
-    background: {regime_color}22;
-    border: 2px solid {regime_color};
-    border-radius: 8px;
-    padding: 12px 24px;
+<div class="qa-panel" style="
+    border-color: color-mix(in srgb, {regime_color} 55%, {BORDER});
+    background: linear-gradient(135deg,
+      color-mix(in srgb, {regime_color} 14%, {SURFACE}) 0%,
+      {SURFACE} 70%);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
 ">
-    <div style="font-size: 24px; font-weight: bold; color: {regime_color};">
+    <div style="font-size: 1.35rem; font-weight: 700; color: {regime_color};
+                font-family: Sora, sans-serif;">
         {regime_emoji} {spy_regime} MARKET
     </div>
-    <div style="color: #AAAAAA; font-size: 14px;">
-        VIX: <b style="color: {vix_color};">{vix_regime}</b> &nbsp;|&nbsp;
-        Position sizing: <b style="color: white;">{sizing_pct}</b>
+    <div style="color: {MUTED}; font-size: 0.9rem;">
+        VIX: <b style="color: {vix_color};">{vix_regime}</b>
+        &nbsp;·&nbsp;
+        Sizing: <b style="color: {TEXT};">{sizing_pct}</b>
     </div>
 </div>
 """,
@@ -794,27 +818,28 @@ def tab_performance(trades: list, pool_history: list) -> None:
             y=pool_values,
             mode="lines",
             name="Q-ALPHA",
-            line=dict(color="#00FF88", width=2),
+            line=dict(color=ACCENT, width=2.5),
             fill="tozeroy",
-            fillcolor="rgba(0, 255, 136, 0.1)",
+            fillcolor="rgba(45, 212, 191, 0.12)",
         ))
         fig.add_hline(
             y=STARTING_POOL,
             line_dash="dash",
-            line_color="#666666",
+            line_color=MUTED,
             annotation_text="Starting Capital $3,000",
         )
         fig.update_layout(
             title="Portfolio Equity Curve",
             xaxis_title="Date",
             yaxis_title="Portfolio Value ($)",
-            plot_bgcolor="#0E1117",
-            paper_bgcolor="#0E1117",
-            font=dict(color="white"),
-            yaxis=dict(gridcolor="#1E2130"),
-            xaxis=dict(gridcolor="#1E2130"),
+            plot_bgcolor=BG,
+            paper_bgcolor=BG,
+            font=dict(color=TEXT, family="Sora"),
+            yaxis=dict(gridcolor=BORDER),
+            xaxis=dict(gridcolor=BORDER),
             hovermode="x unified",
             height=450,
+            margin=dict(l=40, r=20, t=50, b=40),
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -831,9 +856,16 @@ def tab_performance(trades: list, pool_history: list) -> None:
             x="label",
             y="pnl_dollars",
             color="pnl_dollars",
-            color_continuous_scale=["#FF4444", "#00FF88"],
+            color_continuous_scale=[NEGATIVE, POSITIVE],
         )
-        fig2.update_layout(template="plotly_dark", height=400, showlegend=False)
+        fig2.update_layout(
+            template="plotly_dark",
+            height=400,
+            showlegend=False,
+            plot_bgcolor=BG,
+            paper_bgcolor=BG,
+            font=dict(color=TEXT, family="Sora"),
+        )
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("No closed trades for P&L chart.")
@@ -866,31 +898,30 @@ def tab_system_health(health: list) -> None:
         last = get_last_health(key, health)
         if last:
             time_ago = get_time_ago(last.get("created_at") or last.get("last_run", ""))
-            status_color = "#00AA44" if last.get("status") == "OK" else "#CC2200"
+            status_color = POSITIVE if last.get("status") == "OK" else NEGATIVE
             status_icon = "🟢" if last.get("status") == "OK" else "🔴"
             status_text = last.get("status", "UNKNOWN")
             message = last.get("message", "—")
         else:
             time_ago = "Never"
-            status_color = "#666666"
+            status_color = MUTED
             status_icon = "⚫"
             status_text = "Never run"
             message = "—"
 
         st.markdown(
             f"""
-<div style="
-    background: #1E2130;
+<div class="qa-panel" style="
     border-left: 4px solid {status_color};
-    border-radius: 4px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.55rem;
 ">
     <b>{info['icon']} {info['name']}</b>
-    &nbsp;&nbsp; {status_icon} {status_text}
-    &nbsp;&nbsp; <span style="color: #888;">{time_ago}</span>
+    &nbsp;&nbsp; {status_icon}
+    <span style="color: {status_color}; font-weight: 600;">{status_text}</span>
+    &nbsp;&nbsp; <span style="color: {MUTED};">{time_ago}</span>
     <br>
-    <small style="color: #666;">{message}</small>
+    <small style="color: {MUTED};">{message}</small>
 </div>
 """,
             unsafe_allow_html=True,
@@ -1471,20 +1502,18 @@ def tab_strategy_lab() -> None:
         return
 
     src = state.get("_lab_state_source") or "unknown"
-    # --- Banner: never confuse with live IBKR agent ---
     st.markdown(
-        """
-<div style="
-    background: #1a3a5c;
-    border: 2px solid #3d8bfd;
-    border-radius: 8px;
-    padding: 14px 20px;
-    margin-bottom: 12px;
+        f"""
+<div class="qa-panel" style="
+    border-color: color-mix(in srgb, {ACCENT} 40%, {BORDER});
+    background: linear-gradient(135deg,
+      color-mix(in srgb, {ACCENT} 10%, {SURFACE}) 0%,
+      {SURFACE} 65%);
 ">
-  <div style="font-size: 18px; font-weight: 700; color: #7ec8ff;">
+  <div class="qa-panel-title" style="color: {ACCENT_2};">
     SIM · Polygon paper · not IBKR / not real money
   </div>
-  <div style="font-size: 13px; color: #b8d4f0; margin-top: 4px;">
+  <div class="qa-panel-body">
     Strategy Lab forward test — dual pools from <code>live_forward.py</code>.
     Independent of the live agent / Supabase paper book.
   </div>
@@ -1548,41 +1577,42 @@ def tab_strategy_lab() -> None:
     margin = abs(a_val - b_val)
     if a_val > b_val:
         ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
-        ahead_color = "#00AA44"
+        ahead_color = POSITIVE
     elif b_val > a_val:
         ahead_label = pool_b.get("label") or "Strategy B (Target)"
-        ahead_color = "#3d8bfd"
+        ahead_color = ACCENT
     else:
         ahead_label = "TIE"
-        ahead_color = "#888888"
+        ahead_color = MUTED
     # Prefer eod winner label when present and pools still match
     w_pool = winner.get("pool")
     if w_pool == "A_trailing" and a_val >= b_val:
         ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
         margin = float(winner.get("margin_usd") or margin)
-        ahead_color = "#00AA44"
+        ahead_color = POSITIVE
     elif w_pool == "B_target" and b_val >= a_val:
         ahead_label = pool_b.get("label") or "Strategy B (Target)"
         margin = float(winner.get("margin_usd") or margin)
-        ahead_color = "#3d8bfd"
+        ahead_color = ACCENT
     elif w_pool == "tie":
         ahead_label = "TIE"
         margin = 0.0
-        ahead_color = "#888888"
+        ahead_color = MUTED
 
     st.markdown(
         f"""
-<div style="
-    background: {ahead_color}18;
-    border-left: 5px solid {ahead_color};
-    border-radius: 6px;
-    padding: 16px 20px;
-    margin: 8px 0 16px 0;
+<div class="qa-panel" style="
+    border-left: 4px solid {ahead_color};
+    background: linear-gradient(90deg,
+      color-mix(in srgb, {ahead_color} 12%, {SURFACE}) 0%,
+      {SURFACE} 55%);
 ">
-  <div style="font-size: 26px; font-weight: 800; color: {ahead_color};">
-    {"🤝 TIE" if ahead_label == "TIE" else f"🏆 {ahead_label} ahead by ${margin:,.2f}"}
+  <div style="font-size: 1.4rem; font-weight: 700; color: {ahead_color};
+              font-family: Sora, sans-serif;">
+    {"TIE" if ahead_label == "TIE" else f"{ahead_label} ahead by ${margin:,.2f}"}
   </div>
-  <div style="font-size: 14px; color: #666; margin-top: 4px;">
+  <div style="font-size: 0.9rem; color: {MUTED}; margin-top: 0.35rem;
+              font-family: 'IBM Plex Mono', monospace;">
     A ${a_val:,.2f} &nbsp;vs&nbsp; B ${b_val:,.2f}
   </div>
 </div>
@@ -1624,12 +1654,12 @@ def tab_strategy_lab() -> None:
         (
             pool_a.get("label") or "A Trailing",
             pool_a.get("equity_curve") or [],
-            "#00AA44",
+            POSITIVE,
         ),
         (
             pool_b.get("label") or "B Target",
             pool_b.get("equity_curve") or [],
-            "#3d8bfd",
+            ACCENT,
         ),
     ):
         if not curve:
@@ -1663,6 +1693,11 @@ def tab_strategy_lab() -> None:
         yaxis_title="Pool value ($)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         hovermode="closest",
+        plot_bgcolor=BG,
+        paper_bgcolor=BG,
+        font=dict(color=TEXT, family="Sora"),
+        xaxis=dict(gridcolor=BORDER),
+        yaxis=dict(gridcolor=BORDER),
     )
     if fig.data:
         st.plotly_chart(fig, use_container_width=True)
@@ -1835,21 +1870,21 @@ def tab_glossary() -> None:
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
-    st.divider()
+    st.markdown('<div class="qa-footer"></div>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         st.caption(
-            f"🔄 Auto-refreshes every 5 min | "
+            f"Auto-refreshes every 90s · "
             f"Last updated: {now_et.strftime('%H:%M:%S ET')}"
         )
     with col2:
         st.caption(
-            f"v{SYSTEM_VERSION} | "
-            f"Running {DAYS_RUNNING} days | "
-            f"© Q-ALPHA 2026"
+            f"v{SYSTEM_VERSION} · "
+            f"Running {DAYS_RUNNING} days · "
+            f"Q-ALPHA 2026"
         )
     with col3:
-        if st.button("🔄 Refresh Now"):
+        if st.button("Refresh now"):
             st.rerun()
 
 
