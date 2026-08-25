@@ -190,7 +190,10 @@ Q-ALPHA/
 ## KEY LAB DECISIONS (ops)
 
 - Entry = **`immediate`**. `sweep_reclaim` = quality tag only.  
-- Exit comparison = A Trailing vs B Target, dual $3k pools, max 10 slots each, ~1% risk.  
+- Exit comparison = A Trailing vs B Target, dual $3k pools, ~1% risk.  
+- **Aaron capacity (each pool independently):**
+  - `MAX_NEW_ENTRIES_PER_DAY = 3` — candidate list capped to top 3 in **existing scan order** (live scan already `rank_score` / `quality_score` desc; do not re-sort). Same cap in replay/dry-run.
+  - `MAX_FULL_SLOTS = 10` — a “full” open still has residual **T1, T2, or T3** working. **T4-only runners do not count.** Settle writes `residual_tranche_ids` / `counts_as_full_slot` on still-open positions; opens without residuals yet count as full until the first settle (never treat all opens as full forever after residuals exist).
 - LIVE **resumes/compounds**; only `reset_forward.py` zeros to $3000.  
 - Forward R² UI gated at **N≥20**; forward bar is **R² ≥ 0** (beat the mean); backtest −0.24 is context only.  
 - AT1 regression (**Option A**): tip scan-merge order is authoritative — see `strategy_lab/AT1_BASELINE.md`.  

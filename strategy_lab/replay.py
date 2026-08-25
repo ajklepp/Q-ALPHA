@@ -53,7 +53,14 @@ DAILY_CACHE_DIR = LAB / "results" / "daily_cache"
 SELF_TEST_DATE = "2026-08-21"
 
 START_POOL_USD = float(POOL_USD)  # $3000
-MAX_SLOTS = 10
+# Aaron capacity (per pool, independent):
+#   MAX_NEW_ENTRIES_PER_DAY — new names opened on a flag_date
+#   MAX_FULL_SLOTS — concurrent opens that still have T1/T2/T3 working;
+#     T4-only runners do NOT consume a full slot
+MAX_NEW_ENTRIES_PER_DAY = 3
+MAX_FULL_SLOTS = 10
+MAX_SLOTS = MAX_FULL_SLOTS  # back-compat alias
+FULL_SLOT_TRANCHE_IDS = frozenset({"T1", "T2", "T3"})
 MODE_LABEL = "SIM / Polygon-paper (NO live scheduler, NO IBKR)"
 
 
@@ -177,8 +184,63 @@ def tranche_rows(res: dict[str, Any] | None) -> list[dict[str, Any]]:
             "exit_reason": t.get("exit_reason"),
             "return_pct": t.get("return_pct"),
             "pnl_usd": t.get("pnl_usd"),
+            "open": t.get("open"),
         })
     return rows
+
+
+def residual_tranche_ids(res: dict[str, Any] | None) -> list[str]:
+    """Tranche ids still working from a strategy result (settle / sim)."""
+    ids: list[str] = []
+    for t in (res or {}).get("tranches") or []:
+        tid = t.get("id")
+        if not tid:
+            continue
+        is_open = t.get("open")
+        if is_open is True or (
+            is_open is None
+            and t.get("exit_price") is None
+            and not t.get("exit_reason")
+        ):
+            ids.append(str(tid))
+    return ids
+
+
+def position_counts_as_full_slot(pos: dict[str, Any]) -> bool:
+    """
+    Full slot = any of T1/T2/T3 still working.
+    T4-only runner does not count.
+
+    Interim: if residual_tranche_ids missing (pre-settle open), count as FULL
+    so we never under-count capacity. Settle must write residuals — never leave
+    positions without residuals forever.
+    """
+    residual = pos.get("residual_tranche_ids")
+    if residual is None:
+        return True
+    return bool(FULL_SLOT_TRANCHE_IDS.intersection(str(x) for x in residual))
+
+
+def full_slots_used(pool: dict[str, Any]) -> int:
+    """Count opens that consume Aaron full-slot capacity (per pool)."""
+    opens = pool.get("open_positions") or {}
+    return sum(1 for pos in opens.values() if position_counts_as_full_slot(pos))
+
+
+def limit_candidates_for_entry(
+    candidates: list[dict[str, Any]],
+    *,
+    max_n: int = MAX_NEW_ENTRIES_PER_DAY,
+) -> list[dict[str, Any]]:
+    """
+    Cap the day list to top max_n preserving existing scan order.
+
+    Live scan is already rank_score / quality_score desc (AT1 tip order).
+    Do NOT re-sort by quality_score here — keeps AT1 merge stability.
+    """
+    if max_n <= 0:
+        return []
+    return list(candidates)[: int(max_n)]
 
 
 def pool_stats(
@@ -254,17 +316,33 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
     print(f"Mode: {MODE_LABEL}")
     print(
         f"Pools: A Trailing + B Target  |  start ${START_POOL_USD:.0f} each  |  "
-        f"cap {MAX_SLOTS} slots/pool"
+        f"cap {MAX_NEW_ENTRIES_PER_DAY}/day  |  "
+        f"{MAX_FULL_SLOTS} full slots/pool (T1–T3)"
     )
-    print(f"Setups this day: {len(setups)}  -> {[s['ticker'] for s in setups]}")
+    setups = limit_candidates_for_entry(setups)
+    print(f"Setups this day (capped): {len(setups)}  -> {[s['ticker'] for s in setups]}")
     print("=" * 78)
 
+    n_entered = 0
     for setup in setups:
         ticker = setup["ticker"]
         key = f"{ticker}|{flag_date}"
         hist_row = history.get(key)
 
         print(f"\n--- {ticker} | {flag_date} ---")
+
+        if n_entered >= MAX_NEW_ENTRIES_PER_DAY:
+            print(
+                f"  SKIP — day_entry_cap "
+                f"({n_entered}/{MAX_NEW_ENTRIES_PER_DAY})"
+            )
+            per_ticker.append({
+                "ticker": ticker,
+                "flag_date": flag_date,
+                "skipped": True,
+                "skip_reason": "day_entry_cap",
+            })
+            continue
 
         if not hist_row or hist_row.get("status") != "ok":
             print("  SKIP — no ok history / entry")
@@ -326,9 +404,9 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
         }
         shares_a = size_for_pool(pool_a, entry_price, kill_pct)
 
-        if slots_a >= MAX_SLOTS:
+        if slots_a >= MAX_FULL_SLOTS:
             a_rec["skip_reason"] = "slots_full"
-            print(f"  A  SKIP slots full ({slots_a}/{MAX_SLOTS})")
+            print(f"  A  SKIP full slots ({slots_a}/{MAX_FULL_SLOTS})")
         elif shares_a < 1:
             a_rec["skip_reason"] = "size_lt_1"
             print(f"  A  SKIP size < 1 share (pool=${pool_a:.2f})")
@@ -336,7 +414,7 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
             slots_a += 1
             peak_slots_a = max(peak_slots_a, slots_a)
             print(
-                f"  A  OPEN  slots {slots_a}/{MAX_SLOTS}  "
+                f"  A  OPEN  full slots {slots_a}/{MAX_FULL_SLOTS}  "
                 f"size={shares_a} sh  pool=${pool_a:.2f}  "
                 f"risk=${pool_a * RISK_FRAC:.2f}"
             )
@@ -376,7 +454,7 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
                 print(
                     f"  A  CLOSE ret={res_a.get('total_return_pct'):+.2f}%  "
                     f"pnl=${pnl_a:+.2f}  pool->${pool_a:.2f}  "
-                    f"slots {slots_a}/{MAX_SLOTS}  "
+                    f"slots {slots_a}/{MAX_FULL_SLOTS}  "
                     f"exits={res_a.get('exit_reason_counts')}"
                 )
         trades_a.append(a_rec)
@@ -389,9 +467,9 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
         }
         shares_b = size_for_pool(pool_b, entry_price, kill_pct)
 
-        if slots_b >= MAX_SLOTS:
+        if slots_b >= MAX_FULL_SLOTS:
             b_rec["skip_reason"] = "slots_full"
-            print(f"  B  SKIP slots full ({slots_b}/{MAX_SLOTS})")
+            print(f"  B  SKIP full slots ({slots_b}/{MAX_FULL_SLOTS})")
         elif shares_b < 1:
             b_rec["skip_reason"] = "size_lt_1"
             print(f"  B  SKIP size < 1 share (pool=${pool_b:.2f})")
@@ -399,7 +477,7 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
             slots_b += 1
             peak_slots_b = max(peak_slots_b, slots_b)
             print(
-                f"  B  OPEN  slots {slots_b}/{MAX_SLOTS}  "
+                f"  B  OPEN  full slots {slots_b}/{MAX_FULL_SLOTS}  "
                 f"size={shares_b} sh  pool=${pool_b:.2f}  "
                 f"risk=${pool_b * RISK_FRAC:.2f}"
             )
@@ -439,10 +517,13 @@ def run_day(date: str = SELF_TEST_DATE) -> dict[str, Any]:
                 print(
                     f"  B  CLOSE ret={res_b.get('total_return_pct'):+.2f}%  "
                     f"pnl=${pnl_b:+.2f}  pool->${pool_b:.2f}  "
-                    f"slots {slots_b}/{MAX_SLOTS}  "
+                    f"slots {slots_b}/{MAX_FULL_SLOTS}  "
                     f"exits={res_b.get('exit_reason_counts')}"
                 )
         trades_b.append(b_rec)
+
+        if a_rec.get("taken") or b_rec.get("taken"):
+            n_entered += 1
 
         # Side-by-side tranche table
         print("  SIDE-BY-SIDE TRANCHES")

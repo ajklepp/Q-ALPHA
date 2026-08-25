@@ -22,8 +22,12 @@ from forward_runtime import (
 )
 from oos_r2 import actual_mfe_pct, predicted_mfe_pct
 from replay import (
-    MAX_SLOTS,
+    FULL_SLOT_TRANCHE_IDS,
+    MAX_FULL_SLOTS,
+    MAX_NEW_ENTRIES_PER_DAY,
     START_POOL_USD,
+    full_slots_used,
+    residual_tranche_ids,
     run_with_pool_sizing,
     size_for_pool,
     tranche_rows,
@@ -64,7 +68,41 @@ def _win_rate(pool: dict[str, Any]) -> None:
 
 
 def _slots_used(pool: dict[str, Any]) -> int:
-    return len(pool.get("open_positions") or {})
+    """Aaron full-slot count (T1/T2/T3 still working); T4-only excluded."""
+    return full_slots_used(pool)
+
+
+def _new_open_position(
+    *,
+    entry_price: float,
+    entry_time: str,
+    shares: int,
+    pool_value: float,
+    kill_pct: float,
+    trail_pct: float,
+    triggers_4: list,
+    sweep_tag: str,
+    predicted_mfe: float | None,
+    flag_date: str,
+) -> dict[str, Any]:
+    """Build an open_positions record with residual tranche tracking seeded."""
+    residuals = ["T1", "T2", "T3", "T4"]
+    return {
+        "entry_price": entry_price,
+        "entry_time": entry_time,
+        "shares": shares,
+        "pool_value_at_entry": round(pool_value, 4),
+        "kill_pct": kill_pct,
+        "trail_pct": trail_pct,
+        "triggers_4": triggers_4,
+        "sweep_reclaim": sweep_tag,
+        "predicted_mfe": predicted_mfe,
+        "flag_date": flag_date,
+        "opened_at": _now_iso(),
+        # Until settle refines: all four working → counts as full slot.
+        "residual_tranche_ids": residuals,
+        "counts_as_full_slot": True,
+    }
 
 
 def load_bars_for_entry(
@@ -138,8 +176,9 @@ def entry_open_positions(
     print(f"Entry model: immediate  |  sweep_reclaim = quality tag only")
     print(
         f"Pools: A=${day_start_a:.2f} B=${day_start_b:.2f}  |  "
-        f"open slots A={_slots_used(state['pool_A_trailing'])}/10 "
-        f"B={_slots_used(state['pool_B_target'])}/10"
+        f"full slots A={_slots_used(state['pool_A_trailing'])}/{MAX_FULL_SLOTS} "
+        f"B={_slots_used(state['pool_B_target'])}/{MAX_FULL_SLOTS}  "
+        f"(T1–T3; T4-only free)  |  day cap {MAX_NEW_ENTRIES_PER_DAY}"
     )
     print(f"Candidates: {len(candidates)} → {[c['ticker'] for c in candidates]}")
     print("=" * 78)
@@ -149,6 +188,20 @@ def entry_open_positions(
         key = f"{ticker}|{flag_date}"
         hist_row = history.get(key)
         print(f"\n--- entering {ticker} | {flag_date} ---")
+
+        # Day cap: max new names entered (A and/or B counts as one).
+        if n_entered >= MAX_NEW_ENTRIES_PER_DAY:
+            print(
+                f"  SKIP — day_entry_cap "
+                f"({n_entered}/{MAX_NEW_ENTRIES_PER_DAY})"
+            )
+            per_ticker.append({
+                "ticker": ticker,
+                "flag_date": flag_date,
+                "skipped": True,
+                "skip_reason": "day_entry_cap",
+            })
+            continue
 
         minute_bars = load_bars_for_entry(
             ticker, flag_date, refresh=refresh_bars, hist_row=hist_row,
@@ -243,33 +296,36 @@ def entry_open_positions(
         }
         shares_a = size_for_pool(pool_a, entry_price, kill_pct)
         slots_a = _slots_used(state["pool_A_trailing"])
-        if slots_a >= MAX_SLOTS:
+        if slots_a >= MAX_FULL_SLOTS:
             a_rec["skip_reason"] = "slots_full"
-            print(f"  A  SKIP slots full ({slots_a}/{MAX_SLOTS})")
+            print(
+                f"  A  SKIP full slots ({slots_a}/{MAX_FULL_SLOTS}) "
+                f"— T1/T2/T3 capacity"
+            )
         elif shares_a < 1:
             a_rec["skip_reason"] = "size_lt_1"
             print(f"  A  SKIP size < 1 (pool=${pool_a:.2f})")
         else:
             a_rec["taken"] = True
             a_rec["shares"] = shares_a
-            state["pool_A_trailing"]["open_positions"][ticker] = {
-                "entry_price": entry_price,
-                "entry_time": entry_time,
-                "shares": shares_a,
-                "pool_value_at_entry": round(pool_a, 4),
-                "kill_pct": kill_pct,
-                "trail_pct": trail_pct,
-                "triggers_4": triggers_4,
-                "sweep_reclaim": sweep_tag,
-                "predicted_mfe": predicted_mfe,
-                "flag_date": flag_date,
-                "opened_at": _now_iso(),
-            }
-            peak_a = max(peak_a, slots_a + 1)
-            state["pool_A_trailing"]["slots_open"] = slots_a + 1
+            state["pool_A_trailing"]["open_positions"][ticker] = _new_open_position(
+                entry_price=entry_price,
+                entry_time=entry_time,
+                shares=shares_a,
+                pool_value=pool_a,
+                kill_pct=kill_pct,
+                trail_pct=trail_pct,
+                triggers_4=triggers_4,
+                sweep_tag=sweep_tag,
+                predicted_mfe=predicted_mfe,
+                flag_date=flag_date,
+            )
+            slots_a_after = _slots_used(state["pool_A_trailing"])
+            peak_a = max(peak_a, slots_a_after)
+            state["pool_A_trailing"]["slots_open"] = slots_a_after
             state["pool_A_trailing"]["slots_peak"] = peak_a
             print(
-                f"  A  OPEN  slots {slots_a + 1}/{MAX_SLOTS}  "
+                f"  A  OPEN  full slots {slots_a_after}/{MAX_FULL_SLOTS}  "
                 f"size={shares_a} sh  pool=${pool_a:.2f}  "
                 f"risk=${pool_a * RISK_FRAC:.2f}"
             )
@@ -287,33 +343,36 @@ def entry_open_positions(
         }
         shares_b = size_for_pool(pool_b, entry_price, kill_pct)
         slots_b = _slots_used(state["pool_B_target"])
-        if slots_b >= MAX_SLOTS:
+        if slots_b >= MAX_FULL_SLOTS:
             b_rec["skip_reason"] = "slots_full"
-            print(f"  B  SKIP slots full ({slots_b}/{MAX_SLOTS})")
+            print(
+                f"  B  SKIP full slots ({slots_b}/{MAX_FULL_SLOTS}) "
+                f"— T1/T2/T3 capacity"
+            )
         elif shares_b < 1:
             b_rec["skip_reason"] = "size_lt_1"
             print(f"  B  SKIP size < 1 (pool=${pool_b:.2f})")
         else:
             b_rec["taken"] = True
             b_rec["shares"] = shares_b
-            state["pool_B_target"]["open_positions"][ticker] = {
-                "entry_price": entry_price,
-                "entry_time": entry_time,
-                "shares": shares_b,
-                "pool_value_at_entry": round(pool_b, 4),
-                "kill_pct": kill_pct,
-                "trail_pct": trail_pct,
-                "triggers_4": triggers_4,
-                "sweep_reclaim": sweep_tag,
-                "predicted_mfe": predicted_mfe,
-                "flag_date": flag_date,
-                "opened_at": _now_iso(),
-            }
-            peak_b = max(peak_b, slots_b + 1)
-            state["pool_B_target"]["slots_open"] = slots_b + 1
+            state["pool_B_target"]["open_positions"][ticker] = _new_open_position(
+                entry_price=entry_price,
+                entry_time=entry_time,
+                shares=shares_b,
+                pool_value=pool_b,
+                kill_pct=kill_pct,
+                trail_pct=trail_pct,
+                triggers_4=triggers_4,
+                sweep_tag=sweep_tag,
+                predicted_mfe=predicted_mfe,
+                flag_date=flag_date,
+            )
+            slots_b_after = _slots_used(state["pool_B_target"])
+            peak_b = max(peak_b, slots_b_after)
+            state["pool_B_target"]["slots_open"] = slots_b_after
             state["pool_B_target"]["slots_peak"] = peak_b
             print(
-                f"  B  OPEN  slots {slots_b + 1}/{MAX_SLOTS}  "
+                f"  B  OPEN  full slots {slots_b_after}/{MAX_FULL_SLOTS}  "
                 f"size={shares_b} sh  pool=${pool_b:.2f}  "
                 f"risk=${pool_b * RISK_FRAC:.2f}"
             )
@@ -453,13 +512,23 @@ def _settle_one_pool(
 
         if res.get("status") == "open" or res.get("still_open"):
             mark = res.get("last_close") or entry_price
+            residuals = residual_tranche_ids(res)
             pos["mark_price"] = mark
             pos["mark_usd"] = round(float(mark) * shares, 4)
             pos["last_settle_at"] = _now_iso()
+            # Persist residual tranche state so capacity can free T4-only runners.
+            pos["residual_tranche_ids"] = residuals
+            pos["counts_as_full_slot"] = bool(
+                FULL_SLOT_TRANCHE_IDS.intersection(residuals)
+            )
+            if res.get("open_shares") is not None:
+                pos["open_shares"] = res.get("open_shares")
             opens[ticker] = pos
+            slot_tag = "FULL" if pos["counts_as_full_slot"] else "T4-only"
             print(
                 f"    still OPEN  mark=${float(mark):.4f}  "
-                f"open_sh={res.get('open_shares')}"
+                f"open_sh={res.get('open_shares')}  "
+                f"residuals={residuals}  slot={slot_tag}"
             )
             # Provisional MFE for display only — never into R².
             if predicted_mfe is not None:
@@ -557,7 +626,8 @@ def _settle_one_pool(
 
     pool["open_positions"] = opens
     pool["value_usd"] = round(pool_val, 4)
-    pool["slots_open"] = len(opens)
+    pool["slots_open"] = full_slots_used(pool)
+    pool["n_open_positions"] = len(opens)
     return newly_closed
 
 
@@ -597,7 +667,8 @@ def settle_ticker(
                 continue
             cur[t] = pos
         state[pool_key]["open_positions"] = cur
-        state[pool_key]["slots_open"] = len(cur)
+        state[pool_key]["slots_open"] = full_slots_used(state[pool_key])
+        state[pool_key]["n_open_positions"] = len(cur)
 
 
 def settle_open_positions(

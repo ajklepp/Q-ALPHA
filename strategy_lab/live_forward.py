@@ -8,17 +8,22 @@ CONFIG (locked):
   Exits  = BOTH pools in parallel:
              Pool A = Strategy A (Trailing)
              Pool B = Strategy B (Target)
-           $3000 each, 1% risk, max 10 concurrent slots/pool
+           $3000 each, 1% risk, Aaron capacity PER POOL:
+             MAX_NEW_ENTRIES_PER_DAY = 3 (candidate list capped top-3
+               in existing scan order — already quality/rank_score desc)
+             MAX_FULL_SLOTS = 10 where "full" = residual T1/T2/T3 still
+               working; T4-only runner does NOT consume a full slot
   Tag    = sweep_reclaim pass/fail (informational only — not a gate)
 
 FLOW (current trading day, or replay of a past date via run_day):
   1. is_trading_day guard (ET weekend/holiday) → "Market closed today" + stop
-  2. ~09:35: full-market gap scan (agent Polygon scan) → profile candidates
-     into strategy_lab/profiles/ → fetch premarket bars for the day
+  2. ~09:35: full-market gap scan (agent Polygon scan) → cap to top 3
+     (scan order) → profile → fetch premarket bars for the day
   3. Wait for 09:30 1-min bar (LOAD-BEARING: 15-min delayed feed) → ENTRY ONLY
      (store open_positions; do not run strategies / book P&L)
   4. Settle pass (--settle / 16:40 ET / next-morning auto): refresh bars,
-     re-run A/B, book P&L only when open → closed
+     re-run A/B, write residual_tranche_ids on still-open, book P&L only
+     when open → closed
   5. Persist continuously to results/forward_state.json + EOD summary
 
 Feed: Polygon/Massive Stocks Developer — 15-min DELAYED, unlimited REST.
@@ -28,7 +33,7 @@ COMPOUNDING (LIVE only):
   RESUMES pool value, closed-trades history, equity curve, and the prediction
   log from forward_state.json — it does NOT reset to $3000 each morning.
   Replay/dry-run writes forward_state_replay.json and does not clobber the
-  live book or Supabase.
+  live book or Supabase. Same capacity gates as LIVE.
 
 Usage (from repo root):
   py -3 strategy_lab/live_forward.py --replay 2026-08-21   # dry-run
@@ -64,9 +69,12 @@ from fetch_premarket import (  # noqa: E402
     _slim_bars,
 )
 from replay import (  # noqa: E402
-    MAX_SLOTS,
+    MAX_FULL_SLOTS,
+    MAX_NEW_ENTRIES_PER_DAY,
     START_POOL_USD,
     bars_path_for,
+    full_slots_used,
+    limit_candidates_for_entry,
     load_daily_cached,
     pool_stats,
     print_summary,
@@ -405,7 +413,8 @@ def resume_live_book(prior: dict[str, Any], flag_date: str) -> dict[str, Any]:
         pool["value_usd"] = float(pool.get("value_usd") or START_POOL_USD)
         # Preserve overnight opens across live days (settle owns closing them).
         pool["open_positions"] = dict(pool.get("open_positions") or {})
-        pool["slots_open"] = len(pool["open_positions"])
+        pool["slots_open"] = full_slots_used(pool)
+        pool["n_open_positions"] = len(pool["open_positions"])
         pool.setdefault("closed_trades", [])
         pool.setdefault("equity_curve", [])
         pool.setdefault("slots_peak", 0)
@@ -903,7 +912,9 @@ def execute_dual_pools(
         ),
         "day_start_A_usd": round(day_start_a, 4),
         "day_start_B_usd": round(day_start_b, 4),
-        "max_slots": MAX_SLOTS,
+        "max_slots": MAX_FULL_SLOTS,
+        "max_full_slots": MAX_FULL_SLOTS,
+        "max_new_entries_per_day": MAX_NEW_ENTRIES_PER_DAY,
         "n_setups": len(candidates),
         "tickers": entry_report.get("tickers") or [c["ticker"] for c in candidates],
         "per_ticker": entry_report.get("per_ticker") or [],
@@ -1071,7 +1082,9 @@ def run_day(
     print("Polygon-paper  |  NO IBKR  |  entry/settle split")
     print(
         f"Entry={ENTRY_MODEL}  |  exits=A Trailing + B Target  |  "
-        f"${START_POOL_USD:.0f} × 2 pools  |  max {MAX_SLOTS} slots each"
+        f"${START_POOL_USD:.0f} × 2 pools  |  "
+        f"max {MAX_NEW_ENTRIES_PER_DAY}/day  |  "
+        f"max {MAX_FULL_SLOTS} full slots each (T1–T3)"
     )
     print("=" * 78)
 
@@ -1148,16 +1161,25 @@ def run_day(
 
         set_phase(state, "scan", "running full-market gap scan")
         candidates = run_scan_phase(flag_date, mode)
+        n_scan = len(candidates)
+        candidates = limit_candidates_for_entry(candidates)
+        if n_scan > len(candidates):
+            print(
+                f"[live_forward] entry list capped {n_scan} → {len(candidates)} "
+                f"(preserve scan order; MAX_NEW_ENTRIES_PER_DAY="
+                f"{MAX_NEW_ENTRIES_PER_DAY})"
+            )
         state["candidates"] = candidates
         state["n_candidates"] = len(candidates)
         tickers = [c["ticker"] for c in candidates]
         state["scan"] = {
             "n_candidates": len(candidates),
+            "n_scan_before_cap": n_scan,
             "tickers": tickers,
             "sources": sorted({str(c.get("source")) for c in candidates}),
         }
         save_state(state)
-        print(f"[live_forward] {len(candidates)} candidates ready")
+        print(f"[live_forward] {len(candidates)} candidates ready (entry cap)")
         lab_telegram(
             f"🧪 Scan complete — {len(candidates)} candidates: "
             f"{', '.join(tickers) if tickers else '(none)'}.",
