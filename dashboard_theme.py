@@ -322,6 +322,53 @@ h3, [data-testid="stMarkdownContainer"] h3 {
   border-top: 1px solid var(--qa-border);
 }
 
+/* Invisible marker — scopes Glossary prose sizes via :has() */
+.qa-glossary-root {
+  display: none !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Glossary tab only — larger prose; does not change other tabs */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  [data-testid="stMarkdownContainer"] p,
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  [data-testid="stMarkdownContainer"] li {
+  font-size: 19px !important;
+  line-height: 1.65 !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  [data-testid="stMarkdownContainer"] h2 {
+  font-size: 1.85rem !important;
+  line-height: 1.3 !important;
+  margin-top: 1.35rem !important;
+  margin-bottom: 0.65rem !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  [data-testid="stMarkdownContainer"] h3 {
+  font-size: 1.5rem !important;
+  line-height: 1.35 !important;
+  margin-top: 1.15rem !important;
+  margin-bottom: 0.45rem !important;
+  color: var(--qa-accent-2) !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  [data-testid="stMarkdownContainer"] strong {
+  font-size: 1.05em !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  .qa-section-title {
+  font-size: 1.55rem !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+  .qa-section-sub {
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+}
+
 @media (max-width: 768px) {
   :root {
     --qa-font-body: 16px;
@@ -336,6 +383,22 @@ h3, [data-testid="stMarkdownContainer"] h3 {
   }
   div[data-testid="stVerticalBlockBorderWrapper"] {
     margin: 1rem 0 1.55rem 0 !important;
+  }
+  /* Keep Glossary readable on phone */
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+    [data-testid="stMarkdownContainer"] p,
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+    [data-testid="stMarkdownContainer"] li {
+    font-size: 18px !important;
+    line-height: 1.7 !important;
+  }
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+    [data-testid="stMarkdownContainer"] h2 {
+    font-size: 1.65rem !important;
+  }
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-glossary-root)
+    [data-testid="stMarkdownContainer"] h3 {
+    font-size: 1.35rem !important;
   }
 }
 """
@@ -484,3 +547,8 @@ def lab_ahead_banner(label: str, margin: float, a_val: float, b_val: float) -> N
 
 def footer_rule() -> None:
     _md_html('<div class="qa-footer-rule"></div>')
+
+
+def glossary_scope_marker() -> None:
+    """Mark the Glossary panel so CSS can enlarge prose without affecting other tabs."""
+    _md_html('<div class="qa-glossary-root" aria-hidden="true"></div>')

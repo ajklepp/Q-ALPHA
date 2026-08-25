@@ -75,6 +75,7 @@ from dashboard_theme import (
     WARN,
     brand_block,
     footer_rule,
+    glossary_scope_marker,
     inject_theme,
     lab_ahead_banner,
     lab_sim_banner,
@@ -1793,6 +1794,7 @@ def tab_glossary() -> None:
     Leave agent code untouched; best-effort if the file is missing.
     """
     with st.container(border=True):
+        glossary_scope_marker()
         section_header(
             "Glossary",
             "Q-ALPHA / Strategy Lab terms · same content as GLOSSARY.md",
