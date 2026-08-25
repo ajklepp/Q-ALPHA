@@ -107,6 +107,8 @@ collect_setups → fetch_history → fetch_premarket → batch_profile
 
 **Implication:** Agent **MAY** use IBKR live/streaming bars when we choose. Strategy Lab remains on **Polygon** (15-min delayed OK) — **do not mix** Lab SIM and IBKR agent books. Lab P0 wait-for-0930-bar stays **LOAD-BEARING** under Polygon delay.
 
+Paper L2 gate 2026-08-24: AAPL/TSLA/SPY smart depth = PARTIAL_IEX_SMART (2152 missing NASDAQ/BATS/ARCA/NYSE depth); agent clientId 5 realtime bars OK — AI entry research unblocked at partial-L2 fidelity only.
+
 ---
 
 ## LIVE AGENT (durable rules — unchanged philosophy)
@@ -138,7 +140,7 @@ See historical sections below — still the research contract for Modal experime
 
 ## DEFERRED / KNOWN DEBT
 
-**(a) Entry-engine v2** — deferred until we choose to build on IBKR L2 / live order-flow (paper MD/L2 probe OK as of 2026-08-24; full NASDAQ TotalView on paper may still be partial — see **2152**).
+**(a) Entry-engine v2** — deferred (not a build task). Paper MD/L2 probe OK as of 2026-08-24 at **partial-L2** fidelity only — Paper L2 gate 2026-08-24: AAPL/TSLA/SPY smart depth = PARTIAL_IEX_SMART (2152 missing NASDAQ/BATS/ARCA/NYSE depth); agent clientId 5 realtime bars OK — AI entry research unblocked at partial-L2 fidelity only.
 
 **(b) SECURITY — Streamlit Cloud + service role**  
 Most dashboard tabs still use **SUPABASE_SECRET_KEY** on a **public** Streamlit app. Strategy Lab tab correctly prefers **anon + RLS** for `strategy_lab_state`.  

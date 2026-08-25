@@ -237,6 +237,8 @@ Client IDs: ibkr_connector=1 · autonomous_agent=5 · MD probes use a free id (e
 
 **Implications:** Agent **MAY** use IBKR live/streaming bars again when we choose. Strategy Lab stays on **Polygon** (15-min delayed OK). **Do not mix** Lab SIM books with the IBKR agent book.
 
+Paper L2 gate 2026-08-24: AAPL/TSLA/SPY smart depth = PARTIAL_IEX_SMART (2152 missing NASDAQ/BATS/ARCA/NYSE depth); agent clientId 5 realtime bars OK — AI entry research unblocked at partial-L2 fidelity only.
+
 ---
 
 ## QUICK COMMANDS
