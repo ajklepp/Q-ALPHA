@@ -1,14 +1,17 @@
 """
 Q-ALPHA dashboard visual theme — dark fintech console (cyan/teal accent).
 
-No purple/indigo/violet. Injected once per Streamlit session via inject_theme().
+Inject EXACTLY once per run into the parent document <head> via a zero-height
+component (never renders CSS as page text). No purple/indigo/violet.
 """
 from __future__ import annotations
 
-# Design tokens (keep in sync with .streamlit/config.toml + CSS below)
+from html import escape
+
+# Design tokens (literal hex — mirrored in THEME_CSS :root)
 BG = "#0B1220"
 SURFACE = "#121A2B"
-SURFACE_2 = "#182235"
+SURFACE_2 = "#1A2438"
 BORDER = "#2A3548"
 TEXT = "#E8EEF7"
 MUTED = "#94A3B8"
@@ -17,214 +20,377 @@ ACCENT_2 = "#22D3EE"
 POSITIVE = "#34D399"
 NEGATIVE = "#FB7185"
 WARN = "#FBBF24"
+RADIUS = "16px"
 
+# Single stylesheet. Do NOT wrap in an f-string when building inject HTML —
+# curly braces must stay CSS-literal.
+THEME_CSS = """
+:root {
+  --qa-bg: #0B1220;
+  --qa-surface: #121A2B;
+  --qa-surface-2: #1A2438;
+  --qa-border: #2A3548;
+  --qa-text: #E8EEF7;
+  --qa-muted: #94A3B8;
+  --qa-accent: #2DD4BF;
+  --qa-accent-2: #22D3EE;
+  --qa-up: #34D399;
+  --qa-down: #FB7185;
+  --qa-warn: #FBBF24;
+  --qa-radius: 16px;
+}
 
-def inject_theme() -> None:
-    """Inject Google Fonts + global CSS. Safe to call once after set_page_config."""
-    import streamlit as st
-
-    st.markdown(
-        f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root {{
-  --qa-bg: {BG};
-  --qa-surface: {SURFACE};
-  --qa-surface-2: {SURFACE_2};
-  --qa-border: {BORDER};
-  --qa-text: {TEXT};
-  --qa-muted: {MUTED};
-  --qa-accent: {ACCENT};
-  --qa-accent-2: {ACCENT_2};
-  --qa-pos: {POSITIVE};
-  --qa-neg: {NEGATIVE};
-  --qa-warn: {WARN};
-  --qa-radius: 14px;
-}}
-
-html, body, [class*="css"] {{
+html, body, .stApp, [data-testid="stAppViewContainer"] {
   font-family: "Sora", sans-serif !important;
-}}
+  color: var(--qa-text) !important;
+}
 
-.stApp {{
-  background: radial-gradient(1200px 600px at 10% -10%, #132033 0%, var(--qa-bg) 55%) !important;
-  color: var(--qa-text);
-}}
+.stApp {
+  background:
+    radial-gradient(900px 480px at 8% -5%, #16304a 0%, transparent 55%),
+    radial-gradient(700px 400px at 95% 0%, #0f2a3a 0%, transparent 50%),
+    var(--qa-bg) !important;
+}
 
-/* Hide Streamlit chrome noise */
-#MainMenu {{ visibility: hidden; }}
-footer {{ visibility: hidden; }}
-header[data-testid="stHeader"] {{
+[data-testid="stHeader"] {
+  background: rgba(11, 18, 32, 0.72) !important;
+  backdrop-filter: blur(8px);
+}
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+.block-container {
+  padding-top: 1.1rem !important;
+  padding-bottom: 2.5rem !important;
+  max-width: 1240px !important;
+}
+
+/* Tabs: segmented control */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 0.25rem;
+  background: var(--qa-surface) !important;
+  border: 1px solid var(--qa-border) !important;
+  border-radius: var(--qa-radius) !important;
+  padding: 0.4rem !important;
+  margin-bottom: 1.1rem !important;
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: 12px !important;
+  color: var(--qa-muted) !important;
+  font-family: "Sora", sans-serif !important;
+  font-weight: 500 !important;
+  font-size: 0.88rem !important;
+  padding: 0.45rem 0.85rem !important;
   background: transparent !important;
-}}
-
-.block-container {{
-  padding-top: 1.25rem !important;
-  padding-bottom: 2rem !important;
-  max-width: 1280px !important;
-}}
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {{
-  gap: 0.35rem;
-  background: var(--qa-surface);
-  border: 1px solid var(--qa-border);
-  border-radius: var(--qa-radius);
-  padding: 0.35rem;
-}}
-.stTabs [data-baseweb="tab"] {{
-  border-radius: 10px;
-  color: var(--qa-muted);
-  font-weight: 500;
-  font-size: 0.92rem;
-}}
-.stTabs [aria-selected="true"] {{
+  border: 1px solid transparent !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  color: var(--qa-text) !important;
+  background: var(--qa-surface-2) !important;
+}
+.stTabs [aria-selected="true"] {
   background: var(--qa-surface-2) !important;
   color: var(--qa-accent) !important;
-  border: 1px solid color-mix(in srgb, var(--qa-accent) 35%, transparent);
-}}
+  border: 1px solid rgba(45, 212, 191, 0.45) !important;
+  box-shadow: inset 0 -2px 0 0 var(--qa-accent) !important;
+}
+.stTabs [data-baseweb="tab-highlight],
+.stTabs [data-baseweb="tab-border"] {
+  display: none !important;
+}
 
-/* Metrics as elevated cards */
-div[data-testid="stMetric"] {{
-  background: var(--qa-surface);
-  border: 1px solid var(--qa-border);
-  border-radius: var(--qa-radius);
-  padding: 0.9rem 1rem 0.75rem 1rem;
-  box-shadow: none;
-}}
-div[data-testid="stMetric"] label {{
+/* KPI metric cards */
+div[data-testid="stMetric"] {
+  background: var(--qa-surface) !important;
+  border: 1px solid var(--qa-border) !important;
+  border-radius: var(--qa-radius) !important;
+  padding: 1rem 1.1rem 0.85rem 1.1rem !important;
+  min-height: 5.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+div[data-testid="stMetric"] label,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
   color: var(--qa-muted) !important;
-  font-size: 0.78rem !important;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}}
-div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+  font-family: "Sora", sans-serif !important;
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
   font-family: "IBM Plex Mono", ui-monospace, monospace !important;
   font-weight: 600 !important;
-  font-size: 1.35rem !important;
+  font-size: 1.4rem !important;
   color: var(--qa-text) !important;
-}}
-div[data-testid="stMetric"] [data-testid="stMetricDelta"] {{
-  font-family: "IBM Plex Mono", ui-monospace, monospace !important;
-  font-size: 0.85rem !important;
-}}
-
-/* Dataframes / tables — numeric feel */
-div[data-testid="stDataFrame"],
-div[data-testid="stTable"] {{
-  border: 1px solid var(--qa-border);
-  border-radius: var(--qa-radius);
-  overflow: hidden;
-  background: var(--qa-surface);
-}}
-div[data-testid="stDataFrame"] * {{
+  line-height: 1.25 !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
   font-family: "IBM Plex Mono", ui-monospace, monospace !important;
   font-size: 0.82rem !important;
-}}
+}
 
-/* Inputs / buttons */
-.stButton > button {{
-  background: var(--qa-surface-2);
-  color: var(--qa-text);
-  border: 1px solid var(--qa-border);
-  border-radius: 12px;
-  font-family: "Sora", sans-serif !important;
-  font-weight: 600;
-}}
-.stButton > button:hover {{
-  border-color: var(--qa-accent);
-  color: var(--qa-accent);
-}}
+/* Bordered containers — shared panel surface on every tab */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  background: var(--qa-surface) !important;
+  border: 1px solid var(--qa-border) !important;
+  border-radius: var(--qa-radius) !important;
+  padding: 0.95rem 1.1rem 1.1rem 1.1rem !important;
+  margin: 0.65rem 0 1.2rem 0 !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
 
-/* Alerts */
-div[data-testid="stAlert"] {{
-  border-radius: 12px;
-  border: 1px solid var(--qa-border);
-}}
+/* Tables */
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"] {
+  border: 1px solid var(--qa-border) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background: var(--qa-surface-2) !important;
+}
+div[data-testid="stDataFrame"] * {
+  font-family: "IBM Plex Mono", ui-monospace, monospace !important;
+  font-size: 0.8rem !important;
+}
 
-/* Dividers softer */
-hr {{
-  border-color: var(--qa-border) !important;
-  opacity: 0.7;
-}}
-
-/* Captions */
-.stCaption, [data-testid="stCaptionContainer"] {{
-  color: var(--qa-muted) !important;
-}}
-
-/* Markdown headers */
-h1, h2, h3 {{
-  font-family: "Sora", sans-serif !important;
-  letter-spacing: -0.02em;
+/* Buttons / alerts / captions / headers */
+.stButton > button {
+  background: var(--qa-surface-2) !important;
   color: var(--qa-text) !important;
-}}
+  border: 1px solid var(--qa-border) !important;
+  border-radius: 12px !important;
+  font-family: "Sora", sans-serif !important;
+  font-weight: 600 !important;
+}
+.stButton > button:hover {
+  border-color: var(--qa-accent) !important;
+  color: var(--qa-accent) !important;
+}
+div[data-testid="stAlert"] {
+  border-radius: 12px !important;
+  border: 1px solid var(--qa-border) !important;
+  background: var(--qa-surface) !important;
+}
+hr { border-color: var(--qa-border) !important; opacity: 0.65; }
+[data-testid="stCaptionContainer"], .stCaption {
+  color: var(--qa-muted) !important;
+  font-family: "Sora", sans-serif !important;
+}
+h1, h2, h3, [data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+  font-family: "Sora", sans-serif !important;
+  letter-spacing: -0.02em !important;
+  color: var(--qa-text) !important;
+  font-weight: 600 !important;
+}
 
-/* Brand hero */
-.qa-brand {{
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.35rem;
-}}
-.qa-brand-mark {{
-  font-family: "Sora", sans-serif;
-  font-weight: 700;
-  font-size: 1.85rem;
-  letter-spacing: -0.03em;
-  color: var(--qa-text);
-  line-height: 1.15;
-}}
-.qa-brand-mark span {{
-  color: var(--qa-accent);
-}}
-.qa-brand-sub {{
-  font-size: 0.92rem;
-  color: var(--qa-muted);
-  font-weight: 400;
-}}
-.qa-live-pill {{
-  display: inline-block;
-  margin-top: 0.45rem;
-  padding: 0.2rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--qa-accent) 40%, transparent);
-  background: color-mix(in srgb, var(--qa-accent) 12%, transparent);
-  color: var(--qa-accent-2);
-  font-size: 0.78rem;
-  font-weight: 500;
-}}
+/* Brand + HTML helpers (class-only — no inline var() in page HTML) */
+.qa-brand { display: flex; flex-direction: column; gap: 0.2rem; margin: 0 0 0.4rem 0; }
+.qa-brand-mark {
+  font-family: "Sora", sans-serif; font-weight: 700; font-size: 1.9rem;
+  letter-spacing: -0.03em; color: var(--qa-text); line-height: 1.1;
+}
+.qa-brand-mark span { color: var(--qa-accent); }
+.qa-brand-sub { font-size: 0.9rem; color: var(--qa-muted); }
+.qa-live-pill {
+  display: inline-block; margin-top: 0.4rem; padding: 0.22rem 0.7rem;
+  border-radius: 999px; border: 1px solid rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.12); color: var(--qa-accent-2);
+  font-size: 0.75rem; font-weight: 500;
+}
 
-/* Generic panel / banner */
-.qa-panel {{
+.qa-section-title {
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 1.05rem;
+  color: var(--qa-text); margin: 0 0 0.15rem 0;
+}
+.qa-section-sub {
+  font-family: "Sora", sans-serif; font-size: 0.82rem; color: var(--qa-muted);
+  margin: 0 0 0.55rem 0;
+}
+
+.qa-panel {
   background: var(--qa-surface);
   border: 1px solid var(--qa-border);
   border-radius: var(--qa-radius);
   padding: 1rem 1.15rem;
-  margin: 0.5rem 0 1rem 0;
-}}
-.qa-panel-title {{
-  font-family: "Sora", sans-serif;
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--qa-text);
-}}
-.qa-panel-body {{
-  font-size: 0.88rem;
-  color: var(--qa-muted);
+  margin: 0.45rem 0 1rem 0;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+.qa-panel-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+}
+.qa-panel-accent { border-color: rgba(45, 212, 191, 0.5); }
+.qa-panel-up { border-left: 4px solid var(--qa-up); }
+.qa-panel-down { border-left: 4px solid var(--qa-down); }
+.qa-panel-warn { border-left: 4px solid var(--qa-warn); }
+.qa-panel-muted { border-left: 4px solid var(--qa-muted); }
+.qa-panel-title {
+  font-family: "Sora", sans-serif; font-weight: 700; font-size: 1.05rem;
+  color: var(--qa-accent-2);
+}
+.qa-panel-headline {
+  font-family: "Sora", sans-serif; font-weight: 700; font-size: 1.35rem;
+}
+.qa-panel-headline.up { color: var(--qa-up); }
+.qa-panel-headline.down { color: var(--qa-down); }
+.qa-panel-headline.accent { color: var(--qa-accent); }
+.qa-panel-headline.muted { color: var(--qa-muted); }
+.qa-panel-body {
+  font-family: "Sora", sans-serif; font-size: 0.88rem; color: var(--qa-muted);
   margin-top: 0.35rem;
-}}
-
-.qa-footer {{
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
+}
+.qa-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--qa-text);
+  font-size: 0.9rem;
+}
+.qa-footer-rule {
+  margin-top: 1rem; padding-top: 0.85rem;
   border-top: 1px solid var(--qa-border);
-  color: var(--qa-muted);
-  font-size: 0.8rem;
-}}
-</style>
-        """,
-        unsafe_allow_html=True,
+}
+"""
+
+_FONT_HREF = (
+    "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600"
+    "&family=Sora:wght@400;500;600;700&display=swap"
+)
+
+
+def inject_theme() -> None:
+    """
+    Inject fonts + one <style> into the parent document head.
+
+    Uses a zero-height component with JS so stylesheet source never appears
+    as Streamlit markdown/page text. Idempotent via element ids.
+    """
+    import streamlit.components.v1 as components
+
+    # Escape for JS template literal (no f-string over CSS braces).
+    css_js = (
+        THEME_CSS.replace("\\", "\\\\")
+        .replace("`", "\\`")
+        .replace("${", "\\${")
     )
+    href = _FONT_HREF.replace("\\", "\\\\").replace("'", "\\'")
+
+    script = (
+        "<script>(function(){"
+        "var doc=window.parent.document;"
+        "if(!doc.getElementById('q-alpha-fonts')){"
+        "var link=doc.createElement('link');"
+        "link.id='q-alpha-fonts';link.rel='stylesheet';"
+        "link.href='" + href + "';"
+        "doc.head.appendChild(link);"
+        "}"
+        "var el=doc.getElementById('q-alpha-theme-css');"
+        "if(!el){el=doc.createElement('style');el.id='q-alpha-theme-css';"
+        "doc.head.appendChild(el);}"
+        "el.textContent=`" + css_js + "`;"
+        "})();</script>"
+    )
+    components.html(script, height=0, scrolling=False)
+
+
+def _md_html(html: str) -> None:
+    """Render trusted HTML fragments (classes only) into the main app DOM."""
+    import streamlit as st
+
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def section_header(title: str, subtitle: str = "") -> None:
+    """Shared section title (Sora) — use on every tab panel."""
+    sub = (
+        f'<div class="qa-section-sub">{escape(subtitle)}</div>'
+        if subtitle
+        else ""
+    )
+    _md_html(
+        f'<div class="qa-section-title">{escape(title)}</div>{sub}'
+    )
+
+
+def brand_block(live_et: str = "") -> None:
+    """Top-left brand mark + optional live pill."""
+    pill = ""
+    if live_et:
+        pill = (
+            f'<div class="qa-live-pill">Live data · '
+            f"{escape(live_et)} ET · every 30m RTH</div>"
+        )
+    _md_html(
+        '<div class="qa-brand">'
+        '<div class="qa-brand-mark">Q-<span>ALPHA</span></div>'
+        '<div class="qa-brand-sub">Quantitative momentum · paper console</div>'
+        f"{pill}</div>"
+    )
+
+
+def regime_banner(spy_regime: str, vix_regime: str, sizing_pct: str) -> None:
+    """Live Status regime strip — class modifiers only (no inline CSS vars)."""
+    is_bull = spy_regime == "BULL"
+    side = "up" if is_bull else "down"
+    emoji = "🐂" if is_bull else "🐻"
+    vix_cls = "warn" if vix_regime == "ELEVATED" else "up"
+    _md_html(
+        f'<div class="qa-panel qa-panel-row qa-panel-{side}">'
+        f'<div class="qa-panel-headline {side}">{emoji} {escape(spy_regime)} MARKET</div>'
+        f'<div class="qa-panel-body">VIX: <b class="qa-panel-headline {vix_cls}">'
+        f"{escape(vix_regime)}</b> · Sizing: "
+        f'<span class="qa-mono">{escape(sizing_pct)}</span></div></div>'
+    )
+
+
+def status_panel(
+    title: str,
+    status_text: str,
+    time_ago: str,
+    message: str,
+    *,
+    tone: str = "muted",
+    icon: str = "",
+    status_icon: str = "",
+) -> None:
+    """System Health row card."""
+    tone = tone if tone in ("up", "down", "warn", "muted", "accent") else "muted"
+    _md_html(
+        f'<div class="qa-panel qa-panel-{tone}">'
+        f"<b>{escape(icon)} {escape(title)}</b> {escape(status_icon)} "
+        f'<span class="qa-panel-headline {tone}">{escape(status_text)}</span> '
+        f'<span class="qa-panel-body">{escape(time_ago)}</span>'
+        f'<div class="qa-panel-body">{escape(message)}</div></div>'
+    )
+
+
+def lab_sim_banner() -> None:
+    """Strategy Lab SIM disclaimer card."""
+    _md_html(
+        '<div class="qa-panel qa-panel-accent">'
+        '<div class="qa-panel-title">SIM · Polygon paper · not IBKR / not real money</div>'
+        '<div class="qa-panel-body">Strategy Lab forward test — dual pools from '
+        "<code>live_forward.py</code>. Independent of the live agent / "
+        "Supabase paper book.</div></div>"
+    )
+
+
+def lab_ahead_banner(label: str, margin: float, a_val: float, b_val: float) -> None:
+    """Who's-ahead strip for Strategy Lab."""
+    if label == "TIE":
+        tone = "muted"
+        headline = "TIE"
+    elif "Target" in label or label.startswith("Strategy B"):
+        tone = "accent"
+        headline = f"{label} ahead by ${margin:,.2f}"
+    else:
+        tone = "up"
+        headline = f"{label} ahead by ${margin:,.2f}"
+    _md_html(
+        f'<div class="qa-panel qa-panel-{tone}">'
+        f'<div class="qa-panel-headline {tone}">{escape(headline)}</div>'
+        f'<div class="qa-panel-body qa-mono">'
+        f"A ${a_val:,.2f} &nbsp;vs&nbsp; B ${b_val:,.2f}</div></div>"
+    )
+
+
+def footer_rule() -> None:
+    _md_html('<div class="qa-footer-rule"></div>')

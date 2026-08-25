@@ -64,16 +64,21 @@ from dashboard_shared import (
 )
 from dashboard_theme import (
     ACCENT,
-    ACCENT_2,
     BG,
     BORDER,
     MUTED,
     NEGATIVE,
     POSITIVE,
-    SURFACE,
     TEXT,
     WARN,
+    brand_block,
+    footer_rule,
     inject_theme,
+    lab_ahead_banner,
+    lab_sim_banner,
+    regime_banner,
+    section_header,
+    status_panel,
 )
 
 STARTING_POOL = 3000.0
@@ -438,27 +443,14 @@ def _style_watchlist(df: pd.DataFrame):
 def render_header() -> None:
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
-        live_line = ""
+        live_et = ""
         try:
             last_intraday = get_sync().get_last_health("intraday_monitor")
             if last_intraday and last_intraday.get("last_run"):
-                ts = last_intraday["last_run"]
-                live_line = (
-                    f'<div class="qa-live-pill">Live data · '
-                    f'{ts[11:16]} ET · every 30m RTH</div>'
-                )
+                live_et = last_intraday["last_run"][11:16]
         except Exception:
             pass
-        st.markdown(
-            f"""
-<div class="qa-brand">
-  <div class="qa-brand-mark">Q-<span>ALPHA</span></div>
-  <div class="qa-brand-sub">Quantitative momentum · paper console</div>
-  {live_line}
-</div>
-            """,
-            unsafe_allow_html=True,
-        )
+        brand_block(live_et)
     with col2:
         st.metric("Version", f"v{SYSTEM_VERSION}")
     with col3:
@@ -496,83 +488,56 @@ def tab_live_status(trades: list, pool_history: list) -> None:
     losing_trades = total_trades - winning_trades
     win_rate = winning_trades / total_trades if total_trades else 0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric(
-            "Pool Value",
-            f"${pool:,.2f}",
-            f"{pnl_dollar:+.2f} ({pnl_pct:+.1f}%)",
-            delta_color="normal",
-        )
-    with col2:
-        st.metric(
-            "Open Positions",
-            f"{open_pos}/{MAX_SLOTS} slots",
-            f"{MAX_SLOTS - open_pos} available",
-        )
-    with col3:
-        st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
-    with col4:
-        st.metric(
-            "Total Trades",
-            str(total_trades),
-            f"{winning_trades}W / {losing_trades}L",
-        )
-    with col5:
-        st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
+    with st.container(border=True):
+        section_header("Session KPIs", "Pool, slots, and hit rate")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric(
+                "Pool Value",
+                f"${pool:,.2f}",
+                f"{pnl_dollar:+.2f} ({pnl_pct:+.1f}%)",
+                delta_color="normal",
+            )
+        with col2:
+            st.metric(
+                "Open Positions",
+                f"{open_pos}/{MAX_SLOTS} slots",
+                f"{MAX_SLOTS - open_pos} available",
+            )
+        with col3:
+            st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
+        with col4:
+            st.metric(
+                "Total Trades",
+                str(total_trades),
+                f"{winning_trades}W / {losing_trades}L",
+            )
+        with col5:
+            st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
 
     # Regime from today's watchlist (not legacy daily_scans).
     spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
     vix_regime = "NORMAL"
-
-    regime_color = POSITIVE if spy_regime == "BULL" else NEGATIVE
-    regime_emoji = "🐂" if spy_regime == "BULL" else "🐻"
-    vix_color = WARN if vix_regime == "ELEVATED" else POSITIVE
     sizing_pct = "100%" if vix_regime == "NORMAL" else "50%"
+    regime_banner(spy_regime, vix_regime, sizing_pct)
 
-    st.markdown(
-        f"""
-<div class="qa-panel" style="
-    border-color: color-mix(in srgb, {regime_color} 55%, {BORDER});
-    background: linear-gradient(135deg,
-      color-mix(in srgb, {regime_color} 14%, {SURFACE}) 0%,
-      {SURFACE} 70%);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-">
-    <div style="font-size: 1.35rem; font-weight: 700; color: {regime_color};
-                font-family: Sora, sans-serif;">
-        {regime_emoji} {spy_regime} MARKET
-    </div>
-    <div style="color: {MUTED}; font-size: 0.9rem;">
-        VIX: <b style="color: {vix_color};">{vix_regime}</b>
-        &nbsp;·&nbsp;
-        Sizing: <b style="color: {TEXT};">{sizing_pct}</b>
-    </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        section_header("Open Positions", "Live marks vs stop / 2R target")
+        if open_df.empty:
+            st.info("No open positions.")
+        else:
+            for _, trade in open_df.iterrows():
+                ticker = trade["ticker"]
+                entry_price = float(trade.get("entry_price") or 0)
+                stop_price = float(trade.get("stop_price") or 0)
+                target_2r = float(trade.get("target_2r") or 0)
+                pnl_dollars = float(trade.get("pnl_dollars") or 0)
+                pnl_pct_val = float(trade.get("pnl_pct") or 0)
+                current_price = float(trade.get("current_price") or entry_price)
+                r_mult = float(trade.get("r_multiple") or 0)
+                dist_stop = float(trade.get("dist_to_stop") or 0)
+                updated = trade.get("last_updated") or ""
 
-    st.subheader("Open Positions")
-    if open_df.empty:
-        st.info("No open positions.")
-    else:
-        for _, trade in open_df.iterrows():
-            ticker = trade["ticker"]
-            entry_price = float(trade.get("entry_price") or 0)
-            stop_price = float(trade.get("stop_price") or 0)
-            target_2r = float(trade.get("target_2r") or 0)
-            pnl_dollars = float(trade.get("pnl_dollars") or 0)
-            pnl_pct_val = float(trade.get("pnl_pct") or 0)
-            current_price = float(trade.get("current_price") or entry_price)
-            r_mult = float(trade.get("r_multiple") or 0)
-            dist_stop = float(trade.get("dist_to_stop") or 0)
-            updated = trade.get("last_updated") or ""
-
-            with st.container():
                 col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1.5, 1.5, 2])
 
                 with col1:
@@ -629,312 +594,314 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
                 st.divider()
 
-    st.subheader("Today's Watchlist")
-    if watch_load_err:
-        st.caption(f"Watchlist unavailable: {watch_load_err}")
+    with st.container(border=True):
+        section_header("Today's Watchlist", "Agent candidates for the session")
+        if watch_load_err:
+            st.caption(f"Watchlist unavailable: {watch_load_err}")
 
-    if watch_rows:
-        regime_label = watch_rows[0].get("regime") or "—"
-        et_now = datetime.now(pytz.timezone("America/New_York"))
-        trades_today = _trades_for_day(trades, today)
-        st.markdown(
-            f"**{len(watch_rows)} candidates · {_format_watchlist_day(today)} "
-            f"· {regime_label} regime**"
-        )
+        if watch_rows:
+            regime_label = watch_rows[0].get("regime") or "—"
+            et_now = datetime.now(pytz.timezone("America/New_York"))
+            trades_today = _trades_for_day(trades, today)
+            st.markdown(
+                f"**{len(watch_rows)} candidates · {_format_watchlist_day(today)} "
+                f"· {regime_label} regime**"
+            )
 
-        wl_rows = []
-        for r in watch_rows:
-            gap = r.get("gap_pct")
-            try:
-                gap_f = float(gap) if gap is not None else 0.0
-            except (TypeError, ValueError):
-                gap_f = 0.0
-            gap_pct_display = gap_f * 100.0 if abs(gap_f) <= 1.0 else gap_f
-            vol = r.get("pm_vol_ratio")
-            try:
-                vol_f = float(vol) if vol is not None else 0.0
-            except (TypeError, ValueError):
-                vol_f = 0.0
-            score = r.get("score")
-            try:
-                score_f = float(score) if score is not None else 0.0
-            except (TypeError, ValueError):
-                score_f = 0.0
-            ticker = str(r.get("ticker") or "").upper()
-            trade = trades_today.get(ticker)
-            fills = _trade_fill_columns(trade)
-            wl_rows.append({
-                "Rank": int(r.get("rank") or 0),
-                "Ticker": format_ticker_with_history(ticker),
-                "R:R": format_profile_rr_cell(ticker),
-                "Gap %": f"+{gap_pct_display:.1f}%",
-                "Vol Ratio": f"{vol_f:.1f}x",
-                "Score": f"{score_f:.0f}",
-                "Status": _candidate_status(trade, et_now),
-                "Entry": fills["Entry"],
-                "Stop": fills["Stop"],
-                "Target": fills["Target"],
-                "P&L": fills["P&L"],
-            })
+            wl_rows = []
+            for r in watch_rows:
+                gap = r.get("gap_pct")
+                try:
+                    gap_f = float(gap) if gap is not None else 0.0
+                except (TypeError, ValueError):
+                    gap_f = 0.0
+                gap_pct_display = gap_f * 100.0 if abs(gap_f) <= 1.0 else gap_f
+                vol = r.get("pm_vol_ratio")
+                try:
+                    vol_f = float(vol) if vol is not None else 0.0
+                except (TypeError, ValueError):
+                    vol_f = 0.0
+                score = r.get("score")
+                try:
+                    score_f = float(score) if score is not None else 0.0
+                except (TypeError, ValueError):
+                    score_f = 0.0
+                ticker = str(r.get("ticker") or "").upper()
+                trade = trades_today.get(ticker)
+                fills = _trade_fill_columns(trade)
+                wl_rows.append({
+                    "Rank": int(r.get("rank") or 0),
+                    "Ticker": format_ticker_with_history(ticker),
+                    "R:R": format_profile_rr_cell(ticker),
+                    "Gap %": f"+{gap_pct_display:.1f}%",
+                    "Vol Ratio": f"{vol_f:.1f}x",
+                    "Score": f"{score_f:.0f}",
+                    "Status": _candidate_status(trade, et_now),
+                    "Entry": fills["Entry"],
+                    "Stop": fills["Stop"],
+                    "Target": fills["Target"],
+                    "P&L": fills["P&L"],
+                })
 
-        wl_df = pd.DataFrame(wl_rows)
-        st.dataframe(
-            _style_watchlist(wl_df),
-            column_config={
-                "Rank": st.column_config.NumberColumn(
-                    "Rank", width="small", format="%d",
-                ),
-                "Ticker": st.column_config.TextColumn(
-                    "Ticker",
-                    help=(
-                        "Symbol + history_flag: none = reliable, "
-                        "* = limited history/sample, "
-                        "** = insufficient (informational only)."
+            wl_df = pd.DataFrame(wl_rows)
+            st.dataframe(
+                _style_watchlist(wl_df),
+                column_config={
+                    "Rank": st.column_config.NumberColumn(
+                        "Rank", width="small", format="%d",
                     ),
-                    width="small",
-                ),
-                "R:R": st.column_config.TextColumn(
-                    "R:R",
-                    help=(
-                        "target / safe-max-stop; <1.5 = reward may not "
-                        "justify stop width. Shows number + ⚠️ when below "
-                        "1.5; n/a when profile is insufficient (no R:R)."
+                    "Ticker": st.column_config.TextColumn(
+                        "Ticker",
+                        help=(
+                            "Symbol + history_flag: none = reliable, "
+                            "* = limited history/sample, "
+                            "** = insufficient (informational only)."
+                        ),
+                        width="small",
                     ),
-                    width="small",
-                ),
-                "Gap %": st.column_config.TextColumn(
-                    "Gap %", help="Pre-market gap vs prior close", width="small",
-                ),
-                "Vol Ratio": st.column_config.TextColumn(
-                    "Vol Ratio",
-                    help="Pre-market volume vs expected baseline",
-                    width="small",
-                ),
-                "Score": st.column_config.TextColumn(
-                    "Score", help="Composite signal quality (0-100)", width="small",
-                ),
-                "Status": st.column_config.TextColumn(
-                    "Status",
-                    help="Trade lifecycle for today (watching → entered → closed)",
-                    width="medium",
-                ),
-                "Entry": st.column_config.TextColumn(
-                    "Entry",
-                    help="Real fill from trades table (watch_and_enter) — not a scan estimate",
-                    width="small",
-                ),
-                "Stop": st.column_config.TextColumn(
-                    "Stop",
-                    help="Real stop from trades table",
-                    width="small",
-                ),
-                "Target": st.column_config.TextColumn(
-                    "Target",
-                    help="Real 2R target from trades table",
-                    width="small",
-                ),
-                "P&L": st.column_config.TextColumn(
-                    "P&L",
-                    help="pnl_dollars from trades (live current_price when open)",
-                    width="medium",
-                ),
-            },
-            hide_index=True,
-            use_container_width=True,
-            height=min(520, 56 + 38 * max(len(wl_rows), 1)),
-        )
-    else:
-        st.info(
-            "No watchlist for today yet. It appears here as soon as the "
-            "9:20 agent syncs candidates to Supabase (even with zero trades)."
-        )
+                    "R:R": st.column_config.TextColumn(
+                        "R:R",
+                        help=(
+                            "target / safe-max-stop; <1.5 = reward may not "
+                            "justify stop width. Shows number + ⚠️ when below "
+                            "1.5; n/a when profile is insufficient (no R:R)."
+                        ),
+                        width="small",
+                    ),
+                    "Gap %": st.column_config.TextColumn(
+                        "Gap %", help="Pre-market gap vs prior close", width="small",
+                    ),
+                    "Vol Ratio": st.column_config.TextColumn(
+                        "Vol Ratio",
+                        help="Pre-market volume vs expected baseline",
+                        width="small",
+                    ),
+                    "Score": st.column_config.TextColumn(
+                        "Score", help="Composite signal quality (0-100)", width="small",
+                    ),
+                    "Status": st.column_config.TextColumn(
+                        "Status",
+                        help="Trade lifecycle for today (watching → entered → closed)",
+                        width="medium",
+                    ),
+                    "Entry": st.column_config.TextColumn(
+                        "Entry",
+                        help="Real fill from trades table (watch_and_enter) — not a scan estimate",
+                        width="small",
+                    ),
+                    "Stop": st.column_config.TextColumn(
+                        "Stop",
+                        help="Real stop from trades table",
+                        width="small",
+                    ),
+                    "Target": st.column_config.TextColumn(
+                        "Target",
+                        help="Real 2R target from trades table",
+                        width="small",
+                    ),
+                    "P&L": st.column_config.TextColumn(
+                        "P&L",
+                        help="pnl_dollars from trades (live current_price when open)",
+                        width="medium",
+                    ),
+                },
+                hide_index=True,
+                use_container_width=True,
+                height=min(520, 56 + 38 * max(len(wl_rows), 1)),
+            )
+        else:
+            st.info(
+                "No watchlist for today yet. It appears here as soon as the "
+                "9:20 agent syncs candidates to Supabase (even with zero trades)."
+            )
 
 
 def tab_trade_log(trades: list) -> None:
     df = _trades_df(trades)
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
 
-    st.subheader("Closed Trades")
-    if closed.empty:
-        st.info("No closed trades yet.")
-        return
+    with st.container(border=True):
+        section_header("Closed Trades", "Full exit log")
+        if closed.empty:
+            st.info("No closed trades yet.")
+            return
 
-    log = closed.copy()
-    log["Exit"] = log.apply(
-        lambda r: r.get("tranche_3_exit") or r.get("tranche_2_exit")
-        or r.get("tranche_1_exit") or r.get("stop_hit_price") or r.get("entry_price"),
-        axis=1,
-    )
-    log = log.rename(columns={
-        "entry_date": "Date",
-        "ticker": "Ticker",
-        "entry_price": "Entry",
-        "pnl_dollars": "P&L$",
-        "pnl_pct": "P&L%",
-        "days_held": "Days",
-        "exit_reason": "Exit Reason",
-    })
-    cols = ["Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%", "Days", "Exit Reason"]
-    log = log[[c for c in cols if c in log.columns]]
-    styled = log.style.map(_style_pnl, subset=["P&L$", "P&L%"])
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+        log = closed.copy()
+        log["Exit"] = log.apply(
+            lambda r: r.get("tranche_3_exit") or r.get("tranche_2_exit")
+            or r.get("tranche_1_exit") or r.get("stop_hit_price") or r.get("entry_price"),
+            axis=1,
+        )
+        log = log.rename(columns={
+            "entry_date": "Date",
+            "ticker": "Ticker",
+            "entry_price": "Entry",
+            "pnl_dollars": "P&L$",
+            "pnl_pct": "P&L%",
+            "days_held": "Days",
+            "exit_reason": "Exit Reason",
+        })
+        cols = ["Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%", "Days", "Exit Reason"]
+        log = log[[c for c in cols if c in log.columns]]
+        styled = log.style.map(_style_pnl, subset=["P&L$", "P&L%"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
 
     winners = closed[closed["pnl_dollars"] > 0]
     losers = closed[closed["pnl_dollars"] <= 0]
-    st.subheader("Summary Stats")
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Total Trades", len(closed))
-    s2.metric("Winners", len(winners))
-    s3.metric("Losers", len(losers))
-    s4.metric(
-        "Avg Win",
-        f"${winners['pnl_dollars'].mean():.2f}" if not winners.empty else "$0.00",
-    )
-    s5, s6, s7 = st.columns(3)
-    s5.metric(
-        "Avg Loss",
-        f"${losers['pnl_dollars'].mean():.2f}" if not losers.empty else "$0.00",
-    )
-    s6.metric(
-        "Best Trade",
-        f"${closed['pnl_dollars'].max():.2f}" if not closed.empty else "$0.00",
-    )
-    s7.metric(
-        "Worst Trade",
-        f"${closed['pnl_dollars'].min():.2f}" if not closed.empty else "$0.00",
-    )
+    with st.container(border=True):
+        section_header("Summary Stats")
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Total Trades", len(closed))
+        s2.metric("Winners", len(winners))
+        s3.metric("Losers", len(losers))
+        s4.metric(
+            "Avg Win",
+            f"${winners['pnl_dollars'].mean():.2f}" if not winners.empty else "$0.00",
+        )
+        s5, s6, s7 = st.columns(3)
+        s5.metric(
+            "Avg Loss",
+            f"${losers['pnl_dollars'].mean():.2f}" if not losers.empty else "$0.00",
+        )
+        s6.metric(
+            "Best Trade",
+            f"${closed['pnl_dollars'].max():.2f}" if not closed.empty else "$0.00",
+        )
+        s7.metric(
+            "Worst Trade",
+            f"${closed['pnl_dollars'].min():.2f}" if not closed.empty else "$0.00",
+        )
 
 
 def tab_performance(trades: list, pool_history: list) -> None:
-    st.subheader("Equity Curve")
-    if pool_history:
-        hist_df = pd.DataFrame(pool_history)
-        dates = pd.to_datetime(hist_df["snapshot_date"])
-        pool_values = hist_df["pool"]
+    with st.container(border=True):
+        section_header("Equity Curve", "Pool value over time")
+        if pool_history:
+            hist_df = pd.DataFrame(pool_history)
+            dates = pd.to_datetime(hist_df["snapshot_date"])
+            pool_values = hist_df["pool"]
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=dates,
-            y=pool_values,
-            mode="lines",
-            name="Q-ALPHA",
-            line=dict(color=ACCENT, width=2.5),
-            fill="tozeroy",
-            fillcolor="rgba(45, 212, 191, 0.12)",
-        ))
-        fig.add_hline(
-            y=STARTING_POOL,
-            line_dash="dash",
-            line_color=MUTED,
-            annotation_text="Starting Capital $3,000",
-        )
-        fig.update_layout(
-            title="Portfolio Equity Curve",
-            xaxis_title="Date",
-            yaxis_title="Portfolio Value ($)",
-            plot_bgcolor=BG,
-            paper_bgcolor=BG,
-            font=dict(color=TEXT, family="Sora"),
-            yaxis=dict(gridcolor=BORDER),
-            xaxis=dict(gridcolor=BORDER),
-            hovermode="x unified",
-            height=450,
-            margin=dict(l=40, r=20, t=50, b=40),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No pool history yet.")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=pool_values,
+                mode="lines",
+                name="Q-ALPHA",
+                line=dict(color=ACCENT, width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(45, 212, 191, 0.12)",
+            ))
+            fig.add_hline(
+                y=STARTING_POOL,
+                line_dash="dash",
+                line_color=MUTED,
+                annotation_text="Starting Capital $3,000",
+            )
+            fig.update_layout(
+                title="Portfolio Equity Curve",
+                xaxis_title="Date",
+                yaxis_title="Portfolio Value ($)",
+                plot_bgcolor=BG,
+                paper_bgcolor=BG,
+                font=dict(color=TEXT, family="Sora"),
+                yaxis=dict(gridcolor=BORDER),
+                xaxis=dict(gridcolor=BORDER),
+                hovermode="x unified",
+                height=450,
+                margin=dict(l=40, r=20, t=50, b=40),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No pool history yet.")
 
-    st.subheader("P&L Per Trade")
     df = _trades_df(trades)
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
-    if not closed.empty:
-        closed = closed.copy()
-        closed["label"] = closed["entry_date"] + " " + closed["ticker"]
-        fig2 = px.bar(
-            closed,
-            x="label",
-            y="pnl_dollars",
-            color="pnl_dollars",
-            color_continuous_scale=[NEGATIVE, POSITIVE],
-        )
-        fig2.update_layout(
-            template="plotly_dark",
-            height=400,
-            showlegend=False,
-            plot_bgcolor=BG,
-            paper_bgcolor=BG,
-            font=dict(color=TEXT, family="Sora"),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("No closed trades for P&L chart.")
 
-    st.subheader("Monthly Returns")
-    if not closed.empty:
-        monthly = closed.copy()
-        monthly["month"] = pd.to_datetime(monthly["entry_date"]).dt.to_period("M").astype(str)
-        agg = monthly.groupby("month").agg(
-            return_pct=("pnl_pct", "mean"),
-            trades=("ticker", "count"),
-            win_rate=("pnl_dollars", lambda s: (s > 0).mean()),
-        ).reset_index()
-        agg["win_rate"] = agg["win_rate"].apply(lambda x: f"{x:.0%}")
-        agg["return_pct"] = agg["return_pct"].apply(lambda x: f"{x:+.2f}%")
-        st.dataframe(agg, use_container_width=True, hide_index=True)
-    else:
-        st.info("No monthly data yet.")
+    with st.container(border=True):
+        section_header("P&L Per Trade")
+        if not closed.empty:
+            closed_plot = closed.copy()
+            closed_plot["label"] = closed_plot["entry_date"] + " " + closed_plot["ticker"]
+            fig2 = px.bar(
+                closed_plot,
+                x="label",
+                y="pnl_dollars",
+                color="pnl_dollars",
+                color_continuous_scale=[NEGATIVE, POSITIVE],
+            )
+            fig2.update_layout(
+                template="plotly_dark",
+                height=400,
+                showlegend=False,
+                plot_bgcolor=BG,
+                paper_bgcolor=BG,
+                font=dict(color=TEXT, family="Sora"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No closed trades for P&L chart.")
+
+    with st.container(border=True):
+        section_header("Monthly Returns")
+        if not closed.empty:
+            monthly = closed.copy()
+            monthly["month"] = pd.to_datetime(monthly["entry_date"]).dt.to_period("M").astype(str)
+            agg = monthly.groupby("month").agg(
+                return_pct=("pnl_pct", "mean"),
+                trades=("ticker", "count"),
+                win_rate=("pnl_dollars", lambda s: (s > 0).mean()),
+            ).reset_index()
+            agg["win_rate"] = agg["win_rate"].apply(lambda x: f"{x:.0%}")
+            agg["return_pct"] = agg["return_pct"].apply(lambda x: f"{x:+.2f}%")
+            st.dataframe(agg, use_container_width=True, hide_index=True)
+        else:
+            st.info("No monthly data yet.")
 
 
 def tab_system_health(health: list) -> None:
-    st.subheader("Component Status")
-    components = {
-        "morning_scan": {"icon": "🔍", "name": "Morning Scanner"},
-        "eod_monitor": {"icon": "📊", "name": "EOD Monitor"},
-        "approval_processor": {"icon": "✅", "name": "Approval Processor"},
-    }
+    with st.container(border=True):
+        section_header("Component Status", "Last heartbeat per job")
+        components = {
+            "morning_scan": {"icon": "🔍", "name": "Morning Scanner"},
+            "eod_monitor": {"icon": "📊", "name": "EOD Monitor"},
+            "approval_processor": {"icon": "✅", "name": "Approval Processor"},
+        }
 
-    for key, info in components.items():
-        last = get_last_health(key, health)
-        if last:
-            time_ago = get_time_ago(last.get("created_at") or last.get("last_run", ""))
-            status_color = POSITIVE if last.get("status") == "OK" else NEGATIVE
-            status_icon = "🟢" if last.get("status") == "OK" else "🔴"
-            status_text = last.get("status", "UNKNOWN")
-            message = last.get("message", "—")
+        for key, info in components.items():
+            last = get_last_health(key, health)
+            if last:
+                time_ago = get_time_ago(last.get("created_at") or last.get("last_run", ""))
+                status_text = last.get("status", "UNKNOWN")
+                message = last.get("message", "—")
+                ok = last.get("status") == "OK"
+                tone = "up" if ok else "down"
+                status_icon = "🟢" if ok else "🔴"
+            else:
+                time_ago = "Never"
+                status_text = "Never run"
+                message = "—"
+                tone = "muted"
+                status_icon = "⚫"
+
+            status_panel(
+                info["name"],
+                status_text,
+                time_ago,
+                message,
+                tone=tone,
+                icon=info["icon"],
+                status_icon=status_icon,
+            )
+
+    with st.container(border=True):
+        section_header("Recent Activity Log")
+        if health:
+            log_df = pd.DataFrame(health)[
+                ["created_at", "component", "status", "message"]
+            ]
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
         else:
-            time_ago = "Never"
-            status_color = MUTED
-            status_icon = "⚫"
-            status_text = "Never run"
-            message = "—"
-
-        st.markdown(
-            f"""
-<div class="qa-panel" style="
-    border-left: 4px solid {status_color};
-    padding: 0.85rem 1rem;
-    margin-bottom: 0.55rem;
-">
-    <b>{info['icon']} {info['name']}</b>
-    &nbsp;&nbsp; {status_icon}
-    <span style="color: {status_color}; font-weight: 600;">{status_text}</span>
-    &nbsp;&nbsp; <span style="color: {MUTED};">{time_ago}</span>
-    <br>
-    <small style="color: {MUTED};">{message}</small>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    st.subheader("Recent Activity Log")
-    if health:
-        log_df = pd.DataFrame(health)[
-            ["created_at", "component", "status", "message"]
-        ]
-        st.dataframe(log_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No health logs yet.")
+            st.info("No health logs yet.")
 
     cutoff = datetime.now() - timedelta(days=7)
     errors = []
@@ -954,8 +921,8 @@ def tab_system_health(health: list) -> None:
 
 def tab_daily_reviews() -> None:
     """Daily AI session reviews from Supabase."""
-    st.header("📓 Daily Trade Reviews")
-    st.caption("AI analysis of each trading session")
+    with st.container(border=True):
+        section_header("Daily Trade Reviews", "AI analysis of each trading session")
 
     try:
         reviews = get_sync().get_daily_reviews()
@@ -998,18 +965,19 @@ def tab_ticker_profiles() -> None:
     Setup-analysis tab: read precomputed profiles/<T>_profile.json.
     No Polygon calls on tab open — only the explicit Refresh button.
     """
-    st.caption(
-        "Analog MAE/MFE setup analysis · informational only · "
-        "reads precomputed JSON (no auto Polygon calls)"
-    )
-    st.info(
-        "Profiles are **precomputed** at the 9:20 scan (and via Refresh). "
-        "This tab does **not** call Polygon on load."
-    )
-    st.caption(
-        "History flags: `*` limited history/small sample or extended past 2yr · "
-        "`**` insufficient — informational only"
-    )
+    with st.container(border=True):
+        section_header(
+            "Ticker Profiles",
+            "Analog MAE/MFE · informational only · precomputed JSON",
+        )
+        st.info(
+            "Profiles are **precomputed** at the 9:20 scan (and via Refresh). "
+            "This tab does **not** call Polygon on load."
+        )
+        st.caption(
+            "History flags: `*` limited history/small sample or extended past 2yr · "
+            "`**` insufficient — informational only"
+        )
 
     today = et_today()
     watch_tickers: list[str] = []
@@ -1119,18 +1087,19 @@ def tab_ticker_profiles() -> None:
     lookback_d = profile.get("actual_lookback_days")
     display_name = format_ticker_with_history(ticker)
 
-    st.subheader(display_name)
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Analogs", n_m)
-    m2.metric("Confidence", conf)
-    m3.metric(
-        "History flag",
-        {"*": "* limited", "**": "** insuff", "": "(none)"}.get(
-            hist_flag, hist_flag or "(none)"
-        ),
-    )
-    m4.metric("Lookback days", lookback_d if lookback_d is not None else "—")
-    m5.metric("As of", as_of)
+    with st.container(border=True):
+        section_header(display_name, f"Weighting: {weighting}")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Analogs", n_m)
+        m2.metric("Confidence", conf)
+        m3.metric(
+            "History flag",
+            {"*": "* limited", "**": "** insuff", "": "(none)"}.get(
+                hist_flag, hist_flag or "(none)"
+            ),
+        )
+        m4.metric("Lookback days", lookback_d if lookback_d is not None else "—")
+        m5.metric("As of", as_of)
 
     # Avoid markdown **bold** wrapping tickers that already contain * / ** flags
     # (was rendering as: **USDE **** insufficient...).
@@ -1405,11 +1374,12 @@ def _render_strategy_lab_r2_panel(state: dict) -> None:
     Side-by-side Backtest OOS R² vs Forward rolling OOS R².
     Never raises — missing/small-N → collecting-data UI.
     """
-    st.subheader("Out-of-Sample R²")
+    section_header(
+        "Out-of-Sample R²",
+        "Negative R² = worse than predicting average MFE; small-N is noise",
+    )
     st.caption(
-        "Negative R² means the profiler is worse than predicting the average MFE. "
-        f"R² needs a meaningful sample (>={OOS_R2_MIN_N}) to be trustworthy; "
-        "small-N values are noise. "
+        f"R² needs a meaningful sample (>={OOS_R2_MIN_N}) to be trustworthy. "
         "Forward R² is true OOS by construction (live / replay setups the strategy "
         "never trained on)."
     )
@@ -1502,25 +1472,7 @@ def tab_strategy_lab() -> None:
         return
 
     src = state.get("_lab_state_source") or "unknown"
-    st.markdown(
-        f"""
-<div class="qa-panel" style="
-    border-color: color-mix(in srgb, {ACCENT} 40%, {BORDER});
-    background: linear-gradient(135deg,
-      color-mix(in srgb, {ACCENT} 10%, {SURFACE}) 0%,
-      {SURFACE} 65%);
-">
-  <div class="qa-panel-title" style="color: {ACCENT_2};">
-    SIM · Polygon paper · not IBKR / not real money
-  </div>
-  <div class="qa-panel-body">
-    Strategy Lab forward test — dual pools from <code>live_forward.py</code>.
-    Independent of the live agent / Supabase paper book.
-  </div>
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    lab_sim_banner()
 
     pool_a = state.get("pool_A_trailing") or {}
     pool_b = state.get("pool_B_target") or {}
@@ -1571,261 +1523,242 @@ def tab_strategy_lab() -> None:
     )
 
     # --- Out-of-Sample R²: backtest (static) vs forward (live rolling) ---
-    _render_strategy_lab_r2_panel(state)
+    with st.container(border=True):
+        _render_strategy_lab_r2_panel(state)
 
     # --- Who's ahead ---
     margin = abs(a_val - b_val)
     if a_val > b_val:
         ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
-        ahead_color = POSITIVE
     elif b_val > a_val:
         ahead_label = pool_b.get("label") or "Strategy B (Target)"
-        ahead_color = ACCENT
     else:
         ahead_label = "TIE"
-        ahead_color = MUTED
     # Prefer eod winner label when present and pools still match
     w_pool = winner.get("pool")
     if w_pool == "A_trailing" and a_val >= b_val:
         ahead_label = pool_a.get("label") or "Strategy A (Trailing)"
         margin = float(winner.get("margin_usd") or margin)
-        ahead_color = POSITIVE
     elif w_pool == "B_target" and b_val >= a_val:
         ahead_label = pool_b.get("label") or "Strategy B (Target)"
         margin = float(winner.get("margin_usd") or margin)
-        ahead_color = ACCENT
     elif w_pool == "tie":
         ahead_label = "TIE"
         margin = 0.0
-        ahead_color = MUTED
 
-    st.markdown(
-        f"""
-<div class="qa-panel" style="
-    border-left: 4px solid {ahead_color};
-    background: linear-gradient(90deg,
-      color-mix(in srgb, {ahead_color} 12%, {SURFACE}) 0%,
-      {SURFACE} 55%);
-">
-  <div style="font-size: 1.4rem; font-weight: 700; color: {ahead_color};
-              font-family: Sora, sans-serif;">
-    {"TIE" if ahead_label == "TIE" else f"{ahead_label} ahead by ${margin:,.2f}"}
-  </div>
-  <div style="font-size: 0.9rem; color: {MUTED}; margin-top: 0.35rem;
-              font-family: 'IBM Plex Mono', monospace;">
-    A ${a_val:,.2f} &nbsp;vs&nbsp; B ${b_val:,.2f}
-  </div>
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    lab_ahead_banner(ahead_label, margin, a_val, b_val)
 
     # --- Side-by-side pool cards ---
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown(f"### {pool_a.get('label') or 'Strategy A (Trailing)'}")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
-        m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
-        m3.metric(
-            "Win rate",
-            f"{float(a_wr):.1f}%" if a_wr is not None else "—",
-        )
-        m4, m5 = st.columns(2)
-        m4.metric("Open slots", f"{a_slots}/{LAB_MAX_SLOTS}")
-        m5.metric("Closed trades", str(a_taken))
+        with st.container(border=True):
+            section_header(pool_a.get("label") or "Strategy A (Trailing)")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+            m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
+            m3.metric(
+                "Win rate",
+                f"{float(a_wr):.1f}%" if a_wr is not None else "—",
+            )
+            m4, m5 = st.columns(2)
+            m4.metric("Open slots", f"{a_slots}/{LAB_MAX_SLOTS}")
+            m5.metric("Closed trades", str(a_taken))
     with col_b:
-        st.markdown(f"### {pool_b.get('label') or 'Strategy B (Target)'}")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Pool value", f"${b_val:,.2f}", f"{b_ret:+.2f}%")
-        m2.metric("Realized P&L", f"${b_pnl:+,.2f}")
-        m3.metric(
-            "Win rate",
-            f"{float(b_wr):.1f}%" if b_wr is not None else "—",
-        )
-        m4, m5 = st.columns(2)
-        m4.metric("Open slots", f"{b_slots}/{LAB_MAX_SLOTS}")
-        m5.metric("Closed trades", str(b_taken))
+        with st.container(border=True):
+            section_header(pool_b.get("label") or "Strategy B (Target)")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Pool value", f"${b_val:,.2f}", f"{b_ret:+.2f}%")
+            m2.metric("Realized P&L", f"${b_pnl:+,.2f}")
+            m3.metric(
+                "Win rate",
+                f"{float(b_wr):.1f}%" if b_wr is not None else "—",
+            )
+            m4, m5 = st.columns(2)
+            m4.metric("Open slots", f"{b_slots}/{LAB_MAX_SLOTS}")
+            m5.metric("Closed trades", str(b_taken))
 
     # --- Equity curves (overlaid) ---
-    st.markdown("### Equity curves")
-    fig = go.Figure()
-    for label, curve, color in (
-        (
-            pool_a.get("label") or "A Trailing",
-            pool_a.get("equity_curve") or [],
-            POSITIVE,
-        ),
-        (
-            pool_b.get("label") or "B Target",
-            pool_b.get("equity_curve") or [],
-            ACCENT,
-        ),
-    ):
-        if not curve:
-            continue
-        xs = list(range(len(curve)))
-        ys = [float(pt.get("value_usd") or 0) for pt in curve]
-        hover = []
-        for i, pt in enumerate(curve):
-            ev = pt.get("event") or ""
-            tk = pt.get("ticker") or ""
-            hover.append(
-                f"{label}<br>#{i} {ev}"
-                + (f" {tk}" if tk else "")
-                + f"<br>${float(pt.get('value_usd') or 0):,.2f}"
+    with st.container(border=True):
+        section_header("Equity curves")
+        fig = go.Figure()
+        for label, curve, color in (
+            (
+                pool_a.get("label") or "A Trailing",
+                pool_a.get("equity_curve") or [],
+                POSITIVE,
+            ),
+            (
+                pool_b.get("label") or "B Target",
+                pool_b.get("equity_curve") or [],
+                ACCENT,
+            ),
+        ):
+            if not curve:
+                continue
+            xs = list(range(len(curve)))
+            ys = [float(pt.get("value_usd") or 0) for pt in curve]
+            hover = []
+            for i, pt in enumerate(curve):
+                ev = pt.get("event") or ""
+                tk = pt.get("ticker") or ""
+                hover.append(
+                    f"{label}<br>#{i} {ev}"
+                    + (f" {tk}" if tk else "")
+                    + f"<br>${float(pt.get('value_usd') or 0):,.2f}"
+                )
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines+markers",
+                    name=label,
+                    line=dict(color=color, width=2),
+                    hovertext=hover,
+                    hoverinfo="text",
+                )
             )
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=ys,
-                mode="lines+markers",
-                name=label,
-                line=dict(color=color, width=2),
-                hovertext=hover,
-                hoverinfo="text",
-            )
+        fig.update_layout(
+            height=320,
+            margin=dict(l=40, r=20, t=20, b=40),
+            xaxis_title="Event #",
+            yaxis_title="Pool value ($)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            hovermode="closest",
+            plot_bgcolor=BG,
+            paper_bgcolor=BG,
+            font=dict(color=TEXT, family="Sora"),
+            xaxis=dict(gridcolor=BORDER),
+            yaxis=dict(gridcolor=BORDER),
         )
-    fig.update_layout(
-        height=320,
-        margin=dict(l=40, r=20, t=20, b=40),
-        xaxis_title="Event #",
-        yaxis_title="Pool value ($)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        hovermode="closest",
-        plot_bgcolor=BG,
-        paper_bgcolor=BG,
-        font=dict(color=TEXT, family="Sora"),
-        xaxis=dict(gridcolor=BORDER),
-        yaxis=dict(gridcolor=BORDER),
-    )
-    if fig.data:
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.caption("No equity curve points yet.")
+        if fig.data:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.caption("No equity curve points yet.")
 
     # --- Open positions ---
-    st.markdown("### Open Positions")
-    open_a = pool_a.get("open_positions") or {}
-    open_b = pool_b.get("open_positions") or {}
-    tickers_open = sorted(set(open_a.keys()) | set(open_b.keys()))
-    if not tickers_open:
-        st.caption("No open positions (all flat).")
-    else:
-        open_rows = []
-        for t in tickers_open:
-            oa = open_a.get(t) or {}
-            ob = open_b.get(t) or {}
-            open_rows.append({
-                "Ticker": t,
-                "A entry": (
-                    f"${float(oa['entry_price']):.4f}"
-                    if oa.get("entry_price") is not None
-                    else "—"
-                ),
-                "A shares": oa.get("shares") if oa else "—",
-                "A unrealized": "open (no mark)" if oa else "—",
-                "B entry": (
-                    f"${float(ob['entry_price']):.4f}"
-                    if ob.get("entry_price") is not None
-                    else "—"
-                ),
-                "B shares": ob.get("shares") if ob else "—",
-                "B unrealized": "open (no mark)" if ob else "—",
-                "sweep_reclaim": (
-                    oa.get("sweep_reclaim")
-                    or ob.get("sweep_reclaim")
-                    or "—"
-                ),
-            })
-        st.dataframe(
-            pd.DataFrame(open_rows),
-            use_container_width=True,
-            hide_index=True,
-        )
+    with st.container(border=True):
+        section_header("Open Positions", "Lab A vs B marks")
+        open_a = pool_a.get("open_positions") or {}
+        open_b = pool_b.get("open_positions") or {}
+        tickers_open = sorted(set(open_a.keys()) | set(open_b.keys()))
+        if not tickers_open:
+            st.caption("No open positions (all flat).")
+        else:
+            open_rows = []
+            for t in tickers_open:
+                oa = open_a.get(t) or {}
+                ob = open_b.get(t) or {}
+                open_rows.append({
+                    "Ticker": t,
+                    "A entry": (
+                        f"${float(oa['entry_price']):.4f}"
+                        if oa.get("entry_price") is not None
+                        else "—"
+                    ),
+                    "A shares": oa.get("shares") if oa else "—",
+                    "A unrealized": "open (no mark)" if oa else "—",
+                    "B entry": (
+                        f"${float(ob['entry_price']):.4f}"
+                        if ob.get("entry_price") is not None
+                        else "—"
+                    ),
+                    "B shares": ob.get("shares") if ob else "—",
+                    "B unrealized": "open (no mark)" if ob else "—",
+                    "sweep_reclaim": (
+                        oa.get("sweep_reclaim")
+                        or ob.get("sweep_reclaim")
+                        or "—"
+                    ),
+                })
+            st.dataframe(
+                pd.DataFrame(open_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     # --- Closed trades (side-by-side A vs B) ---
-    st.markdown("### Closed Trades")
-    # Prefer report.per_ticker (aligned A/B); else zip closed_trades by ticker.
-    per = (state.get("report") or {}).get("per_ticker") or []
-    closed_rows = []
-    if per:
-        for row in per:
-            if row.get("skipped"):
-                continue
-            ar = row.get("A") or {}
-            br = row.get("B") or {}
-            if not ar.get("taken") and not br.get("taken"):
-                continue
-            closed_rows.append({
-                "Ticker": row.get("ticker"),
-                "Entry": (
-                    f"${float(row['entry_price']):.4f}"
-                    if row.get("entry_price") is not None
-                    else "—"
-                ),
-                "A exits": _lab_tranche_exits(ar.get("tranches")),
-                "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
-                "A ret%": (
-                    f"{float(ar['return_pct']):+.2f}%"
-                    if ar.get("return_pct") is not None
-                    else "—"
-                ),
-                "B exits": _lab_tranche_exits(br.get("tranches")),
-                "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
-                "B ret%": (
-                    f"{float(br['return_pct']):+.2f}%"
-                    if br.get("return_pct") is not None
-                    else "—"
-                ),
-                "sweep_reclaim": row.get("sweep_reclaim") or "—",
-            })
-    else:
-        # Fallback: index closed_trades by ticker
-        by_a = {
-            t.get("ticker"): t
-            for t in (pool_a.get("closed_trades") or [])
-            if t.get("taken")
-        }
-        by_b = {
-            t.get("ticker"): t
-            for t in (pool_b.get("closed_trades") or [])
-            if t.get("taken")
-        }
-        for t in sorted(set(by_a) | set(by_b)):
-            ar = by_a.get(t) or {}
-            br = by_b.get(t) or {}
-            entry = ar.get("entry_price", br.get("entry_price"))
-            closed_rows.append({
-                "Ticker": t,
-                "Entry": f"${float(entry):.4f}" if entry is not None else "—",
-                "A exits": _lab_tranche_exits(ar.get("tranches")),
-                "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
-                "A ret%": (
-                    f"{float(ar['return_pct']):+.2f}%"
-                    if ar.get("return_pct") is not None
-                    else "—"
-                ),
-                "B exits": _lab_tranche_exits(br.get("tranches")),
-                "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
-                "B ret%": (
-                    f"{float(br['return_pct']):+.2f}%"
-                    if br.get("return_pct") is not None
-                    else "—"
-                ),
-                "sweep_reclaim": (
-                    ar.get("sweep_reclaim") or br.get("sweep_reclaim") or "—"
-                ),
-            })
+    with st.container(border=True):
+        section_header("Closed Trades", "Aligned A / B exits")
+        # Prefer report.per_ticker (aligned A/B); else zip closed_trades by ticker.
+        per = (state.get("report") or {}).get("per_ticker") or []
+        closed_rows = []
+        if per:
+            for row in per:
+                if row.get("skipped"):
+                    continue
+                ar = row.get("A") or {}
+                br = row.get("B") or {}
+                if not ar.get("taken") and not br.get("taken"):
+                    continue
+                closed_rows.append({
+                    "Ticker": row.get("ticker"),
+                    "Entry": (
+                        f"${float(row['entry_price']):.4f}"
+                        if row.get("entry_price") is not None
+                        else "—"
+                    ),
+                    "A exits": _lab_tranche_exits(ar.get("tranches")),
+                    "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
+                    "A ret%": (
+                        f"{float(ar['return_pct']):+.2f}%"
+                        if ar.get("return_pct") is not None
+                        else "—"
+                    ),
+                    "B exits": _lab_tranche_exits(br.get("tranches")),
+                    "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
+                    "B ret%": (
+                        f"{float(br['return_pct']):+.2f}%"
+                        if br.get("return_pct") is not None
+                        else "—"
+                    ),
+                    "sweep_reclaim": row.get("sweep_reclaim") or "—",
+                })
+        else:
+            # Fallback: index closed_trades by ticker
+            by_a = {
+                t.get("ticker"): t
+                for t in (pool_a.get("closed_trades") or [])
+                if t.get("taken")
+            }
+            by_b = {
+                t.get("ticker"): t
+                for t in (pool_b.get("closed_trades") or [])
+                if t.get("taken")
+            }
+            for t in sorted(set(by_a) | set(by_b)):
+                ar = by_a.get(t) or {}
+                br = by_b.get(t) or {}
+                entry = ar.get("entry_price", br.get("entry_price"))
+                closed_rows.append({
+                    "Ticker": t,
+                    "Entry": f"${float(entry):.4f}" if entry is not None else "—",
+                    "A exits": _lab_tranche_exits(ar.get("tranches")),
+                    "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
+                    "A ret%": (
+                        f"{float(ar['return_pct']):+.2f}%"
+                        if ar.get("return_pct") is not None
+                        else "—"
+                    ),
+                    "B exits": _lab_tranche_exits(br.get("tranches")),
+                    "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
+                    "B ret%": (
+                        f"{float(br['return_pct']):+.2f}%"
+                        if br.get("return_pct") is not None
+                        else "—"
+                    ),
+                    "sweep_reclaim": (
+                        ar.get("sweep_reclaim") or br.get("sweep_reclaim") or "—"
+                    ),
+                })
 
-    if closed_rows:
-        st.dataframe(
-            pd.DataFrame(closed_rows),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.caption("No closed trades yet.")
+        if closed_rows:
+            st.dataframe(
+                pd.DataFrame(closed_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No closed trades yet.")
 
     # Candidates footer
     n_c = state.get("n_candidates")
@@ -1845,32 +1778,33 @@ def tab_glossary() -> None:
     Render repo-root GLOSSARY.md — same content as the markdown file.
     Leave agent code untouched; best-effort if the file is missing.
     """
-    st.header("📖 Glossary")
-    st.caption(
-        "Q-ALPHA / Strategy Lab terms · same content as `GLOSSARY.md` in the repo root"
-    )
-    if not GLOSSARY_PATH.exists():
-        st.warning(
-            "GLOSSARY.md not found in the repo root. "
-            "Pull latest main or add the file locally."
+    with st.container(border=True):
+        section_header(
+            "Glossary",
+            "Q-ALPHA / Strategy Lab terms · same content as GLOSSARY.md",
         )
-        return
-    try:
-        body = GLOSSARY_PATH.read_text(encoding="utf-8")
-    except OSError as exc:
-        st.error(f"Could not read GLOSSARY.md: {exc}")
-        return
-    # Skip the duplicate H1 when the tab already has a header.
-    lines = body.splitlines()
-    if lines and lines[0].startswith("# "):
-        body = "\n".join(lines[1:]).lstrip("\n")
-    st.markdown(body)
+        if not GLOSSARY_PATH.exists():
+            st.warning(
+                "GLOSSARY.md not found in the repo root. "
+                "Pull latest main or add the file locally."
+            )
+            return
+        try:
+            body = GLOSSARY_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            st.error(f"Could not read GLOSSARY.md: {exc}")
+            return
+        # Skip the duplicate H1 when the tab already has a header.
+        lines = body.splitlines()
+        if lines and lines[0].startswith("# "):
+            body = "\n".join(lines[1:]).lstrip("\n")
+        st.markdown(body)
 
 
 def render_footer() -> None:
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
-    st.markdown('<div class="qa-footer"></div>', unsafe_allow_html=True)
+    footer_rule()
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         st.caption(
