@@ -50,7 +50,8 @@ FUND_NAME_TOKENS = frozenset({
     "FUND", "FUNDS",
     "LEVERAGED", "INVERSE", "ULTRAPRO", "ULTRASHORT",
     "WARRANT", "WARRANTS",
-    "DEPOSITARY",
+    # "DEPOSITARY" alone false-positives ADRs ("American Depositary Shares").
+    # Preferreds still caught via FUND_NAME_PHRASES "DEPOSITARY SHARE".
     "ACQUISITION", "ACQUISITIONS",  # pre-merger SPAC shells, units, warrants
     # Issuer brands that only ever appear on fund/derivative products. Asset
     # managers that are themselves tradable common stocks (Invesco/IVZ,
@@ -121,7 +122,17 @@ def is_leveraged_or_fund(name: str) -> bool:
         return True
     if ISSUER_SHARES_RE.search(upper):
         return True
-    if any(phrase in upper for phrase in FUND_NAME_PHRASES):
+    # ADR operating companies use "American Depositary Shares" — not a fund.
+    # Skip depositary phrases for those; preferred depositary shares still match
+    # when "AMERICAN DEPOSITARY" is absent.
+    is_adr_common = (
+        "AMERICAN DEPOSITARY" in upper or "AMERICAN DEPOSITORY" in upper
+    )
+    for phrase in FUND_NAME_PHRASES:
+        if phrase not in upper:
+            continue
+        if is_adr_common and "DEPOSITARY" in phrase:
+            continue
         return True
     words = set(_WORD_RE.findall(upper))
     if words & FUND_NAME_TOKENS:
@@ -215,6 +226,64 @@ def load_full_cs_universe() -> dict[str, dict]:
     return universe
 
 
+# Instrument types IB may return that are never tradable Q-Alpha equity.
+BANNED_STOCK_TYPES = frozenset({
+    "RIGHT", "WAR", "WARRANT", "BOND", "CASH", "CMDTY", "FUT", "FOP",
+    "OPT", "IOPT", "FWD", "BAG", "NEWS", "PREFERRED", "PREF",
+})
+
+
+def passes_instrument_safety(
+    ticker: str,
+    *,
+    name: str = "",
+    stock_type: str = "",
+    require_cs_cache: bool = True,
+) -> bool:
+    """
+    Fund/deny/stockType safety. Optionally require Polygon CS-cache membership.
+
+    TWS-sourced names MUST call with require_cs_cache=False — CS membership
+    re-blocks NYSE American names (PMI) that scanners surface correctly.
+    """
+    symbol = (ticker or "").upper().strip()
+    if not symbol or symbol in EXCLUDE_SYMBOLS:
+        print(f"BLOCKED: {symbol or ticker} failed instrument safety gate")
+        return False
+
+    st = (stock_type or "").upper().strip()
+    if st in BANNED_STOCK_TYPES or st.startswith("WAR"):
+        print(f"BLOCKED: {symbol} stockType={stock_type!r}")
+        return False
+    # ETF / ETN / fund wrappers from IB stockType
+    if st in {"ETF", "ETN", "ETP", "FUND"}:
+        print(f"BLOCKED: {symbol} stockType={stock_type!r}")
+        return False
+
+    resolved_name = (name or "").strip()
+    if not resolved_name and require_cs_cache:
+        cs_universe = load_full_cs_universe()
+        meta = cs_universe.get(symbol) or {}
+        resolved_name = str(meta.get("name") or "")
+
+    if resolved_name and is_leveraged_or_fund(resolved_name):
+        print(f"BLOCKED: {symbol} failed fund/name safety ({resolved_name[:48]!r})")
+        return False
+
+    if require_cs_cache:
+        cs_universe = load_full_cs_universe()
+        if resolved_name:
+            return True
+        if not cs_universe:
+            print("  full CS universe cache missing or empty — refusing all entries")
+            print(f"BLOCKED: {symbol} failed universe safety gate")
+            return False
+        if symbol not in cs_universe:
+            print(f"BLOCKED: {symbol} failed universe safety gate")
+            return False
+    return True
+
+
 def passes_universe_safety_gate(ticker: str) -> bool:
     """
     Last check before an order is placed anywhere in Q-Alpha.
@@ -226,28 +295,29 @@ def passes_universe_safety_gate(ticker: str) -> bool:
 
     Name comes from the scanner CS cache. If the name is missing, membership
     in that cache is the fallback (fail closed if the cache is empty).
+
+    For TWS-sourced candidates prefer passes_instrument_safety(..., require_cs_cache=False)
+    with name/stock_type from the pipeline — do not use this CS-membership path.
     """
-    symbol = (ticker or "").upper().strip()
-    if not symbol or symbol in EXCLUDE_SYMBOLS:
-        print(f"BLOCKED: {symbol or ticker} failed universe safety gate")
-        return False
+    return passes_instrument_safety(ticker, require_cs_cache=True)
 
-    cs_universe = load_full_cs_universe()
-    meta = cs_universe.get(symbol) or {}
-    name = str(meta.get("name") or "")
 
-    if name:
-        if is_leveraged_or_fund(name):
-            print(f"BLOCKED: {symbol} failed universe safety gate")
-            return False
-        return True
+def candidate_passes_safety(candidate: dict) -> bool:
+    """
+    Dispatch safety for agent watchlists.
 
-    if not cs_universe:
-        print("  full CS universe cache missing or empty — refusing all entries")
-        print(f"BLOCKED: {symbol} failed universe safety gate")
-        return False
-
-    if symbol not in cs_universe:
-        print(f"BLOCKED: {symbol} failed universe safety gate")
-        return False
-    return True
+    TWS pipeline rows carry source='tws_scan' (+ name/stock_type) and must NOT
+    require CS-cache membership. Polygon full_market_scan rows keep the legacy gate.
+    """
+    if not isinstance(candidate, dict):
+        return passes_universe_safety_gate(str(candidate))
+    ticker = str(candidate.get("ticker") or "")
+    source = str(candidate.get("source") or "")
+    if source == "tws_scan" or candidate.get("skip_cs_cache"):
+        return passes_instrument_safety(
+            ticker,
+            name=str(candidate.get("name") or ""),
+            stock_type=str(candidate.get("stock_type") or ""),
+            require_cs_cache=False,
+        )
+    return passes_universe_safety_gate(ticker)

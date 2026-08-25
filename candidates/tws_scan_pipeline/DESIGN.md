@@ -1,6 +1,6 @@
 # TWS Scan Pipeline — Design (hybrid morning path)
 
-**Status:** Phase 1 (design + spike). **Not wired** into `autonomous_agent.py`.  
+**Status:** Phase 2 wired (`QALPHA_USE_TWS_SCAN=1`). Production funnel: ~50×3 → watch 10 / trade 3.  
 **Owners:** Aaron + research director (architecture lock).  
 **Workspace:** Q-ALPHA only (not Q-ALPHA-READONLY).
 
@@ -20,64 +20,70 @@ This path only changes how the **live agent** builds its morning candidate list 
 
 ---
 
-## Target architecture (locked)
+## Target architecture (locked — production funnel)
 
 ```
-  ~09:25 ET
+  ~09:20–09:25 ET
        │
        ▼
  ┌─────────────────────────────────────────────────────────┐
- │ 1) LIST — TWS scanners (ib_insync ScannerSubscription)  │
- │    TOP_PERC_GAIN / MOST_ACTIVE / HOT_BY_VOLUME (best     │
- │    available). Union + dedupe → raw symbol list.         │
+ │ 1) LIST — TWS scanners                                  │
+ │    TOP_PERC_GAIN + MOST_ACTIVE + HOT_BY_VOLUME          │
+ │    SCAN_ROWS_PER_CODE ≈ 50 each → union+dedupe          │
+ │    TARGET_UNIVERSE ≈ 100 hunting set                    │
  └───────────────────────────┬─────────────────────────────┘
                              │
                              ▼
  ┌─────────────────────────────────────────────────────────┐
- │ 2) SAFETY HARD GATES (before any score)                 │
- │    • price >= $5                                        │
- │    • not leveraged/ETF  → reuse universe_filter         │
- │      (EXCLUDE_SYMBOLS + is_leveraged_or_fund)           │
- │    • min market cap     → $50M (see decision below)     │
- │    • skip if IB marks closing-only / no trade permission│
- │      when detectable                                    │
+ │ 2) GATES                                                │
+ │    IGNORE mcap < $50M | LEARN $50–150M | TRADE ≥ $150M  │
+ │    No $5 floor; ban ETF/lev/RIGHT/junk; no CS-cache req │
  └───────────────────────────┬─────────────────────────────┘
                              │
                              ▼
  ┌─────────────────────────────────────────────────────────┐
- │ 3) SCORE shortlist (not full-market Polygon scan)       │
- │    Premarket: prefer TWS live / extended-hours bars+    │
- │               quotes; Polygon fallback if TWS no-quote  │
- │    History:   Polygon ticker_profiler ONLY              │
- │               (do not rebuild history on IB)            │
+ │ 3) SCORE full post-gate shortlist (~100)                │
+ │    PM: TWS first, Polygon fallback                      │
+ │    History: Polygon ticker_profiler only                │
  └───────────────────────────┬─────────────────────────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+ ┌────────────────────────┐   ┌────────────────────────────┐
+ │ 4) WATCH top 10        │   │ 5) TRADE top 3             │
+ │    by score (TRADE +   │   │    TRADE lane only         │
+ │    LEARN allowed)      │   │    MAX_TRADES_DAY = 3      │
+ │    Telegram/dashboard  │   │    Never bracket LEARN     │
+ └────────────────────────┘   └────────────────────────────┘
                              │
                              ▼
  ┌─────────────────────────────────────────────────────────┐
- │ 4) SELECT — rank by score → top MAX_TRADES_DAY (= 3)    │
- │    Agent only. Lab SIM Polygon path unchanged this phase│
- └───────────────────────────┬─────────────────────────────┘
-                             │
-                             ▼
- ┌─────────────────────────────────────────────────────────┐
- │ 5) OPTIONAL ~09:40 second scanner pass                  │
- │    Fill remaining slots (CRML-style post-open).         │
- │    v1: design + stub unless spike is clean.             │
+ │ 6) OPTIONAL ~09:40 refill — OFF (stub)                  │
  └─────────────────────────────────────────────────────────┘
 ```
 
+**Constants:** `SCAN_ROWS_PER_CODE=50`, `TARGET_UNIVERSE=100`, `WATCH_TOP_N=10`, `TRADE_TOP_N=3` (`MAX_TRADES_DAY=3`).
+
 ---
 
-## Locked decisions
+## Locked decisions (Phase 2 — Aaron 2026-08-25)
 
 | Topic | Decision |
 |-------|----------|
-| Market-cap floor | **$50M** — kills JEM-class (~$3M) while keeping true small/mid momentum names; $100M reserved if paper still floods microcaps. Documented here; constant in Phase 2 code. |
-| Universe filter | Reuse `candidates/universe_filter.py` name/deny rules. **Do not** require Polygon `cs_universe_cache` membership for TWS-sourced names (that membership check is the PMI hole). Phase 2: gate = price + fund/ETF name + mcap + IB tradability; CS-cache is optional enrichment only. |
-| History / analogs | Polygon `ticker_profiler` only. |
-| Lab SIM | Unchanged in Phase 1–2 except docs cross-links. |
-| Agent `MAX_TRADES_DAY` | Remains **3**. |
-| Client IDs | Spike uses a free id (**97**). Reserved: connector `1`, agent `5`, MD probe `98`/`99`. |
+| **TRADE** | `marketCap >= $150M` → entry shortlist; take **top 3** (`TRADE_TOP_N` / `MAX_TRADES_DAY`) |
+| **LEARN** | `$50M <= marketCap < $150M` → score + persist learn file; may appear in **watch 10**; **NO IB orders** |
+| **IGNORE** | `marketCap < $50M` → drop |
+| Funnel size | `SCAN_ROWS_PER_CODE=50` × 3 → `TARGET_UNIVERSE≈100` after dedupe (not spike’s 25) |
+| Watch | `WATCH_TOP_N=10` by score across TRADE+LEARN |
+| Price | **No $5 hard floor** for TRADE/LEARN. Sub-$5 ALLOWED when mcap lane says so. Still apply pool max-affordable for entries. |
+| Safety | Ban leveraged/ETF/funds (`universe_filter` / IB `stockType`); reject RIGHT/preferred junk. **CS-cache membership NOT required** for TWS-sourced names. |
+| Premarket | TWS extended hours first; Polygon snapshot fallback |
+| History | Polygon `ticker_profiler` only |
+| IB rejects | closing-only / Customer Ineligible / No Trading Permission → session skip, Telegram, **not** a fill |
+| 09:40 refill | **OFF** (stub) |
+| Flag | `QALPHA_USE_TWS_SCAN` default **1**; set `0` to revert to Polygon `full_market_scan` |
+| Lab SIM | Polygon `live_forward` unchanged |
+| Client IDs | Agent **5**; scan-only/spike **97**; connector **1** |
 
 ---
 
@@ -85,12 +91,10 @@ This path only changes how the **live agent** builds its morning candidate list 
 
 | Phase | Deliverable | Gate to next |
 |-------|-------------|--------------|
-| **1 (now)** | `DESIGN.md` + `spike_tws_scanners.py` — connect paper 7497, pull scanners, try extended snapshot/hist on a few symbols, report IB errors | Spike PASS + Aaron review |
-| **2** | Module: list → hard gates → score helpers; unit tests; still not default agent path | Aaron approve wiring |
-| **3** | Wire agent morning path behind flag; keep Polygon scan as fallback | Live paper day PASS |
-| **4** | Optional 09:40 refill if Phase 1–2 show clean scanner+MD | Explicit approve |
-
-**Do not** promote to live agent path until Phase 2 approval after spike PASS.
+| **1** | DESIGN + spike — PASS 2026-08-25 | Done |
+| **2 (now)** | `pipeline.py` + agent flag + LEARN files + ineligible skip | Paper morning |
+| **3** | Harden after first live paper day | — |
+| **4** | Optional 09:40 refill | Explicit approve |
 
 ---
 

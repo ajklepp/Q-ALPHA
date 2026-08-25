@@ -119,6 +119,17 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 Every 30m Modal intraday monitor
 ```
 
+### Agent morning list (Phase 2 — TWS pipeline)
+
+- Default: `QALPHA_USE_TWS_SCAN=1` → TWS scanners (**~50 rows each**, union ≈100) → mcap lanes → score full shortlist → **watch top 10** / **trade top 3**.
+  - **TRADE** mcap ≥ $150M (orders; no $5 floor; pool affordability applies)
+  - **LEARN** $50–150M → learn file + may appear on watch 10 (**never bracketed**)
+  - **IGNORE** &lt; $50M
+- Revert: `$env:QALPHA_USE_TWS_SCAN='0'` → Polygon `full_market_scan`
+- Dry scan (no orders): `.\venv\Scripts\python.exe candidates/tws_scan_pipeline/scan_only.py`
+- Design: `candidates/tws_scan_pipeline/DESIGN.md`
+- Lab SIM Polygon path unchanged (parallel book).
+
 ---
 
 ## DASHBOARD TABS

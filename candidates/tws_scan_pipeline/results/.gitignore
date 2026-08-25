@@ -1,0 +1,3 @@
+# Runtime scan / learn dumps — regenerate daily; do not commit.
+*
+!.gitignore

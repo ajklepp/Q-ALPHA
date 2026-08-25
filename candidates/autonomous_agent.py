@@ -87,6 +87,7 @@ from position_sizer import (
 from state_paths import CANDIDATES_DIR as _CANDIDATES_DIR, is_trading_day, state_path
 from universe_filter import (
     EXCLUDE_SYMBOLS,
+    candidate_passes_safety,
     is_leveraged_or_fund,
     passes_universe_safety_gate,
 )
@@ -113,12 +114,14 @@ EXPECTED_PM_VOL_PCT = 0.10
 IBKR_BATCH_SIZE = 80
 
 # -- Candidate source -------------------------------------------------------
-# When True, the day's watchlist comes from full_market_scan (Polygon, the
-# ENTIRE US market, name-aware ban filter, N-day RVOL) instead of the 300-name
-# static universe scanned over TWS. The old TWS scan_premarket() is kept as an
-# instant fallback: set QALPHA_USE_FULL_MARKET_SCAN=0 to revert. The live
-# 9:30+ entry logic (watch_and_enter) is IDENTICAL either way -- only the
-# SOURCE of the watchlist changes. full_market_scan is read-only (no orders).
+# Phase 2 (Aaron): TWS scanner shortlist is the default paper morning path.
+#   QALPHA_USE_TWS_SCAN=1 (default) → TWS pipeline: watch 10 / trade 3
+#   QALPHA_USE_TWS_SCAN=0           → revert to Polygon full_market_scan / TWS300
+# When TWS scan is OFF, USE_FULL_MARKET_SCAN still selects Polygon vs 300-name.
+USE_TWS_SCAN = os.environ.get("QALPHA_USE_TWS_SCAN", "1") != "0"
+
+# When True (and TWS scan OFF), watchlist from full_market_scan (Polygon).
+# Set QALPHA_USE_FULL_MARKET_SCAN=0 to use the legacy TWS 300-name scan.
 USE_FULL_MARKET_SCAN = os.environ.get("QALPHA_USE_FULL_MARKET_SCAN", "1") != "0"
 
 # -- Execution mode ---------------------------------------------------------
@@ -128,6 +131,33 @@ USE_FULL_MARKET_SCAN = os.environ.get("QALPHA_USE_FULL_MARKET_SCAN", "1") != "0"
 # path can place orders after a human YES. Risk controls in watch_and_enter
 # (MAX_TRADES_DAY, universe safety gate, single-bracket 2R) are unchanged.
 AUTO_APPROVE = True
+
+# Session-level skip: IB rejected as closing-only / customer ineligible / etc.
+_SESSION_INELIGIBLE: set[str] = set()
+
+_INELIGIBLE_MARKERS = (
+    "closing only",
+    "closing-only",
+    "customer ineligible",
+    "no trading permission",
+    "not eligible to trade",
+)
+
+
+def _is_ineligible_reject_text(text: str) -> bool:
+    """True when IB reject text means skip ticker for the session (no retry)."""
+    t = (text or "").lower()
+    if not t:
+        return False
+    if "closing only" in t or "closing-only" in t:
+        return True
+    if "customer ineligible" in t:
+        return True
+    if "no trading permission" in t:
+        return True
+    if "not eligible" in t and "trade" in t:
+        return True
+    return False
 
 # ── IBKR message-throttle budget (scan_premarket) ───────────────────────────
 # ib_insync 0.9.86 self-throttles OUTBOUND API messages: Client.MaxRequests
@@ -546,6 +576,9 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
     """
     Place DAY bracket order for intraday entry.
     IBKRConnector uses MOC during market hours — autonomous agent needs immediate DAY fill.
+
+    On closing-only / customer-ineligible / no-permission rejects: return
+    status=REJECTED_INELIGIBLE (caller must NOT book a filled trade or retry).
     """
     ticker = order_plan["ticker"]
     shares = int(order_plan["shares"])
@@ -555,45 +588,58 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
     if shares <= 0:
         raise ValueError(f"Invalid share count for {ticker}: {shares}")
 
-    contract = Stock(ticker, "SMART", "USD")
-    ib.qualifyContracts(contract)
+    err_buf: list[str] = []
 
-    parent = MarketOrder(
-        action="BUY",
-        totalQuantity=shares,
-        tif="DAY",
-        transmit=False,
-    )
-    parent_trade = ib.placeOrder(contract, parent)
-    parent_id = parent_trade.order.orderId
+    def _on_err(reqId, errorCode, errorString, contract):
+        line = f"{errorCode}: {errorString}"
+        err_buf.append(line)
 
-    stop_loss = StopOrder(
-        action="SELL",
-        totalQuantity=shares,
-        stopPrice=round(stop, 2),
-        parentId=parent_id,
-        tif="GTC",
-        transmit=False,
-    )
-    stop_loss_trade = ib.placeOrder(contract, stop_loss)
+    ib.errorEvent += _on_err
+    try:
+        contract = Stock(ticker, "SMART", "USD")
+        ib.qualifyContracts(contract)
 
-    take_profit = LimitOrder(
-        action="SELL",
-        totalQuantity=shares,
-        lmtPrice=round(target_2r, 2),
-        parentId=parent_id,
-        tif="GTC",
-        transmit=True,
-    )
-    take_profit_trade = ib.placeOrder(contract, take_profit)
-    ib.sleep(2)  # let TWS acknowledge all three legs
+        parent = MarketOrder(
+            action="BUY",
+            totalQuantity=shares,
+            tif="DAY",
+            transmit=False,
+        )
+        parent_trade = ib.placeOrder(contract, parent)
+        parent_id = parent_trade.order.orderId
 
-    # --- Verbose bracket-event logging (first real IBKR bracket test) -------
+        stop_loss = StopOrder(
+            action="SELL",
+            totalQuantity=shares,
+            stopPrice=round(stop, 2),
+            parentId=parent_id,
+            tif="GTC",
+            transmit=False,
+        )
+        stop_loss_trade = ib.placeOrder(contract, stop_loss)
+
+        take_profit = LimitOrder(
+            action="SELL",
+            totalQuantity=shares,
+            lmtPrice=round(target_2r, 2),
+            parentId=parent_id,
+            tif="GTC",
+            transmit=True,
+        )
+        take_profit_trade = ib.placeOrder(contract, take_profit)
+        ib.sleep(2)  # let TWS acknowledge all three legs
+    finally:
+        try:
+            ib.errorEvent -= _on_err
+        except Exception:
+            pass
+
     def _ostat(tr):
         try:
             return tr.orderStatus.status
         except Exception:
             return "UNKNOWN"
+
     parent_status = _ostat(parent_trade)
     stop_status = _ostat(stop_loss_trade)
     target_status = _ostat(take_profit_trade)
@@ -603,12 +649,28 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
         f"shares={shares}"
     )
 
-    # --- Option B: ALERT-ONLY protective-stop verification ------------------
-    # If the entry fills but the protective STOP is not working, a live
-    # position would be unprotected. For this first live test we do NOT
-    # auto-flatten (untested order code on untested bracket code); we send a
-    # LOUD Telegram alert so it can be handled manually in TWS. Auto-flatten
-    # is a follow-up once brackets are proven.
+    blob = " | ".join(err_buf)
+    try:
+        blob += " | " + str(getattr(parent_trade, "log", "") or "")
+    except Exception:
+        pass
+    if _is_ineligible_reject_text(blob):
+        reason = blob or f"parent_status={parent_status}"
+        print(f"  [BRACKET] {ticker} REJECTED_INELIGIBLE: {reason[:200]}")
+        return {
+            "ticker": ticker,
+            "parent_id": parent_id,
+            "shares": shares,
+            "stop": stop,
+            "target": target_2r,
+            "status": "REJECTED_INELIGIBLE",
+            "reject_reason": reason[:500],
+            "parent_status": parent_status,
+            "stop_status": stop_status,
+            "target_status": target_status,
+            "paper": True,
+        }
+
     healthy = {"PreSubmitted", "Submitted", "Filled"}
     if parent_status == "Filled" and stop_status not in healthy:
         alert = (
@@ -732,7 +794,7 @@ def subscribe_realtime_bars(ib: IB, candidates: list[dict]) -> dict:
     print(f"\nSubscribing to real-time bars for {len(candidates)} tickers...")
     rt_bars: dict[str, tuple[object, Stock]] = {}
     for c in candidates:
-        if not passes_universe_safety_gate(c["ticker"]):
+        if not candidate_passes_safety(c):
             continue
         try:
             contract = Stock(c["ticker"], "SMART", "USD")
@@ -782,7 +844,7 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
 
     gated: list[dict] = []
     for c in candidates:
-        if passes_universe_safety_gate(c["ticker"]):
+        if candidate_passes_safety(c):
             gated.append(c)
         else:
             skipped.append({
@@ -889,6 +951,9 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                 continue
             if ticker in open_tickers:
                 decided.add(ticker)
+                continue
+
+            if ticker in _SESSION_INELIGIBLE:
                 continue
 
             bars_obj, _contract = rt_bars.get(ticker, (None, None))
@@ -1054,6 +1119,30 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
 
                 try:
                     result = _place_intraday_bracket(ib, order_plan)
+                    if result.get("status") == "REJECTED_INELIGIBLE":
+                        reason = (
+                            result.get("reject_reason")
+                            or "IB closing-only / ineligible / no permission"
+                        )
+                        _SESSION_INELIGIBLE.add(ticker)
+                        print(f"  → SESSION SKIP {ticker}: {reason[:160]}")
+                        skipped.append({
+                            "ticker": ticker,
+                            "reason": f"IB ineligible: {reason[:200]}",
+                            "price": current_price,
+                        })
+                        decided.add(ticker)
+                        track.update(
+                            decision="skipped",
+                            decision_time=now_et.isoformat(),
+                            decision_reason=f"IB ineligible (no retry): {reason[:200]}",
+                        )
+                        send_telegram(
+                            f"⏭ {ticker} SESSION SKIP — IB ineligible\n"
+                            f"{reason[:240]}\n(no retry this session; not a fill)"
+                        )
+                        continue
+
                     position_value = shares * current_price
                     pool.open_trade(position_value)
 
@@ -1407,7 +1496,53 @@ def main() -> None:
         print(f"\n{'─' * 40}")
         print("PHASE 1: PRE-MARKET SCAN")
         print(f"{'─' * 40}")
-        if USE_FULL_MARKET_SCAN:
+        entry_candidates: list[dict] | None = None
+        if USE_TWS_SCAN:
+            print(
+                "Candidate source: TWS scan pipeline "
+                "(QALPHA_USE_TWS_SCAN=1; set 0 to revert)"
+            )
+            try:
+                from tws_scan_pipeline.pipeline import (
+                    TRADE_TOP_N,
+                    WATCH_TOP_N,
+                    run_morning_pipeline,
+                )
+                pipe = run_morning_pipeline(
+                    ib, watch_n=WATCH_TOP_N, trade_n=min(MAX_TRADES_DAY, TRADE_TOP_N),
+                )
+                watch_list = pipe.get("watch") or []
+                trade_list = pipe.get("trade") or []
+                n_learn = len(pipe.get("learn") or [])
+                # Telegram / dashboard / profiles use watch (may include LEARN).
+                candidates = watch_list
+                # Bracket path uses TRADE-lane top-N only (never LEARN).
+                entry_candidates = trade_list
+                print(
+                    f"  TWS pipeline → watch={len(watch_list)} "
+                    f"trade={len(trade_list)} LEARN_all={n_learn} "
+                    f"(LEARN never bracketed)"
+                )
+            except Exception as exc:
+                msg = (
+                    f"\u26a0\ufe0f Q-ALPHA: TWS scan pipeline failed ({exc}); "
+                    f"falling back to full_market_scan"
+                )
+                print(msg)
+                send_telegram(msg)
+                try:
+                    from full_market_scan import scan_for_agent
+                    candidates = scan_for_agent(TOP_N_CANDIDATES)
+                except Exception as exc2:
+                    msg2 = (
+                        f"\u26a0\ufe0f Q-ALPHA: full_market_scan also failed "
+                        f"({exc2}); falling back to TWS 300-name scan"
+                    )
+                    print(msg2)
+                    send_telegram(msg2)
+                    candidates = scan_premarket(ib)
+                entry_candidates = candidates
+        elif USE_FULL_MARKET_SCAN:
             print("Candidate source: full_market_scan (Polygon full US market)")
             try:
                 from full_market_scan import scan_for_agent
@@ -1420,9 +1555,19 @@ def main() -> None:
                 print(msg)
                 send_telegram(msg)
                 candidates = scan_premarket(ib)
+            entry_candidates = candidates
         else:
             print("Candidate source: TWS 300-name scan_premarket")
             candidates = scan_premarket(ib)
+            entry_candidates = candidates
+
+        if entry_candidates is None:
+            entry_candidates = candidates
+        # Belt-and-suspenders: never bracket LEARN-lane names.
+        entry_candidates = [
+            c for c in entry_candidates
+            if str(c.get("lane") or "TRADE").upper() != "LEARN"
+        ]
 
         if not candidates:
             send_telegram(f"💤 Q-ALPHA: No gap candidates today.\nRegime: {regime}")
@@ -1464,10 +1609,12 @@ def main() -> None:
             "Skipping pending_approvals.json; proceeding to watch/enter."
         )
 
-        # Subscribe BEFORE the pre-open wait, so the 9:30:00 bar is already in
-        # the list when watch_and_enter selects the opening candle. ib.sleep()
-        # below runs the event loop, which is what lets those bars accumulate.
-        rt_bars = subscribe_realtime_bars(ib, candidates)
+        # Subscribe / enter TRADE shortlist only (watch may include LEARN).
+        print(
+            f"  Entry shortlist: {len(entry_candidates)} "
+            f"(max {MAX_TRADES_DAY}; LEARN excluded)"
+        )
+        rt_bars = subscribe_realtime_bars(ib, entry_candidates)
 
         while datetime.now(ET).time() < ENTRY_OPEN:
             remaining = session_open_dt() - datetime.now(ET)
@@ -1480,7 +1627,7 @@ def main() -> None:
         print(f"\n{'─' * 40}")
         print("PHASE 3: MARKET OPEN WATCHER")
         print(f"{'─' * 40}")
-        result = watch_and_enter(ib, candidates, rt_bars)
+        result = watch_and_enter(ib, entry_candidates, rt_bars)
 
         print(f"\n{'─' * 40}")
         print("PHASE 4: SESSION RECAP")
