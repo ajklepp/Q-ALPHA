@@ -108,4 +108,14 @@ Compare vs EXP-0017 Sharpe **1.87** and EXP-0018 Sharpe **0.86**. Negative Lab M
 | `experiment20.py` | Modal scaffold |
 | `results.md` | Stub — NOT RUN |
 
-No Modal until you approve the run.
+No Modal full pilot until plumbing smoke passes and you approve the run.
+
+---
+
+## 9. Plumbing incident (2026-08-24) — NOT an economic FAIL
+
+Invalid ablation: **0/523 eligible**, attach **~0s**.
+
+**Root cause:** `_import_ticker_profiler` evaluated `Path(__file__).parents[2]` while Modal mounts `experiment20.py` as `/root/experiment20.py` (only 2 parents) → **`IndexError`** on every row, swallowed as `confidence=ERROR`. Secondary hardening: install **`tzdata`** for `ZoneInfo` on debian_slim; refuse silent 0s attach via plumbing guard; log cache hits/misses + first errors.
+
+**Smoke (passed):** local + Modal `--smoke` → MARA/RIOT/SMCI **3/3 HIGH eligible** (~7–14s each cold).

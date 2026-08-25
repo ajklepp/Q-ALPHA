@@ -18,6 +18,7 @@ image = (
     .pip_install([
         "pandas", "pandas-ta",
         "numpy", "requests", "scipy",
+        "tzdata",  # ZoneInfo America/New_York on debian_slim
     ])
     # Mount single profiler module — no forked copy of analog/MAE logic
     .add_local_file(
@@ -732,16 +733,33 @@ def get_regime(current_date, price_pivot):
 
 
 def _import_ticker_profiler():
-    """Import mounted candidates/ticker_profiler.py (Modal /root or repo)."""
+    """Import mounted candidates/ticker_profiler.py (Modal /root or repo).
+
+    Modal often mounts experiment20.py as /root/experiment20.py (only 2 path
+    parents). Never index parents[2] blindly — that raised IndexError on the
+    invalid 0/523 run and was swallowed as confidence=ERROR in ~0s.
+    """
     import sys
     from pathlib import Path
 
-    for root in ("/root", str(Path(__file__).resolve().parents[2] / "candidates")):
-        if root not in sys.path:
+    roots: list[str] = ["/root"]
+    try:
+        here = Path(__file__).resolve()
+        for p in (here.parent, *here.parents):
+            if (p / "ticker_profiler.py").is_file():
+                roots.append(str(p))
+                break
+            if (p / "candidates" / "ticker_profiler.py").is_file():
+                roots.append(str(p / "candidates"))
+                break
+    except Exception:
+        pass
+    for root in roots:
+        if root and root not in sys.path:
             sys.path.insert(0, root)
-    # Prefer /root mount on Modal
-    if "/root" not in sys.path:
-        sys.path.insert(0, "/root")
+    # Prove ZoneInfo works (fails on debian_slim without tzdata)
+    from zoneinfo import ZoneInfo
+    ZoneInfo("America/New_York")
     import ticker_profiler as tp
     return tp
 
@@ -754,7 +772,9 @@ def profile_cache_path(ticker, as_of_str, cache_dir=PROFILE_CACHE_DIR):
     return Path(cache_dir) / safe
 
 
-def load_or_build_profile(ticker, as_of_date, api_key, cache_dir=PROFILE_CACHE_DIR):
+def load_or_build_profile(
+    ticker, as_of_date, api_key, cache_dir=PROFILE_CACHE_DIR, stats=None,
+):
     """
     Build ticker profile as_of signal day with disk cache.
 
@@ -766,13 +786,34 @@ def load_or_build_profile(ticker, as_of_date, api_key, cache_dir=PROFILE_CACHE_D
 
     tp = _import_ticker_profiler()
     as_of_str = str(as_of_date)[:10]
+    if hasattr(as_of_date, "isoformat") and not isinstance(as_of_date, str):
+        try:
+            as_of_str = as_of_date.isoformat()[:10]
+        except Exception:
+            as_of_str = str(as_of_date)[:10]
+
     path = profile_cache_path(ticker, as_of_str, cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
+    if path.exists() and path.stat().st_size > 20:
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict) and cached.get("ticker"):
+                if stats is not None:
+                    stats["cache_hits"] = stats.get("cache_hits", 0) + 1
+                return cached
+            if stats is not None:
+                stats["cache_bad"] = stats.get("cache_bad", 0) + 1
+        except Exception as exc:
+            if stats is not None:
+                stats["cache_bad"] = stats.get("cache_bad", 0) + 1
+                stats.setdefault("cache_bad_errors", []).append(str(exc)[:80])
+
+    if stats is not None:
+        stats["cache_misses"] = stats.get("cache_misses", 0) + 1
+
+    if not api_key:
+        raise RuntimeError("POLYGON_API_KEY empty — cannot build_ticker_profile")
+
     profile = tp.build_ticker_profile(
         ticker, as_of_date=as_of_str, api_key=api_key,
     )
@@ -784,8 +825,9 @@ def load_or_build_profile(ticker, as_of_date, api_key, cache_dir=PROFILE_CACHE_D
         slim["analog_finder"] = af
     try:
         path.write_text(json.dumps(slim, default=str), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        if stats is not None:
+            stats.setdefault("cache_write_errors", []).append(str(exc)[:80])
     return slim
 
 
@@ -804,9 +846,16 @@ def extract_rank_fields(profile):
             "analog_count": 0,
             "mfe_p50": None,
             "mae_safe": None,
+            "prof_error": None,
+            "finder_analog_count": 0,
         }
     conf = str(profile.get("confidence") or "INSUFFICIENT")
     meaningful = bool(profile.get("stats_meaningful", False))
+    finder_n = int(
+        profile.get("n_analogs_finder")
+        or profile.get("analog_count")
+        or 0
+    )
     if conf == "INSUFFICIENT" or not meaningful:
         return {
             "prof_eligible": False,
@@ -815,6 +864,10 @@ def extract_rank_fields(profile):
             "analog_count": int(profile.get("analog_count") or 0),
             "mfe_p50": None,
             "mae_safe": None,
+            "prof_error": None,
+            "finder_analog_count": finder_n,
+            "lookback_days": profile.get("actual_lookback_days"),
+            "history_flag": profile.get("history_flag"),
         }
     bracket = profile.get("bracket") or {}
     outcomes = profile.get("outcomes") or {}
@@ -831,23 +884,66 @@ def extract_rank_fields(profile):
         "analog_count": int(profile.get("analog_count") or 0),
         "mfe_p50": mfe.get("p50"),
         "mae_safe": bracket.get("safe_max_stop_pct"),
+        "prof_error": None,
+        "finder_analog_count": finder_n,
     }
 
 
 def attach_profiler_ranks(df, api_key, cache_dir=PROFILE_CACHE_DIR, progress_every=25):
-    """Attach profiler R:R columns to candidate rows (cached per ticker+as_of)."""
+    """Attach profiler R:R columns; log hits/misses/errors; refuse silent 0s death."""
     import time
+    from collections import Counter
 
     rows = []
+    stats = {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_bad": 0,
+        "errors": [],
+        "as_of_samples": [],
+    }
     t0 = time.time()
     n = len(df)
+
+    # One-time import probe (fail loud before the loop)
+    try:
+        tp = _import_ticker_profiler()
+        print(
+            f"  profiler import OK | module={getattr(tp, '__file__', '?')} | "
+            f"api_key_len={len(api_key or '')}"
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"ticker_profiler import/ZoneInfo failed — cannot attach ranks: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
     for i, (idx, row) in enumerate(df.iterrows()):
         ticker = str(row.get("ticker") or "").upper()
-        as_of = idx.date() if hasattr(idx, "date") else str(idx)[:10]
+        # DatetimeIndex → date; defend MultiIndex / Timestamp / str
+        if isinstance(idx, tuple):
+            idx0 = idx[0]
+        else:
+            idx0 = idx
+        if hasattr(idx0, "date") and callable(idx0.date):
+            as_of = idx0.date()
+        else:
+            as_of = str(idx0)[:10]
+        if len(stats["as_of_samples"]) < 5:
+            stats["as_of_samples"].append(
+                f"{ticker}@{as_of} (idx_type={type(idx0).__name__})"
+            )
         try:
-            prof = load_or_build_profile(ticker, as_of, api_key, cache_dir)
+            if not ticker:
+                raise ValueError("empty ticker on candidate row")
+            prof = load_or_build_profile(
+                ticker, as_of, api_key, cache_dir, stats=stats,
+            )
             fields = extract_rank_fields(prof)
         except Exception as exc:
+            err = f"{ticker}@{as_of}: {type(exc).__name__}: {exc}"
+            if len(stats["errors"]) < 10:
+                stats["errors"].append(err[:200])
             fields = {
                 "prof_eligible": False,
                 "reward_risk": -1.0,
@@ -855,14 +951,57 @@ def attach_profiler_ranks(df, api_key, cache_dir=PROFILE_CACHE_DIR, progress_eve
                 "analog_count": 0,
                 "mfe_p50": None,
                 "mae_safe": None,
-                "prof_error": str(exc)[:120],
+                "prof_error": str(exc)[:200],
+                "finder_analog_count": 0,
             }
         rows.append(fields)
         if (i + 1) % progress_every == 0:
-            print(f"  profiles {i + 1}/{n} [{time.time() - t0:.0f}s]")
+            print(
+                f"  profiles {i + 1}/{n} [{time.time() - t0:.0f}s] "
+                f"hits={stats['cache_hits']} misses={stats['cache_misses']} "
+                f"errs={len(stats['errors'])}"
+            )
+
+    elapsed = time.time() - t0
     out = df.copy()
-    for key in ("prof_eligible", "reward_risk", "confidence", "analog_count", "mfe_p50", "mae_safe"):
+    for key in (
+        "prof_eligible", "reward_risk", "confidence", "analog_count",
+        "mfe_p50", "mae_safe", "prof_error", "finder_analog_count",
+    ):
         out[key] = [r.get(key) for r in rows]
+
+    conf_counts = Counter(out["confidence"].tolist())
+    n_elig = int(out["prof_eligible"].sum())
+    n_err = int((out["confidence"] == "ERROR").sum())
+    print(f"  as_of samples: {stats['as_of_samples']}")
+    print(f"  confidence counts: {dict(conf_counts)}")
+    print(
+        f"  cache hits={stats['cache_hits']} misses={stats['cache_misses']} "
+        f"bad={stats['cache_bad']} | eligible={n_elig}/{n} | "
+        f"errors={n_err} | elapsed={elapsed:.1f}s"
+    )
+    if stats["errors"]:
+        print("  first prof_errors:")
+        for e in stats["errors"]:
+            print(f"    - {e}")
+
+    # Plumbing guard: cold attach cannot finish in ~0s with 0 eligible
+    # unless we truly saw only INSUFFICIENT with finder stats (slow path).
+    if n >= 10 and n_elig == 0 and elapsed < 5.0:
+        raise RuntimeError(
+            f"PLUMBING GUARD: attach finished in {elapsed:.1f}s with 0/{n} "
+            f"eligible (hits={stats['cache_hits']} misses={stats['cache_misses']} "
+            f"errs={n_err} conf={dict(conf_counts)}). "
+            f"First errors: {stats['errors'][:3]}. "
+            f"Refusing silent invalid ablation — fix import/API/cache first."
+        )
+    if n_elig == 0 and n_err == 0:
+        # Truly all INSUFFICIENT — log finder analog distribution
+        finder = out["finder_analog_count"]
+        print(
+            f"  all INSUFFICIENT path: finder_analog_count "
+            f"min={finder.min()} median={finder.median()} max={finder.max()}"
+        )
     return out
 
 
@@ -1440,8 +1579,78 @@ def run_exp020():
     }
 
 
+@app.function(
+    image=image,
+    timeout=600,
+    memory=2048,
+    secrets=[polygon_secret],
+    volumes={PROFILE_CACHE_DIR: profile_volume},
+)
+def smoke_profiler_three():
+    """Tiny Modal smoke: import + 3 build_ticker_profile calls. Not an economic test."""
+    import os
+    import time
+
+    api_key = os.environ.get("POLYGON_API_KEY", "")
+    print(f"api_key present={bool(api_key)} len={len(api_key)}")
+    tp = _import_ticker_profiler()
+    print(f"import OK file={tp.__file__}")
+
+    cases = [
+        ("MARA", "2024-06-03"),
+        ("RIOT", "2024-03-15"),
+        ("SMCI", "2024-01-19"),
+    ]
+    results = []
+    eligible = 0
+    for ticker, as_of in cases:
+        t0 = time.time()
+        try:
+            prof = load_or_build_profile(
+                ticker, as_of, api_key, PROFILE_CACHE_DIR, stats={},
+            )
+            fields = extract_rank_fields(prof)
+            ok = bool(fields["prof_eligible"])
+            if ok:
+                eligible += 1
+            row = {
+                "ticker": ticker,
+                "as_of": as_of,
+                "confidence": fields["confidence"],
+                "analog_count": fields["analog_count"],
+                "eligible": ok,
+                "reward_risk": fields["reward_risk"],
+                "sec": round(time.time() - t0, 1),
+            }
+            print(row)
+            results.append(row)
+        except Exception as exc:
+            row = {
+                "ticker": ticker,
+                "as_of": as_of,
+                "error": f"{type(exc).__name__}: {exc}",
+                "sec": round(time.time() - t0, 1),
+            }
+            print(row)
+            results.append(row)
+    try:
+        profile_volume.commit()
+    except Exception as exc:
+        print(f"volume commit warn: {exc}")
+    status = "PASS" if eligible >= 1 else "FAIL"
+    print(f"SMOKE {status}: eligible {eligible}/{len(cases)}")
+    return {"status": status, "eligible": eligible, "n": len(cases), "rows": results}
+
+
 @app.local_entrypoint()
-def main():
+def main(smoke: bool = False):
+    """Default: full pilot run. Pass --smoke for 3-ticker Modal plumbing check."""
+    if smoke:
+        result = smoke_profiler_three.remote()
+        print("\nSmoke result:")
+        for k, v in (result or {}).items():
+            print(f"  {k}: {v}")
+        return
     result = run_exp020.remote()
     print("\nFinal result:")
     for k, v in (result or {}).items():
