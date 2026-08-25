@@ -55,8 +55,14 @@ Windows Task Scheduler task **`QAlpha Strategy Lab`**:
 - Action: `powershell.exe … -File "…\strategy_lab\start_lab_scheduled.ps1"`
 - Launcher: **`venv\Scripts\python.exe strategy_lab\live_forward.py`** (ENTRY only — opens positions, no phantom same-morning settle)
 
-**Settle task** (register similarly): **`QAlpha Strategy Lab Settle`** · **Mon–Fri 16:40 ET** ·
+**Settle task** (register similarly): **`QAlpha Strategy Lab Settle`** · **Mon–Fri ~16:20 ET** ·
 `start_lab_settle_scheduled.ps1` → `live_forward.py --settle`  
+Optional backup: **`QAlpha Strategy Lab Settle Backup`** · **16:40 ET** (same script).
+
+**Intraday marks:** **`QAlpha Strategy Lab Mark`** · **Mon–Fri every 30m 10:00–16:00 ET** ·
+`start_lab_mark_scheduled.ps1` → `live_forward.py --mark` (quiet; force-upserts Supabase).
+
+Full cadence + schtasks examples: **`strategy_lab/DASHBOARD_FRESHNESS.md`**.  
 (Morning entry also auto-settles any overnight opens first.)
 
 **Unattended needs:** PC on, awake, **logged in as ajkle**, network, `.env` present.
@@ -114,9 +120,11 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 9:29     Premarket Telegram (agent)
 9:30–11:00 Entries (agent)
 9:35     Strategy Lab live_forward (parallel SIM — no IBKR)
+10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase)
 11:00    Agent session recap Telegram
-~4:15    Modal EOD monitor
-Every 30m Modal intraday monitor
+~4:15    Modal EOD monitor (agent)
+~4:20    Strategy Lab --settle (primary EOD; optional 16:40 backup)
+Every 30m Modal intraday monitor (agent)
 ```
 
 ### Agent morning list (Phase 2 — TWS pipeline)

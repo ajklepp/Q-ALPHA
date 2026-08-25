@@ -21,9 +21,9 @@ FLOW (current trading day, or replay of a past date via run_day):
      (scan order) → profile → fetch premarket bars for the day
   3. Wait for 09:30 1-min bar (LOAD-BEARING: 15-min delayed feed) → ENTRY ONLY
      (store open_positions; do not run strategies / book P&L)
-  4. Settle pass (--settle / 16:40 ET / next-morning auto): refresh bars,
-     re-run A/B, write residual_tranche_ids on still-open, book P&L only
-     when open → closed
+  4. Intraday --mark (Task ~30m 10:00–16:00 ET) + EOD --settle (~16:20 ET,
+     optional 16:40 backup): refresh bars, update marks / residual_tranche_ids,
+     book closes, force-upsert Supabase strategy_lab_state
   5. Persist continuously to results/forward_state.json + EOD summary
 
 Feed: Polygon/Massive Stocks Developer — 15-min DELAYED, unlimited REST.
@@ -960,11 +960,14 @@ def run_settle(
     *,
     close_at_data_end: bool = False,
     refresh_data: bool = True,
+    quiet: bool = False,
+    label: str = "settle",
 ) -> dict[str, Any]:
     """
-    Settle pass: refresh bars and re-run strategies on open_positions.
+    Settle/mark pass: refresh bars and re-run strategies on open_positions.
     LIVE default: close_at_data_end=False (no phantom time_cap at last print).
 
+    quiet=True (--mark): skip routine Telegram; still alert if positions close.
     Weekend/holiday: ET is_trading_day guard (same calendar as run_day entry).
     """
     from forward_book import settle_open_positions
@@ -973,14 +976,14 @@ def run_settle(
     today_et = datetime.now(ET).date()
     if not is_trading_day(today_et):
         msg = (
-            f"market closed ({today_et.isoformat()}) — nothing to settle"
+            f"market closed ({today_et.isoformat()}) — nothing to {label}"
         )
-        print(f"[live_forward] settle: {msg}")
-        # Always live-labeled Telegram (no [DRY-RUN]) — this is the scheduled settle path.
-        lab_telegram(
-            "🧪 Strategy Lab Settle — market closed, nothing to settle",
-            dry_run=False,
-        )
+        print(f"[live_forward] {label}: {msg}")
+        if not quiet:
+            lab_telegram(
+                f"🧪 Strategy Lab {label.title()} — market closed, nothing to do",
+                dry_run=False,
+            )
         return {
             "status": "market_closed",
             "flag_date": today_et.isoformat(),
@@ -989,7 +992,7 @@ def run_settle(
 
     state = load_state_file()
     if not state:
-        print("[live_forward] settle: no forward_state.json — nothing to do")
+        print(f"[live_forward] {label}: no forward_state.json — nothing to do")
         return {"status": "no_state"}
 
     mode = str(state.get("mode") or MODE_LIVE).lower()
@@ -997,9 +1000,9 @@ def run_settle(
     locked = False
     try:
         if mode == MODE_LIVE:
-            acquire_live_lock("settle")
+            acquire_live_lock(label)
             locked = True
-        set_phase(state, "settle", "settling open positions")
+        set_phase(state, label, f"{label} open positions")
         result = settle_open_positions(
             state,
             close_at_data_end=close_at_data_end,
@@ -1008,13 +1011,13 @@ def run_settle(
             refresh_r2=refresh_forward_r2,
             allow_finalize_mfe=(mode != MODE_REPLAY),
         )
-        state["phase"] = "settle_done"
+        state["phase"] = f"{label}_done"
         n_open = int(result.get("open_positions") or 0)
         if n_open:
             state["status"] = "open_positions"
         elif str(state.get("status")) in ("running", "open_positions"):
             state["status"] = "complete"
-        state["last_settle"] = {
+        stamp = {
             "at": _now_iso(),
             **{
                 k: result[k]
@@ -1025,17 +1028,28 @@ def run_settle(
                 if k in result
             },
         }
+        state["last_settle"] = stamp
+        if quiet or label == "mark":
+            state["last_mark"] = stamp
+        # Always force-push so Cloud Strategy Lab updated_at advances.
         save_state(state, force_sync=(mode == MODE_LIVE))
         a = float(result.get("pool_A_usd") or 0)
         b = float(result.get("pool_B_usd") or 0)
-        lab_telegram(
-            f"🧪 SETTLE: Pool A ${a:.2f}, Pool B ${b:.2f}, "
-            f"closed A={result.get('closed_A')} B={result.get('closed_B')}, "
+        closed_a = int(result.get("closed_A") or 0)
+        closed_b = int(result.get("closed_B") or 0)
+        msg = (
+            f"🧪 {label.upper()}: Pool A ${a:.2f}, Pool B ${b:.2f}, "
+            f"closed A={closed_a} B={closed_b}, "
             f"still open={n_open}. "
-            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
-            dry_run=dry,
+            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}."
         )
-        print(f"[live_forward] settle done: {result}")
+        if quiet:
+            # Intraday marks: only Telegram when something actually closed.
+            if closed_a or closed_b:
+                lab_telegram(msg, dry_run=dry)
+        else:
+            lab_telegram(msg, dry_run=dry)
+        print(f"[live_forward] {label} done: {result}")
         return {"status": "ok", **result}
     finally:
         if locked:
@@ -1055,7 +1069,7 @@ def run_day(
     """
     Scan → profile → premarket → ENTRY (open positions only).
 
-    LIVE: does not settle same morning (use --settle / 16:40 task). Auto-runs
+    LIVE: does not settle same morning (use --mark / --settle tasks). Auto-runs
     settle first for any overnight opens. REPLAY: entry then settle inline
     (close_at_data_end=True) for regression parity.
     """
@@ -1378,7 +1392,12 @@ def main() -> int:
     parser.add_argument(
         "--settle",
         action="store_true",
-        help="Settle open positions (refresh bars, re-run strategies)",
+        help="EOD/overnight settle (refresh bars, re-run strategies, Telegram)",
+    )
+    parser.add_argument(
+        "--mark",
+        action="store_true",
+        help="Intraday mark pass (same engine as settle; quiet Telegram; force sync)",
     )
     parser.add_argument(
         "--force-rerun",
@@ -1391,8 +1410,10 @@ def main() -> int:
     )
 
     try:
-        if args.settle:
-            run_settle(close_at_data_end=False, refresh_data=True)
+        if args.mark:
+            run_settle(close_at_data_end=False, refresh_data=True, quiet=True, label="mark")
+        elif args.settle:
+            run_settle(close_at_data_end=False, refresh_data=True, quiet=False, label="settle")
         elif args.replay:
             run_day(args.replay, mode=MODE_REPLAY)
         elif args.date:

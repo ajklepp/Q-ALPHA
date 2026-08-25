@@ -27,8 +27,9 @@
 # MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles,
 # Strategy Lab, and Glossary (not pages/ sidebar routes). Profiler reads
 # precomputed profiles/*.json; "Refresh profile" is on-demand only — never on
-# load/autorefresh. Strategy Lab reads strategy_lab/results/forward_state.json
-# (SIM paper only). Glossary tab renders repo-root GLOSSARY.md.
+# load/autorefresh. Strategy Lab prefers Supabase strategy_lab_state (anon);
+# local fallback is strategy_lab/results/forward_state.json (SIM paper only).
+# Cadence: strategy_lab/DASHBOARD_FRESHNESS.md (marks ~30m; settle ~16:20 ET).
 # =============================================================================
 from __future__ import annotations
 
@@ -82,7 +83,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-st_autorefresh(interval=5 * 60 * 1000, key="main_refresh")
+# Autorefresh so Live Status + Strategy Lab pick up Supabase marks without
+# manual rerun / redeploy. 90s sits in the 60–120s band; Lab marks push ~30m.
+st_autorefresh(interval=90 * 1000, key="main_refresh")
 
 
 @st.cache_resource
@@ -1527,7 +1530,16 @@ def tab_strategy_lab() -> None:
     ]
     if state.get("updated_at"):
         meta_bits.append(f"updated `{state['updated_at']}`")
+    if state.get("_lab_state_updated_at"):
+        meta_bits.append(f"supabase `{state['_lab_state_updated_at']}`")
+    last_mark = (state.get("last_mark") or {}).get("at")
+    if last_mark:
+        meta_bits.append(f"last_mark `{last_mark}`")
     st.caption(" · ".join(meta_bits))
+    st.caption(
+        "Auto-refreshes ~90s · Lab marks Mon–Fri ~every 30m (10:00–16:00 ET) · "
+        "EOD settle ~16:20 ET — see `strategy_lab/DASHBOARD_FRESHNESS.md`"
+    )
 
     # --- Out-of-Sample R²: backtest (static) vs forward (live rolling) ---
     _render_strategy_lab_r2_panel(state)

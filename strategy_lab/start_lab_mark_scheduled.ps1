@@ -1,12 +1,11 @@
 # =============================================================================
-# Q-ALPHA — strategy_lab/start_lab_settle_scheduled.ps1
-# Unattended SETTLE pass for Strategy Lab (primary EOD ~16:20 ET).
+# Q-ALPHA — strategy_lab/start_lab_mark_scheduled.ps1
+# Intraday MARK pass (Mon–Fri RTH): refresh opens → Supabase (quiet).
 #
-# Primary:  Mon–Fri 16:20 ET  (shortly after agent Modal EOD ~16:15)
-# Optional: Mon–Fri 16:40 ET  as backup (same script)
-#   See strategy_lab/DASHBOARD_FRESHNESS.md
-#
-#   schtasks /Create ... /ST 16:20 ... -File "...\start_lab_settle_scheduled.ps1"
+# Register (example — every 30 min 10:00–16:00 ET):
+#   schtasks /Create /F /TN "QAlpha Strategy Lab Mark" ...
+#     /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
+#   See DASHBOARD_FRESHNESS.md
 # =============================================================================
 $ErrorActionPreference = "Continue"
 
@@ -38,16 +37,16 @@ try {
 } catch {
     $etDate = Get-Date -Format "yyyy-MM-dd"
 }
-$LogFile = Join-Path $LogDir "lab_${etDate}_settle.log"
+$LogFile = Join-Path $LogDir "lab_${etDate}_mark.log"
 
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Add-Content -LiteralPath $LogFile -Value ""
-Add-Content -LiteralPath $LogFile -Value "======== LAB SETTLE START $stamp ========"
+Add-Content -LiteralPath $LogFile -Value "======== LAB MARK START $stamp ========"
 
-& $Python $Runner --settle *>> $LogFile
+& $Python $Runner --mark *>> $LogFile
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 
 $endStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
-Add-Content -LiteralPath $LogFile -Value "======== LAB SETTLE END exit=$exitCode $endStamp ========"
+Add-Content -LiteralPath $LogFile -Value "======== LAB MARK END exit=$exitCode $endStamp ========"
 exit $exitCode
