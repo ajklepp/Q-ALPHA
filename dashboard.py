@@ -1509,14 +1509,17 @@ def tab_strategy_lab() -> None:
         f"status **{state.get('status') or '—'}**",
         f"source **{src}**",
     ]
+    stamp_bits = []
     if state.get("updated_at"):
-        meta_bits.append(f"updated `{state['updated_at']}`")
+        stamp_bits.append(f"updated `{state['updated_at']}`")
     if state.get("_lab_state_updated_at"):
-        meta_bits.append(f"supabase `{state['_lab_state_updated_at']}`")
+        stamp_bits.append(f"supabase `{state['_lab_state_updated_at']}`")
     last_mark = (state.get("last_mark") or {}).get("at")
     if last_mark:
-        meta_bits.append(f"last_mark `{last_mark}`")
+        stamp_bits.append(f"last_mark `{last_mark}`")
     st.caption(" · ".join(meta_bits))
+    if stamp_bits:
+        st.caption(" · ".join(stamp_bits))
     st.caption(
         "Auto-refreshes ~90s · Lab marks Mon–Fri ~every 30m (10:00–16:00 ET) · "
         "EOD settle ~16:20 ET — see `strategy_lab/DASHBOARD_FRESHNESS.md`"
@@ -1549,12 +1552,13 @@ def tab_strategy_lab() -> None:
     lab_ahead_banner(ahead_label, margin, a_val, b_val)
 
     # --- Side-by-side pool cards ---
+    # Pool value alone on first row so $X,XXX.XX never ellipsizes in a 1/3 column.
     col_a, col_b = st.columns(2)
     with col_a:
         with st.container(border=True):
             section_header(pool_a.get("label") or "Strategy A (Trailing)")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+            st.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+            m2, m3 = st.columns(2)
             m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
             m3.metric(
                 "Win rate",
@@ -1566,8 +1570,8 @@ def tab_strategy_lab() -> None:
     with col_b:
         with st.container(border=True):
             section_header(pool_b.get("label") or "Strategy B (Target)")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Pool value", f"${b_val:,.2f}", f"{b_ret:+.2f}%")
+            st.metric("Pool value", f"${b_val:,.2f}", f"{b_ret:+.2f}%")
+            m2, m3 = st.columns(2)
             m2.metric("Realized P&L", f"${b_pnl:+,.2f}")
             m3.metric(
                 "Win rate",
