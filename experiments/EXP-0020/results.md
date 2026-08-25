@@ -1,118 +1,105 @@
 # EXP-0020 Results — Ticker-Profiler R:R Ranker (pilot 50)
 
-**Status: FAIL (1/6 hard gates) — INVALID ABLATION (0 profiler-eligible rows)**
+**Current status: INVESTIGATE (4/6 hard gates) — plumbing fixed; do not promote**
 
-**Run date:** 2026-08-24  
-**Modal run:** https://modal.com/apps/ajklepp/main/ap-BhKVsVEDNEhBtMRTDhpbu3  
-**Runtime:** **42s** (STEP 1 daily download ~39s; STEP 2 profile attach ~**0–3s** for 523 rows)  
-**App:** `q-alpha-exp020`  
-**Universe:** Pilot **50** + SPY (screener then `PILOT_MAX_TICKERS=50`)
+Pilot universe = **50** names (not 300). Compare Sharpe to 0017/0018/0019 with that caveat.
 
 ---
 
-## Loud verdict
+## Run B — post-plumbing pilot (VALID ablation) — 2026-08-24
 
-# FAIL — do not promote to `/candidates`
+**Modal:** https://modal.com/apps/ajklepp/main/ap-A1hJV1vaNktFSTTVZpDQ5l  
+**Runtime:** **2718s** (~45 min) · Attach alone **2671.9s**  
+**Cache:** misses=**523** hits=**0** bad=0 errs=0 (cold Volume after fix)
 
-This run **does not** measure whether profiler R:R ranking beats EXP-0017/0018/0019.
+### Expectation checks
 
-| Red flag | Observation |
-|----------|-------------|
-| Profiler-eligible | **0 / 523** |
-| OOS trades | **0** |
-| Profile attach wall time | **≈0s** for 523 rows |
-| Implication | Profiles were **not** built via Polygon 1-min analogs (that path cannot finish in &lt;1s cold). Likely every `load_or_build_profile` hit the exception path or returned non-meaningful / INSUFFICIENT without measurement — **scaffold/integration bug**, not a ranker economic result. |
+| Check | Result |
+|-------|--------|
+| Attach not ~0s on cold work | **PASS** — 2671.9s |
+| Profiler-eligible ≫ 0 | **PASS** — **433 / 523 (82.8%)** |
+| OOS trades > 0 | **PASS** — **66** |
 
-**Next step before Phase-2 (300):** debug Modal import/`build_ticker_profile` errors (log `prof_error`), confirm Volume writes, print first failing traceback. Re-run pilot only after eligible count ≫ 0 and attach time reflects cache miss cost.
-
----
-
-## v1 settings (as run)
-
-| Item | Value |
-|------|-------|
-| Entry/label | `MOC_CLOSE_ATR_D0` |
-| Selector | `PROFILER_RR` |
-| INSUFFICIENT | SKIP |
-| RR_MIN_GATE | None (rank-only) |
-| Premarket | OFF |
-| Cache | Modal Volume `qalpha-exp020-profiles` → `/cache/exp020_profiles` |
-| Cache behavior | Progress `profiles N/523 [0s]` throughout — **no evidence of cold builds**; treat as miss/fail, not healthy hits |
-
----
-
-## Transparency
-
-| Metric | Value |
-|--------|-------|
-| Candidate rows | **523** |
-| Base rate | **25.0%** (131/523 Option D ≈ 0.2505) |
-| Profiler-eligible | **0 / 523 (0%)** |
-| Eligible with R:R &lt; 1.5 | **0 / 0 (n/a)** — no eligible sample |
-| OOS trades | **0** |
-| Win rate | 0% |
-
----
-
-## Hard gates (FAIL loudly)
+### Loud gate table
 
 | Gate | Threshold | Actual | Result |
 |------|-----------|--------|--------|
-| Sharpe | ≥ 1.50 | **0.00** | **FAIL** |
-| Max DD | ≥ −0.15 | **0.00** (no trades) | **PASS*** |
-| Positive return | yes | **0.00%** | **FAIL** |
-| Beats buy-and-hold | yes | 0% vs B&H **+136.5%** | **FAIL** |
-| Walk-forward | ≥ 3/4 | **0/4** | **FAIL** |
-| Monte Carlo | p &lt; 0.05 | **n/a** (insufficient trades) | **FAIL** |
+| Sharpe | ≥ 1.50 | **2.303** | **PASS** |
+| Max DD | ≥ −0.15 | **−4.28%** | **PASS** |
+| Positive return | yes | **+46.42%** | **PASS** |
+| Beats buy-and-hold | yes | +46.4% vs B&H **+136.5%** | **FAIL** |
+| Walk-forward | ≥ 3/4 | **3/4** | **PASS** |
+| Monte Carlo | p &lt; 0.05 | **p = 0.526** | **FAIL** |
 
-\*DD “PASS” with zero trades is **vacuous** — not evidence of risk control.
+**Verdict: INVESTIGATE (4/6)** — two hard fails (B&H, MC). **Do not promote to `/candidates`.**
 
-**Gates: 1/6 → FAIL**
+### Transparency
 
----
+| Metric | Value |
+|--------|-------|
+| Candidates | 523 · base rate **25.0%** |
+| Confidence | HIGH 122 · MEDIUM 233 · LOW 78 · INSUFFICIENT 90 · ERROR 0 |
+| Profiler-eligible | **433 / 523** |
+| Eligible with R:R &lt; 1.5 | **394 / 433 (91.0%)** — informational |
+| OOS trades / win rate | **66** / **50.0%** |
+| as_of samples | `MARA@2019-02-11` Timestamp (DatetimeIndex OK) |
 
-## Walk-forward
+### Walk-forward
 
 | Window | Return | Sharpe | Trades | Result |
 |--------|--------|--------|--------|--------|
-| 2021 | 0% | 0.00 | 0 | **FAIL** |
-| 2022 | 0% | 0.00 | 0 | **FAIL** |
-| 2023 | 0% | 0.00 | 0 | **FAIL** |
-| 2024 | 0% | 0.00 | 0 | **FAIL** |
+| 2021 | +8.83% | 1.19 | 41 | PASS |
+| 2022 | −13.48% | −3.24 | 35 | **FAIL** |
+| 2023 | +35.37% | 1.80 | 34 | PASS |
+| 2024 | +5.09% | 0.70 | 37 | PASS |
+
+### vs EXP-0017 / 0018 / 0019
+
+| Experiment | Selector | Univ. | Sharpe | Trades | WF | Notes |
+|------------|----------|-------|--------|--------|-----|-------|
+| EXP-0017 | ScoreCard FULL | 300 | 1.87 | 103 | 2/4 | Lift failed |
+| EXP-0018 | A–Z catalyst-only | 300 | 0.86 | 93 | 2/4 | REJECTED |
+| EXP-0019 FULL | Threshold+rank | 300 | 1.87 | 103 | 2/4 | MIXED |
+| **EXP-0020 Run B** | Profiler R:R | **50** | **2.30** | **66** | **3/4** | B&H+MC **FAIL**; pilot only |
+
+**Reading:** On the **50-name pilot**, profiler R:R ranking produces strong OOS Sharpe (2.30) and WF 3/4 — better than 0018 and competitive with 0017/0019 on Sharpe — but **MC p≈0.53** (trade bootstrap indistinguishable from noise) and **does not beat univ. B&H**. Not a full-300 claim. **91%** of eligible rows have R:R &lt; 1.5 (rank-only policy kept them).
+
+### Quant Assassin (Run B)
+
+**PASS-ish sim edge on pilot; FAIL promotion bar.**  
+Plumbing is fixed. Economic gates incomplete (B&H, MC). Pause scale-to-300 until you decide next experiment design.
 
 ---
 
-## vs EXP-0017 / 0018 / 0019
+## Run A — invalid plumbing FAIL (HISTORY) — 2026-08-24
 
-| Experiment | Selector | Universe | Sharpe | Trades | Notes |
-|------------|----------|----------|--------|--------|-------|
-| EXP-0017 | ScoreCard FULL | 300 | **1.87** | 103 | Lift failed; sim Sharpe strong |
-| EXP-0018 | A–Z catalyst-only | 300 | **0.86** | 93 | Hypothesis REJECTED |
-| EXP-0019 A/B/C | Threshold / rank / FULL | 300 | **1.71 / 1.69 / 1.87** | 105 / 94 / 103 | MIXED; all FAIL B&H/WF/MC |
-| **EXP-0020 pilot** | Profiler R:R | **50** | **0.00** | **0** | **Invalid — 0 eligible profiles** |
+**Status: FAIL (1/6) — INVALID ABLATION (0 profiler-eligible)**  
+**Modal:** https://modal.com/apps/ajklepp/main/ap-BhKVsVEDNEhBtMRTDhpbu3 · **42s**
 
-**Comparison:** EXP-0020 is **worse than every baseline** only in the trivial sense of taking no trades. It is **not** a fair head-to-head until profiler attach works.
+| Red flag | Observation |
+|----------|-------------|
+| Eligible | **0 / 523** |
+| Trades | **0** |
+| Attach | **≈0s** |
+| Cause | Modal flat-mount `Path(__file__).parents[2]` → **IndexError** every row, swallowed as ERROR |
 
----
-
-## Quant Assassin notes
-
-### What “worked”
-- Modal app started; pilot cap 50 applied; daily STEP 1 completed (~39s).
-- Volume mount path printed; hard-gate machinery ran (SKIP → empty book).
-
-### What failed (loud)
-- **Zero** profiler-eligible candidates  
-- **Zero** trades / WF / MC  
-- Attach timing proves **profiler path did not execute real analog builds**  
-- Vacuous DD pass must not be spun as success  
-
-### Promotion
-**Do not promote to `/candidates`.** Do not scale to 300 until pilot produces eligible profiles and a non-empty trade set.
+Kept for audit. Fixed in commit `c6d1f3a`. Not an economic reject of the ranker.
 
 ---
 
-## How to re-run (after debug)
+## Settings (both runs)
+
+| Item | Value |
+|------|-------|
+| Entry | `MOC_CLOSE_ATR_D0` |
+| INSUFFICIENT | SKIP |
+| RR_MIN_GATE | None (rank-only) |
+| Premarket | OFF |
+| Pilot | 50 · Volume `qalpha-exp020-profiles` |
+
+---
+
+## How to re-run
 
 ```powershell
 $env:PYTHONIOENCODING='utf-8'; $env:PYTHONUTF8='1'
