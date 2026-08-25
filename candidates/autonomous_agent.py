@@ -1406,13 +1406,14 @@ def fetch_regime_from_polygon() -> dict | None:
 def _generate_watchlist_profiles(candidates: list[dict]) -> None:
     """
     After the 9:20 watchlist is finalized, write profiles/<TICKER>_profile.json
-    for each name so the dashboard Ticker Profiles tab has fresh data.
+    for each name and upsert to Supabase ticker_profiles (Cloud dashboard).
 
     Always persists JSON when build_ticker_profile returns (including
     INSUFFICIENT_HISTORY / LOW confidence for short-history names like recent
     IPOs) so the tab shows "insufficient history" instead of "no profile".
 
-    Per-ticker try/except — NEVER aborts the trading session.
+    Uses the full watchlist (TWS WATCH_TOP_N=10 when QALPHA_USE_TWS_SCAN=1),
+    not only TRADE_TOP_N. Per-ticker try/except — NEVER aborts the session.
     """
     tickers = [
         str(c.get("ticker") or "").upper()
@@ -1428,11 +1429,18 @@ def _generate_watchlist_profiles(candidates: list[dict]) -> None:
         print(f"  Profile skipped for (all): ticker_profiler unavailable — {exc}")
         return
 
+    try:
+        from supabase_sync import upsert_ticker_profile_safe
+    except Exception:
+        upsert_ticker_profile_safe = None  # type: ignore[assignment]
+
     print(f"\nAuto-generating setup profiles for {len(tickers)} watchlist ticker(s)...")
     for ticker in tickers:
         try:
             profile = build_ticker_profile(ticker)
             out = save_profile_json(profile)
+            if upsert_ticker_profile_safe is not None:
+                upsert_ticker_profile_safe(profile)
             n = profile.get("analog_count", profile.get("n_analogs_measured", 0))
             conf = profile.get("confidence", "?")
             hf = profile.get("history_flag") or ""

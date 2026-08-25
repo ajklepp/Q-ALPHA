@@ -20,7 +20,12 @@ CANDIDATES_DIR = ROOT / "candidates"
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
-from candidates.supabase_sync import SupabaseSync  # noqa: E402
+from candidates.supabase_sync import (  # noqa: E402
+    SupabaseSync,
+    fetch_ticker_profile_anon,
+    list_ticker_profile_tickers_anon,
+    upsert_ticker_profile_safe,
+)
 
 PROFILES_DIR = ROOT / "profiles"
 SYSTEM_VERSION = "1.3.7"
@@ -66,15 +71,51 @@ def profile_path(ticker: str) -> Path:
     return PROFILES_DIR / f"{ticker.upper()}_profile.json"
 
 
-def load_profile(ticker: str) -> dict | None:
-    """Load a precomputed profile JSON, or None if missing/corrupt."""
+def load_profile_local(ticker: str) -> dict | None:
+    """Load profiles/{T}_profile.json only (no network)."""
     path = profile_path(ticker)
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = dict(data)
+            data["_profile_source"] = "local"
+        return data
     except Exception:
         return None
+
+
+def load_profile(ticker: str) -> dict | None:
+    """
+    Prefer Supabase ticker_profiles (anon), else local JSON.
+
+    Sets ``_profile_source`` to ``supabase`` | ``local``. Returns None if missing.
+    Never calls Polygon.
+    """
+    t = str(ticker or "").upper().strip()
+    if not t:
+        return None
+    remote = fetch_ticker_profile_anon(t)
+    if remote:
+        return remote
+    return load_profile_local(t)
+
+
+def profile_source_label(profile: dict | None, ticker: str = "") -> str:
+    """Human caption: supabase | local | missing."""
+    if profile and profile.get("_profile_source") == "supabase":
+        return "supabase"
+    if profile and profile.get("_profile_source") == "local":
+        return "local"
+    if profile:
+        # Legacy dict without marker — treat as local if file exists
+        if ticker and profile_path(ticker).exists():
+            return "local"
+        return "supabase"
+    if ticker and profile_path(ticker).exists():
+        return "local"
+    return "missing"
 
 
 def _profile_insufficient(profile: dict) -> bool:
@@ -182,16 +223,36 @@ def list_cached_profile_tickers() -> list[str]:
     return out
 
 
+def list_profile_option_tickers(
+    watch_tickers: list[str] | None = None,
+) -> list[str]:
+    """
+    Select-box options: today's watchlist ∪ remote Supabase ∪ local cache.
+    Order preserved; first-seen wins.
+    """
+    options: list[str] = []
+    seen: set[str] = set()
+    for t in (watch_tickers or []) + list_ticker_profile_tickers_anon() + list_cached_profile_tickers():
+        u = str(t or "").upper().strip()
+        if u and u not in seen:
+            options.append(u)
+            seen.add(u)
+    return options
+
+
 def compute_and_save_profile(ticker: str) -> dict:
     """
-    Run ticker_profiler.build_ticker_profile and write profiles/{T}_profile.json.
+    Run ticker_profiler.build_ticker_profile, write local JSON, upsert Supabase.
 
     EXPENSIVE (many Polygon 1-min calls). Call only from an explicit button —
-    never on dashboard load / autorefresh.
+    never on dashboard load / autorefresh. Supabase upsert fails soft.
     """
     ensure_polygon_key_from_secrets()
     from ticker_profiler import build_ticker_profile, save_profile_json
 
     profile = build_ticker_profile(ticker.upper())
     save_profile_json(profile)
+    upsert_ticker_profile_safe(profile)
+    profile = dict(profile)
+    profile["_profile_source"] = "local"
     return profile

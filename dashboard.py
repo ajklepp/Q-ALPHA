@@ -26,10 +26,11 @@
 #
 # MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles,
 # Strategy Lab, and Glossary (not pages/ sidebar routes). Profiler reads
-# precomputed profiles/*.json; "Refresh profile" is on-demand only — never on
-# load/autorefresh. Strategy Lab prefers Supabase strategy_lab_state (anon);
-# local fallback is strategy_lab/results/forward_state.json (SIM paper only).
-# Cadence: strategy_lab/DASHBOARD_FRESHNESS.md (marks ~30m; settle ~16:20 ET).
+# Supabase ticker_profiles (anon) then profiles/*.json; "Refresh profile" is
+# on-demand only — never on load/autorefresh. Strategy Lab prefers Supabase
+# strategy_lab_state (anon); local fallback is strategy_lab/results/forward_state.json
+# (SIM paper only). Cadence: strategy_lab/DASHBOARD_FRESHNESS.md (marks ~30m;
+# settle ~16:20 ET).
 # =============================================================================
 from __future__ import annotations
 
@@ -57,10 +58,11 @@ from dashboard_shared import (
     et_today,
     format_profile_rr_cell,
     format_ticker_with_history,
-    list_cached_profile_tickers,
+    list_profile_option_tickers,
     load_profile,
     load_todays_watchlist,
     profile_path,
+    profile_source_label,
 )
 from dashboard_theme import (
     ACCENT,
@@ -968,11 +970,12 @@ def tab_ticker_profiles() -> None:
     with st.container(border=True):
         section_header(
             "Ticker Profiles",
-            "Analog MAE/MFE · informational only · precomputed JSON",
+            "Analog MAE/MFE · informational only · Supabase-first (no auto Polygon)",
         )
         st.info(
             "Profiles are **precomputed** at the 9:20 scan (and via Refresh). "
-            "This tab does **not** call Polygon on load."
+            "This tab does **not** call Polygon on load. Cloud reads "
+            "`ticker_profiles` via anon key; local JSON is fallback."
         )
         st.caption(
             "History flags: `*` limited history/small sample or extended past 2yr · "
@@ -992,20 +995,14 @@ def tab_ticker_profiles() -> None:
     except Exception as exc:
         watch_err = str(exc)
 
-    cached = list_cached_profile_tickers()
-    options: list[str] = []
-    seen: set[str] = set()
-    for t in watch_tickers + cached:
-        if t and t not in seen:
-            options.append(t)
-            seen.add(t)
+    options = list_profile_option_tickers(watch_tickers)
 
     if watch_err:
         st.warning(f"Watchlist unavailable: {watch_err}")
 
     if not options:
         st.warning(
-            "No watchlist tickers and no cached profiles yet. "
+            "No watchlist tickers and no cached/remote profiles yet. "
             "After the morning scan, tickers appear here — or type a symbol below."
         )
         manual = st.text_input(
@@ -1021,28 +1018,33 @@ def tab_ticker_profiles() -> None:
             options=options or ["JOBY"],
             index=0,
             key="profile_ticker_select",
-            help="Today's watchlist preferred; cached profiles also listed.",
+            help="Watchlist ∪ Supabase ticker_profiles ∪ local JSON.",
         )
     with col_meta:
         path = profile_path(ticker)
+        peek = load_profile(ticker)
+        src = profile_source_label(peek, ticker)
+        st.caption(f"Source: **{src}**")
         if path.exists():
             mtime = path.stat().st_mtime
             st.caption(
-                f"Cache: `{path.relative_to(ROOT)}` · "
+                f"Local file: `{path.relative_to(ROOT)}` · "
                 f"updated {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')}"
             )
+        elif src == "supabase":
+            st.caption("No local JSON — using Supabase row (Cloud path).")
         else:
             st.caption(f"No cache at `{path.relative_to(ROOT)}`")
 
     do_refresh = False
     if ensure_polygon_key_from_secrets():
         # On-demand Polygon refresh — only when a key is available (local / secrets).
-        # Streamlit Cloud usually has no key; profiles come from committed JSON.
+        # Streamlit Cloud usually has no key; profiles come from Supabase.
         if st.button(
             f"🔄 Refresh profile — {ticker}",
             type="primary",
             key="profile_refresh_btn",
-            help="Runs build_ticker_profile (Polygon 1-min). Slow. Not auto.",
+            help="Runs build_ticker_profile (Polygon 1-min). Slow. Writes local + Supabase.",
         ):
             do_refresh = True
 
@@ -1058,7 +1060,7 @@ def tab_ticker_profiles() -> None:
                     f"({profile.get('analog_count', profile.get('n_analogs_measured', '?'))} "
                     f"analogs, {profile.get('confidence', '?')}"
                     f"{', lookback=' + str(profile.get('actual_lookback_days')) + 'd' if profile.get('actual_lookback_days') is not None else ''}"
-                    f"{', flag=' + repr(hf) if hf else ''})"
+                    f"{', flag=' + repr(hf) if hf else ''}) · local + Supabase"
                 )
                 st.rerun()
             except Exception as exc:
@@ -1068,12 +1070,20 @@ def tab_ticker_profiles() -> None:
     profile = load_profile(ticker)
     if profile is None:
         st.warning(
-            f"No precomputed profile for **{ticker}**. "
-            f"Click **Refresh profile** to generate one (expensive)."
+            f"No precomputed profile for **{ticker}** (source: missing). "
+            f"Click **Refresh profile** to generate one (expensive), or wait for "
+            f"the 9:20 agent upsert."
         )
         return
 
-    st.divider()
+    st.caption(
+        f"Loaded from **{profile_source_label(profile, ticker)}**"
+        + (
+            f" · updated `{profile.get('_profile_updated_at')}`"
+            if profile.get("_profile_updated_at")
+            else ""
+        )
+    )
     conf = profile.get("confidence", "?")
     n_m = (
         profile.get("analog_count")

@@ -148,12 +148,14 @@ Every 30m Modal intraday monitor (agent)
 📈 Performance
 🔧 System Health
 📓 Daily Reviews
-🔬 Ticker Profiles  — precomputed JSON; Refresh gated if no POLYGON on Cloud
+🔬 Ticker Profiles  — Supabase `ticker_profiles` (anon); local JSON fallback; Refresh gated if no POLYGON on Cloud
 🧪 Strategy Lab     — SIM A vs B; OOS R² panel (backtest + forward MIN_N=20); Supabase anon-first
 📖 Glossary         — renders GLOSSARY.md
 ```
 
 Local: `.\start_dashboard.ps1` (detached). Cloud auto-deploys on push to `main`; reboot if cache stale.
+
+**Ticker Profiles on Cloud:** were empty when only local `profiles/*.json` existed (not in git). Now the 9:20 agent upserts to Supabase; Cloud reads via anon. Aaron must run `candidates/sql/ticker_profiles.sql` once in the SQL editor if the table is missing.
 
 ---
 
@@ -163,7 +165,7 @@ Local: `.\start_dashboard.ps1` (detached). Cloud auto-deploys on push to `main`;
 |-------|------|
 | GitHub `ajklepp/Q-ALPHA` | Source of truth |
 | Streamlit Cloud | Public dashboard |
-| Supabase | Agent tables + `strategy_lab_state` |
+| Supabase | Agent tables + `strategy_lab_state` + `ticker_profiles` |
 | Modal `qalpha-scheduler` | Intraday + EOD monitors |
 | Polygon $79 | Lab bars, scans, news (15-min delayed “live”) |
 | Telegram `@MyQalphaBot` | Alerts |
@@ -178,6 +180,12 @@ Local: `.\start_dashboard.ps1` (detached). Cloud auto-deploys on push to `main`;
 - Table: `strategy_lab_state` (JSONB state keyed by `flag_date`)
 - Writer: `lab_state_sync.upsert_forward_state` (service)
 - Reader: `fetch_latest_forward_state_anon` (dashboard Strategy Lab)
+
+### Supabase (Ticker Profiles)
+- Table: `ticker_profiles` — SQL: `candidates/sql/ticker_profiles.sql` (run once if missing)
+- Writer: agent `_generate_watchlist_profiles` + dashboard Refresh → `upsert_ticker_profile_safe` (service)
+- Reader: `fetch_ticker_profile_anon` / `load_profile` (dashboard; local JSON fallback)
+- Scope: full watchlist (TWS `WATCH_TOP_N=10`), not only trade-3
 
 ---
 
@@ -238,7 +246,7 @@ Q-ALPHA/
 - Live Status regime banner: dropped SPY price / SMA50; keep VIX + sizing.  
 - Next-scan countdown: **9:20 ET**, skips Sat/Sun → next Monday.  
 - `is_trading_day`: uses **US/Eastern** date (not machine local) — verified via Sunday market-closed Telegram.  
-- Profiles: Cloud hides Refresh when no Polygon key; lookback / analog-day fixes earlier.
+- Profiles: Cloud empty before was local-only JSON; now Supabase `ticker_profiles` (run SQL once). Refresh still on-demand when Polygon key present.
 
 ---
 

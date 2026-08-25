@@ -317,6 +317,153 @@ class SupabaseSync:
         )
         return result.data or []
 
+    def upsert_ticker_profile(self, profile: dict) -> None:
+        """
+        Insert/update one setup profile for Cloud Ticker Profiles.
+
+        Service role only. Schema: candidates/sql/ticker_profiles.sql.
+        """
+        ticker = str(profile.get("ticker") or "").upper().strip()
+        if not ticker:
+            raise ValueError("upsert_ticker_profile: missing ticker")
+        as_of = profile.get("as_of_date")
+        if as_of is not None:
+            as_of = str(as_of)[:10] or None
+        row = {
+            "ticker": ticker,
+            "as_of_date": as_of,
+            "profile": profile,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+        }
+        self.client.table("ticker_profiles").upsert(
+            row, on_conflict="ticker"
+        ).execute()
+
+
+def upsert_ticker_profile_safe(profile: dict) -> bool:
+    """
+    Best-effort profile upsert. Logs and returns False on failure —
+    never raises (morning agent / dashboard Refresh must not crash).
+    """
+    try:
+        SupabaseSync().upsert_ticker_profile(profile)
+        ticker = str(profile.get("ticker") or "").upper()
+        print(f"  Supabase ticker_profiles upserted {ticker}")
+        return True
+    except Exception as exc:
+        ticker = str((profile or {}).get("ticker") or "?")
+        print(f"  ⚠️ Supabase ticker_profiles upsert failed ({ticker}): {exc}")
+        return False
+
+
+def _get_anon_credentials() -> tuple[str, str]:
+    """URL + anon/publishable key for public dashboard reads (never service)."""
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            url = st.secrets.get("SUPABASE_URL")
+            key = (
+                st.secrets.get("SUPABASE_ANON_KEY")
+                or st.secrets.get("SUPABASE_PUBLISHABLE_KEY")
+            )
+            if url and key:
+                return str(url), str(key)
+    except Exception:
+        pass
+    _load_env()
+    url = os.environ.get("SUPABASE_URL", "")
+    key = (
+        os.environ.get("SUPABASE_ANON_KEY", "")
+        or os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
+    )
+    return url, key
+
+
+_anon_client = None
+_anon_failed = False
+
+
+def _get_anon_client():
+    """Lazy anon supabase client (RLS applies)."""
+    global _anon_client, _anon_failed
+    if _anon_failed:
+        return None
+    if _anon_client is not None:
+        return _anon_client
+    try:
+        from supabase import create_client
+
+        url, key = _get_anon_credentials()
+        if not url or not key:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_ANON_KEY "
+                "(or SUPABASE_PUBLISHABLE_KEY) required for anon profile reads"
+            )
+        _anon_client = create_client(url, key)
+        return _anon_client
+    except Exception as exc:
+        _anon_failed = True
+        print(f"  ⚠️ anon Supabase unavailable for ticker_profiles: {exc}")
+        return None
+
+
+def fetch_ticker_profile_anon(ticker: str) -> dict | None:
+    """
+    Read one profile blob via anon key + RLS SELECT.
+    Returns the profile dict, or None if missing / unavailable.
+    """
+    client = _get_anon_client()
+    if client is None:
+        return None
+    t = str(ticker or "").upper().strip()
+    if not t:
+        return None
+    try:
+        result = (
+            client.table("ticker_profiles")
+            .select("ticker,as_of_date,profile,updated_at")
+            .eq("ticker", t)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+        blob = rows[0].get("profile")
+        if not isinstance(blob, dict) or not blob:
+            return None
+        out = dict(blob)
+        out.setdefault("ticker", t)
+        out["_profile_source"] = "supabase"
+        out["_profile_updated_at"] = rows[0].get("updated_at")
+        return out
+    except Exception as exc:
+        print(f"  ⚠️ ticker_profiles anon fetch failed ({t}): {exc}")
+        return None
+
+
+def list_ticker_profile_tickers_anon() -> list[str]:
+    """Tickers present in ticker_profiles (anon SELECT). Empty on failure."""
+    client = _get_anon_client()
+    if client is None:
+        return []
+    try:
+        result = (
+            client.table("ticker_profiles")
+            .select("ticker")
+            .order("ticker")
+            .execute()
+        )
+        out: list[str] = []
+        for row in result.data or []:
+            t = str(row.get("ticker") or "").upper().strip()
+            if t:
+                out.append(t)
+        return out
+    except Exception as exc:
+        print(f"  ⚠️ ticker_profiles list failed: {exc}")
+        return []
+
 
 def sync_to_supabase_safe(callback) -> None:
     """Run a sync callback; never raise if Supabase is unavailable."""
