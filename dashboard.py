@@ -2098,21 +2098,12 @@ def tab_strategy_lab() -> None:
     with col_a:
         with st.container(border=True):
             section_header(pool_a.get("label") or "Strategy A (Trailing)")
-            t4_runners, a_full_slots = _lab_trail_runner_stats(pool_a)
-            a_slots_free = max(0, LAB_MAX_SLOTS - a_full_slots)
+            t4_runners, _a_full_slots = _lab_trail_runner_stats(pool_a)
             a_top_l, a_top_r = st.columns(2)
             with a_top_l:
                 st.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
             with a_top_r:
-                st.metric(
-                    "T4 trailing",
-                    str(t4_runners),
-                    f"{a_slots_free} slots free",
-                )
-                st.caption(
-                    f"full slots: {a_full_slots}/{LAB_MAX_SLOTS} · "
-                    "T4-only = trailing runner (not a full slot)"
-                )
+                st.metric("T4 trailing", str(t4_runners))
             m2, m3 = st.columns(2)
             m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
             m3.metric(
