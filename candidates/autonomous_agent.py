@@ -159,6 +159,56 @@ def _is_ineligible_reject_text(text: str) -> bool:
         return True
     return False
 
+
+# Parent order statuses that mean no fill / give up (cancel residuals).
+_IB_DEAD_STATUSES = frozenset({
+    "Cancelled", "ApiCancelled", "Inactive", "Rejected",
+})
+# How long to wait for parent fill before treating as NEVER_FILLED.
+_BRACKET_FILL_WAIT_SEC = 20.0
+_BRACKET_POLL_SEC = 0.5
+
+
+def _order_status(trade) -> str:
+    """Safe orderStatus.status string."""
+    try:
+        return str(trade.orderStatus.status or "UNKNOWN")
+    except Exception:
+        return "UNKNOWN"
+
+
+def _order_filled_qty(trade) -> float:
+    """Filled quantity on an ib_insync Trade (0 if unknown)."""
+    try:
+        return float(trade.orderStatus.filled or 0)
+    except Exception:
+        return 0.0
+
+
+def _cancel_trade_safe(ib: IB, trade) -> None:
+    """Best-effort cancel; never raises."""
+    try:
+        st = _order_status(trade)
+        if st in _IB_DEAD_STATUSES | {"Filled"}:
+            return
+        ib.cancelOrder(trade.order)
+    except Exception as exc:
+        print(f"  [BRACKET] cancel warn: {exc}")
+
+
+def _ib_position_shares(ib: IB, ticker: str) -> float:
+    """Net shares for ticker in IB portfolio (0 if flat / missing)."""
+    t = str(ticker or "").upper()
+    total = 0.0
+    try:
+        for p in ib.positions():
+            sym = str(getattr(p.contract, "symbol", "") or "").upper()
+            if sym == t:
+                total += float(p.position or 0)
+    except Exception as exc:
+        print(f"  [RECONCILE] positions read failed: {exc}")
+    return total
+
 # ── IBKR message-throttle budget (scan_premarket) ───────────────────────────
 # ib_insync 0.9.86 self-throttles OUTBOUND API messages: Client.MaxRequests
 # messages per Client.RequestsInterval second. Excess messages are parked in
@@ -574,11 +624,15 @@ def send_premarket_summary(candidates: list[dict], regime: str, vix: str) -> Non
 
 def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
     """
-    Place DAY bracket order for intraday entry.
-    IBKRConnector uses MOC during market hours — autonomous agent needs immediate DAY fill.
+    Place DAY bracket for intraday entry; wait for parent FILL before success.
 
-    On closing-only / customer-ineligible / no-permission rejects: return
-    status=REJECTED_INELIGIBLE (caller must NOT book a filled trade or retry).
+    Returns status=
+      FILLED              — parent filled qty > 0 (safe to book PaperTrade)
+      REJECTED_INELIGIBLE — closing-only / ineligible / no permission
+      REJECTED_NO_FILL    — cancelled / inactive / timeout without fill
+
+    On any reject: cancel residual child (and parent) orders. Caller must NOT
+    call pool.open_trade or append an OPEN PaperTrade unless status is FILLED.
     """
     ticker = order_plan["ticker"]
     shares = int(order_plan["shares"])
@@ -591,10 +645,13 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
     err_buf: list[str] = []
 
     def _on_err(reqId, errorCode, errorString, contract):
-        line = f"{errorCode}: {errorString}"
-        err_buf.append(line)
+        err_buf.append(f"{errorCode}: {errorString}")
 
     ib.errorEvent += _on_err
+    parent_trade = None
+    stop_loss_trade = None
+    take_profit_trade = None
+    parent_id = None
     try:
         contract = Stock(ticker, "SMART", "USD")
         ib.qualifyContracts(contract)
@@ -627,71 +684,99 @@ def _place_intraday_bracket(ib: IB, order_plan: dict) -> dict:
             transmit=True,
         )
         take_profit_trade = ib.placeOrder(contract, take_profit)
-        ib.sleep(2)  # let TWS acknowledge all three legs
+
+        # Poll until fill, hard reject, or timeout — never book on Submitted alone.
+        deadline = time.time() + _BRACKET_FILL_WAIT_SEC
+        parent_status = "UNKNOWN"
+        filled_qty = 0.0
+        while time.time() < deadline:
+            ib.sleep(_BRACKET_POLL_SEC)
+            parent_status = _order_status(parent_trade)
+            filled_qty = _order_filled_qty(parent_trade)
+            blob = " | ".join(err_buf)
+            try:
+                blob += " | " + str(getattr(parent_trade, "log", "") or "")
+            except Exception:
+                pass
+
+            if filled_qty > 0 or parent_status == "Filled":
+                break
+            if parent_status in _IB_DEAD_STATUSES or _is_ineligible_reject_text(blob):
+                break
     finally:
         try:
             ib.errorEvent -= _on_err
         except Exception:
             pass
 
-    def _ostat(tr):
-        try:
-            return tr.orderStatus.status
-        except Exception:
-            return "UNKNOWN"
+    parent_status = _order_status(parent_trade) if parent_trade else "UNKNOWN"
+    filled_qty = _order_filled_qty(parent_trade) if parent_trade else 0.0
+    stop_status = _order_status(stop_loss_trade) if stop_loss_trade else "UNKNOWN"
+    target_status = _order_status(take_profit_trade) if take_profit_trade else "UNKNOWN"
+    blob = " | ".join(err_buf)
+    try:
+        if parent_trade is not None:
+            blob += " | " + str(getattr(parent_trade, "log", "") or "")
+    except Exception:
+        pass
 
-    parent_status = _ostat(parent_trade)
-    stop_status = _ostat(stop_loss_trade)
-    target_status = _ostat(take_profit_trade)
     print(
-        f"  [BRACKET] {ticker}: parent={parent_status} "
-        f"stop={stop_status}@${round(stop,2)} target={target_status}@${round(target_2r,2)} "
+        f"  [BRACKET] {ticker}: parent={parent_status} filled={filled_qty:g} "
+        f"stop={stop_status}@${round(stop, 2)} target={target_status}@${round(target_2r, 2)} "
         f"shares={shares}"
     )
 
-    blob = " | ".join(err_buf)
-    try:
-        blob += " | " + str(getattr(parent_trade, "log", "") or "")
-    except Exception:
-        pass
-    if _is_ineligible_reject_text(blob):
-        reason = blob or f"parent_status={parent_status}"
-        print(f"  [BRACKET] {ticker} REJECTED_INELIGIBLE: {reason[:200]}")
-        return {
-            "ticker": ticker,
-            "parent_id": parent_id,
-            "shares": shares,
-            "stop": stop,
-            "target": target_2r,
-            "status": "REJECTED_INELIGIBLE",
-            "reject_reason": reason[:500],
-            "parent_status": parent_status,
-            "stop_status": stop_status,
-            "target_status": target_status,
-            "paper": True,
-        }
-
-    healthy = {"PreSubmitted", "Submitted", "Filled"}
-    if parent_status == "Filled" and stop_status not in healthy:
-        alert = (
-            f"\ud83d\udea8 Q-ALPHA: {ticker} ENTRY FILLED but STOP status="
-            f"{stop_status} (not working). Position may be UNPROTECTED - "
-            f"check TWS and place a manual stop @ ${round(stop,2)} now."
-        )
-        print(alert)
-        send_telegram(alert)
-
-    return {
+    base = {
         "ticker": ticker,
         "parent_id": parent_id,
         "shares": shares,
         "stop": stop,
         "target": target_2r,
-        "status": "SUBMITTED",
         "parent_status": parent_status,
         "stop_status": stop_status,
         "target_status": target_status,
+        "filled_qty": filled_qty,
         "paper": True,
+    }
+
+    if filled_qty > 0 or parent_status == "Filled":
+        if stop_status not in {"PreSubmitted", "Submitted", "Filled"}:
+            alert = (
+                f"\ud83d\udea8 Q-ALPHA: {ticker} ENTRY FILLED but STOP status="
+                f"{stop_status} (not working). Position may be UNPROTECTED - "
+                f"check TWS and place a manual stop @ ${round(stop, 2)} now."
+            )
+            print(alert)
+            send_telegram(alert)
+        return {**base, "status": "FILLED"}
+
+    # No fill — cancel residuals so we never leave orphan working orders.
+    if take_profit_trade is not None:
+        _cancel_trade_safe(ib, take_profit_trade)
+    if stop_loss_trade is not None:
+        _cancel_trade_safe(ib, stop_loss_trade)
+    if parent_trade is not None:
+        _cancel_trade_safe(ib, parent_trade)
+    try:
+        ib.sleep(0.5)
+    except Exception:
+        pass
+
+    if _is_ineligible_reject_text(blob) or parent_status in _IB_DEAD_STATUSES:
+        reason = blob or f"parent_status={parent_status}"
+        print(f"  [BRACKET] {ticker} REJECTED_INELIGIBLE: {reason[:200]}")
+        return {
+            **base,
+            "status": "REJECTED_INELIGIBLE",
+            "reject_reason": reason[:500],
+        }
+
+    reason = blob or f"no fill within {_BRACKET_FILL_WAIT_SEC:.0f}s (parent={parent_status})"
+    print(f"  [BRACKET] {ticker} REJECTED_NO_FILL: {reason[:200]}")
+    return {
+        **base,
+        "status": "REJECTED_NO_FILL",
+        "reject_reason": reason[:500],
     }
 
 
@@ -711,15 +796,18 @@ def _get_open_tickers_today() -> set[str]:
 
 
 def _count_trades_today() -> int:
-    """Count autonomous + telegram entries opened today."""
+    """Count autonomous + telegram entries opened today (real fills only)."""
     store = PaperTradesStore()
     data = store.load()
     today = date.today().isoformat()
+    skip = {
+        "SKIPPED", "NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL",
+    }
     return sum(
         1
         for t in data.get("trades", [])
         if t.get("entry_date") == today
-        and t.get("status") not in ("SKIPPED",)
+        and t.get("status") not in skip
         and t.get("approved_by") in ("autonomous_agent", "telegram_yes")
     )
 
@@ -818,6 +906,119 @@ def cancel_realtime_bars(ib: IB, rt_bars: dict) -> None:
             pass
 
 
+def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
+    """
+    Fill-truth repair: any OPEN IBKR_PAPER trade with no IB position and never
+    filled → NEVER_FILLED, free pool capital, sync Supabase.
+
+    Safe to call mid-session or EOD. Returns list of corrected tickers.
+    """
+    store = PaperTradesStore()
+    data = store.load()
+    trades = data.get("trades") or []
+    pool = PoolManager(state_path=state_path("pool_state.json"))
+    corrected: list[dict] = []
+
+    # Build IB position map if connected.
+    ib_shares: dict[str, float] = {}
+    if ib is not None:
+        try:
+            for p in ib.positions():
+                sym = str(getattr(p.contract, "symbol", "") or "").upper()
+                if sym:
+                    ib_shares[sym] = ib_shares.get(sym, 0.0) + float(p.position or 0)
+        except Exception as exc:
+            print(f"  [RECONCILE] IB positions unavailable: {exc}")
+            ib = None
+
+    for t in trades:
+        status = str(t.get("status") or "").upper()
+        if status not in {"OPEN", "T1_HIT", "T2_HIT", "PENDING_MOC"}:
+            continue
+        if str(t.get("execution_mode") or "") != "IBKR_PAPER":
+            continue
+        ticker = str(t.get("ticker") or "").upper()
+        if not ticker:
+            continue
+
+        pos = float(ib_shares.get(ticker, 0.0)) if ib is not None else None
+        ibkr_st = str(t.get("ibkr_status") or "")
+        never_filled_hint = ibkr_st in (
+            "SUBMITTED", "PreSubmitted", "PendingSubmit", "Cancelled", "Inactive",
+            "Rejected", "",
+        ) and ibkr_st != "Filled"
+
+        # Only auto-correct when we can see IB and position is flat.
+        if ib is None:
+            continue
+        if abs(pos) >= 1e-6:
+            continue  # real position — leave alone
+        if ibkr_st == "Filled" and not never_filled_hint:
+            # Filled flag but flat now → likely closed elsewhere; do not ghost-fix here.
+            continue
+
+        pv = float(t.get("position_value") or 0)
+        print(
+            f"  [RECONCILE] {ticker} OPEN but IB flat + never confirmed fill "
+            f"→ NEVER_FILLED (free ${pv:.2f})"
+        )
+        t["status"] = "NEVER_FILLED"
+        t["exit_reason"] = "RECONCILE_NEVER_FILLED"
+        t["ibkr_status"] = ibkr_st or "Cancelled"
+        t["pnl_dollars"] = 0.0
+        t["pnl_pct"] = 0.0
+        t["remaining_t1"] = 0
+        t["remaining_t2"] = 0
+        t["remaining_t3"] = 0
+        t["skip_reason"] = (
+            t.get("skip_reason")
+            or "Reconcile: no IB position and entry never filled"
+        )
+        t["shares_total"] = 0
+        # Undo open_trade sizing if capital still looks reserved.
+        if pv > 0 and pool.deployed + 1e-6 >= pv:
+            pool.state["pool"] = round(pool.pool + pv, 2)
+            pool.state["deployed"] = round(max(0.0, pool.deployed - pv), 2)
+            pool.state["open_positions"] = max(0, pool.open_positions - 1)
+            pool.state["total_trades"] = max(0, int(pool.state["total_trades"]) - 1)
+            pool.save_state()
+        corrected.append({"ticker": ticker, "position_value": pv})
+
+        try:
+            from supabase_sync import SupabaseSync
+            row = dict(t)
+            row["position_size"] = 0.0
+            row["shares_total"] = 0
+            row["status"] = "NEVER_FILLED"
+            row["pnl_dollars"] = 0.0
+            SupabaseSync().upsert_trade(row)
+        except Exception as exc:
+            print(f"  [RECONCILE] Supabase sync warn ({ticker}): {exc}")
+
+    if corrected:
+        open_n = sum(
+            1 for x in trades
+            if str(x.get("status") or "") in {
+                "OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC",
+            }
+        )
+        data["summary"] = {
+            **(data.get("summary") or {}),
+            "open_trades": open_n,
+        }
+        store.save(data)
+        send_telegram(
+            "🔧 Q-ALPHA RECONCILE\n"
+            + "\n".join(
+                f"  {c['ticker']} → NEVER_FILLED (freed ${c['position_value']:.2f})"
+                for c in corrected
+            )
+        )
+    else:
+        print("  [RECONCILE] No ghost OPEN IBKR_PAPER trades.")
+    return corrected
+
+
 def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None) -> dict:
     """
     Monitor candidates 9:30-11:00 AM; enter on confirmed gap+VWAP+volume setup.
@@ -836,6 +1037,13 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
     main() feeds the result straight into send_session_recap().
     """
     pool = PoolManager(state_path=state_path("pool_state.json"))
+
+    # Repair any ghost OPEN rows before sizing new entries.
+    try:
+        reconcile_unfilled_opens(ib)
+        pool = PoolManager(state_path=state_path("pool_state.json"))
+    except Exception as exc:
+        print(f"  [RECONCILE] pre-entry warn: {exc}")
 
     entered: list[dict] = []
     skipped: list[dict] = []
@@ -1119,27 +1327,77 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
 
                 try:
                     result = _place_intraday_bracket(ib, order_plan)
-                    if result.get("status") == "REJECTED_INELIGIBLE":
+                    br_status = str(result.get("status") or "")
+                    if br_status in ("REJECTED_INELIGIBLE", "REJECTED_NO_FILL"):
                         reason = (
                             result.get("reject_reason")
-                            or "IB closing-only / ineligible / no permission"
+                            or "IB closing-only / ineligible / no fill"
                         )
-                        _SESSION_INELIGIBLE.add(ticker)
+                        if br_status == "REJECTED_INELIGIBLE":
+                            _SESSION_INELIGIBLE.add(ticker)
                         print(f"  → SESSION SKIP {ticker}: {reason[:160]}")
                         skipped.append({
                             "ticker": ticker,
-                            "reason": f"IB ineligible: {reason[:200]}",
+                            "reason": f"IB {br_status}: {reason[:200]}",
                             "price": current_price,
                         })
                         decided.add(ticker)
                         track.update(
                             decision="skipped",
                             decision_time=now_et.isoformat(),
-                            decision_reason=f"IB ineligible (no retry): {reason[:200]}",
+                            decision_reason=f"IB {br_status} (no book): {reason[:200]}",
                         )
+                        # Persist a NEVER_FILLED ledger row for fill-truth (not OPEN).
+                        try:
+                            ghost = {
+                                "ticker": ticker,
+                                "entry_date": date.today().isoformat(),
+                                "entry_price": current_price,
+                                "stop_price": stop_price,
+                                "target_1r": target_1r,
+                                "target_2r": target_2r,
+                                "target_3r": target_3r,
+                                "shares_total": 0,
+                                "shares_t1": 0,
+                                "shares_t2": 0,
+                                "shares_t3": 0,
+                                "status": "NEVER_FILLED",
+                                "approved_by": "autonomous_agent",
+                                "position_value": 0.0,
+                                "ibkr_order_id": result.get("parent_id"),
+                                "ibkr_status": result.get("parent_status") or br_status,
+                                "execution_mode": "IBKR_PAPER",
+                                "bracket_mode": "single_2r",
+                                "exit_reason": br_status,
+                                "skip_reason": reason[:400],
+                                "pnl_dollars": 0.0,
+                                "pnl_pct": 0.0,
+                            }
+                            save_trade(ghost)
+                        except Exception as save_exc:
+                            print(f"  NEVER_FILLED ledger warn: {save_exc}")
                         send_telegram(
-                            f"⏭ {ticker} SESSION SKIP — IB ineligible\n"
-                            f"{reason[:240]}\n(no retry this session; not a fill)"
+                            f"⏭ {ticker} SESSION SKIP — IB {br_status}\n"
+                            f"{reason[:240]}\n(not a fill; pool unchanged)"
+                        )
+                        continue
+
+                    if br_status != "FILLED":
+                        # Defensive: never book OPEN on Submitted / unknown.
+                        print(
+                            f"  → SKIP book {ticker}: bracket status={br_status} "
+                            f"(expected FILLED)"
+                        )
+                        skipped.append({
+                            "ticker": ticker,
+                            "reason": f"IB not filled (status={br_status})",
+                            "price": current_price,
+                        })
+                        decided.add(ticker)
+                        track.update(
+                            decision="skipped",
+                            decision_time=now_et.isoformat(),
+                            decision_reason=f"IB not filled: {br_status}",
                         )
                         continue
 
@@ -1172,7 +1430,7 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                         atr_14=atr_14,
                         position_value=round(position_value, 2),
                         ibkr_order_id=result.get("parent_id"),
-                        ibkr_status="SUBMITTED",
+                        ibkr_status="Filled",
                         execution_mode="IBKR_PAPER",
                         bracket_mode="single_2r",
                     )
@@ -1200,7 +1458,7 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                         f"Reason: {entry_reason}\n"
                         f"Catalyst: {track['candidate']['news_summary'][:60]}"
                     )
-                    print(f"  ✅ ORDER PLACED — Order ID: {result.get('parent_id')}")
+                    print(f"  ✅ ORDER FILLED — Order ID: {result.get('parent_id')}")
 
                 except Exception as exc:
                     print(f"  ❌ ORDER FAILED: {exc}")
@@ -1641,6 +1899,14 @@ def main() -> None:
         print("PHASE 4: SESSION RECAP")
         print(f"{'─' * 40}")
         send_session_recap(result, candidates)
+
+        print(f"\n{'─' * 40}")
+        print("PHASE 4b: FILL-TRUTH RECONCILE")
+        print(f"{'─' * 40}")
+        try:
+            reconcile_unfilled_opens(ib)
+        except Exception as exc:
+            print(f"  [RECONCILE] post-session warn: {exc}")
 
         print(f"\n{'─' * 40}")
         print("PHASE 5: SYNC TO MODAL")

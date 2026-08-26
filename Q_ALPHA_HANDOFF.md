@@ -230,7 +230,7 @@ Q-ALPHA/
 
 ## KNOWN DEBT (do not implement from this list without a dedicated spec)
 
-- **IB reject / fill-truth (JEM-class):** when TWS rejects with closing-only / Customer Ineligible / No Trading Permission, agent session-skips correctly, but dashboard Trade Log / Live Status may still need an explicit “rejected — not a fill” display path so ops never confuse a skip with an open. Separate ticket — do not fold into dashboard theme work.
+- **IB reject / fill-truth (JEM-class):** DONE 2026-08-26 — book OPEN only on parent **FILLED**; rejects → `NEVER_FILLED` (not OPEN); `reconcile_unfilled_opens` frees ghost opens; dashboard shows **Never filled**. JEM 2026-08-25 ledger corrected (TWS had no position); SEDG 2026-08-26 kept (TWS 8 sh).
 - **ENTRY-CONVENTION LIMITATION:** SIM entries fill at the 09:30 1-min close, which on the 15-min delayed tier is not visible until ~09:45 — fills are therefore not executable at that price in real money. Real-money transition requires the real-time tier OR re-basing entry fills to the first executable visible bar. Deferred: latency-cost study quantifying the gap.
 - **Latency-cost study:** for historical flagged gappers, recompute entries with fills at (i) 09:30 close vs (ii) first bar visible under 15-min delay; report per-trade and aggregate P&L difference → informs $199 Stocks Advanced upgrade decision.
 - **Monitor marks:** with Snapshot, all open-position marks cost ONE call; marks will be ~15 min stale (acceptable — settle is source of truth).

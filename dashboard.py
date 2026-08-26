@@ -302,6 +302,8 @@ def _candidate_status(trade: dict | None, now_et: datetime) -> str:
         return "— Skipped"
 
     status = str(trade.get("status") or "").upper()
+    if status in {"NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL"}:
+        return "🚫 Never filled"
     if status in OPEN_STATUSES or status in {"OPEN", "PENDING"}:
         return "🟢 In Trade"
 
@@ -722,32 +724,54 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 def tab_trade_log(trades: list) -> None:
     df = _trades_df(trades)
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
+    never = (
+        df[df["status"].isin(["NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL"])]
+        if not df.empty else pd.DataFrame()
+    )
 
     with st.container(border=True):
         section_header("Closed Trades", "Full exit log")
         if closed.empty:
             st.info("No closed trades yet.")
-            return
+        else:
+            log = closed.copy()
+            log["Exit"] = log.apply(
+                lambda r: r.get("tranche_3_exit") or r.get("tranche_2_exit")
+                or r.get("tranche_1_exit") or r.get("stop_hit_price") or r.get("entry_price"),
+                axis=1,
+            )
+            log = log.rename(columns={
+                "entry_date": "Date",
+                "ticker": "Ticker",
+                "entry_price": "Entry",
+                "pnl_dollars": "P&L$",
+                "pnl_pct": "P&L%",
+                "days_held": "Days",
+                "exit_reason": "Exit Reason",
+            })
+            cols = ["Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%", "Days", "Exit Reason"]
+            log = log[[c for c in cols if c in log.columns]]
+            styled = log.style.map(_style_pnl, subset=["P&L$", "P&L%"])
+            st.dataframe(styled, use_container_width=True, hide_index=True)
 
-        log = closed.copy()
-        log["Exit"] = log.apply(
-            lambda r: r.get("tranche_3_exit") or r.get("tranche_2_exit")
-            or r.get("tranche_1_exit") or r.get("stop_hit_price") or r.get("entry_price"),
-            axis=1,
-        )
-        log = log.rename(columns={
-            "entry_date": "Date",
-            "ticker": "Ticker",
-            "entry_price": "Entry",
-            "pnl_dollars": "P&L$",
-            "pnl_pct": "P&L%",
-            "days_held": "Days",
-            "exit_reason": "Exit Reason",
-        })
-        cols = ["Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%", "Days", "Exit Reason"]
-        log = log[[c for c in cols if c in log.columns]]
-        styled = log.style.map(_style_pnl, subset=["P&L$", "P&L%"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+    if not never.empty:
+        with st.container(border=True):
+            section_header(
+                "Never filled / IB rejected",
+                "Not opens — no pool capital; not counted as trades",
+            )
+            show = never.rename(columns={
+                "entry_date": "Date",
+                "ticker": "Ticker",
+                "status": "Status",
+                "exit_reason": "Reason",
+                "skip_reason": "Detail",
+            })
+            cols = [c for c in ["Date", "Ticker", "Status", "Reason", "Detail"] if c in show.columns]
+            st.dataframe(show[cols], use_container_width=True, hide_index=True)
+
+    if closed.empty:
+        return
 
     winners = closed[closed["pnl_dollars"] > 0]
     losers = closed[closed["pnl_dollars"] <= 0]
