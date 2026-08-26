@@ -1362,6 +1362,60 @@ def _lab_tranche_exits(tranches: list | None) -> str:
     return ", ".join(uniq) if uniq else "—"
 
 
+def _lab_fmt_money(x) -> str:
+    """Format a dollar amount or em dash."""
+    if x is None:
+        return "—"
+    try:
+        return f"${float(x):,.4f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _lab_unrealized_cell(pos: dict | None) -> str:
+    """
+    Unrealized $ and % from mark_price vs entry for one Lab pool leg.
+    Missing mark → 'no mark' (not a Live Status T3 KPI).
+    """
+    if not pos:
+        return "—"
+    entry = pos.get("entry_price")
+    mark = pos.get("mark_price")
+    shares = pos.get("shares")
+    if entry is None or mark is None:
+        return "no mark"
+    try:
+        e = float(entry)
+        m = float(mark)
+        sh = float(shares) if shares is not None else 0.0
+    except (TypeError, ValueError):
+        return "no mark"
+    if e <= 0:
+        return "no mark"
+    pnl = (m - e) * sh
+    pct = (m / e - 1.0) * 100.0
+    return f"${pnl:+,.2f} ({pct:+.1f}%)"
+
+
+def _lab_residuals_cell(pos: dict | None) -> str:
+    """residual_tranche_ids + FULL vs T4-only slot tag."""
+    if not pos:
+        return "—"
+    ids = pos.get("residual_tranche_ids")
+    if isinstance(ids, list) and ids:
+        tag = "+".join(str(x) for x in ids)
+    else:
+        tag = "—"
+    full = pos.get("counts_as_full_slot")
+    if full is True:
+        slot = "FULL"
+    elif full is False:
+        slot = "T4-only"
+    else:
+        slot = "?"
+    return f"{tag} · {slot}"
+
+
 OOS_R2_BACKTEST_PATH = ROOT / "strategy_lab" / "results" / "oos_r2_backtest.json"
 # Forward / gap R² is noise below this; still compute in runner, just don't show.
 OOS_R2_MIN_N = 20
@@ -1674,9 +1728,15 @@ def tab_strategy_lab() -> None:
         else:
             st.caption("No equity curve points yet.")
 
-    # --- Open positions ---
+    # --- Open positions (SIM Lab book — not IBKR Live Status) ---
     with st.container(border=True):
-        section_header("Open Positions", "Lab A vs B marks")
+        section_header("Open Positions", "Lab A vs B marks (SIM / Polygon)")
+        st.caption(
+            "Lab **A** = trailing exits · Lab **B** = target exits · "
+            "separate from the IBKR agent Live Status book. "
+            "Lab JEM (if listed) is a SIM residual (e.g. T4 runner), "
+            "not the agent NEVER_FILLED ghost."
+        )
         open_a = pool_a.get("open_positions") or {}
         open_b = pool_b.get("open_positions") or {}
         tickers_open = sorted(set(open_a.keys()) | set(open_b.keys()))
@@ -1687,25 +1747,24 @@ def tab_strategy_lab() -> None:
             for t in tickers_open:
                 oa = open_a.get(t) or {}
                 ob = open_b.get(t) or {}
+                # Prefer either pool's mark when only one side is open.
+                mark_a = oa.get("mark_price") if oa else None
+                mark_b = ob.get("mark_price") if ob else None
+                mark_show = mark_a if mark_a is not None else mark_b
                 open_rows.append({
                     "Ticker": t,
-                    "A entry": (
-                        f"${float(oa['entry_price']):.4f}"
-                        if oa.get("entry_price") is not None
-                        else "—"
-                    ),
+                    "Mark": _lab_fmt_money(mark_show),
+                    "A entry": _lab_fmt_money(oa.get("entry_price") if oa else None),
                     "A shares": oa.get("shares") if oa else "—",
-                    "A unrealized": "open (no mark)" if oa else "—",
-                    "B entry": (
-                        f"${float(ob['entry_price']):.4f}"
-                        if ob.get("entry_price") is not None
-                        else "—"
-                    ),
+                    "A unrealized": _lab_unrealized_cell(oa if oa else None),
+                    "A residual": _lab_residuals_cell(oa if oa else None),
+                    "B entry": _lab_fmt_money(ob.get("entry_price") if ob else None),
                     "B shares": ob.get("shares") if ob else "—",
-                    "B unrealized": "open (no mark)" if ob else "—",
+                    "B unrealized": _lab_unrealized_cell(ob if ob else None),
+                    "B residual": _lab_residuals_cell(ob if ob else None),
                     "sweep_reclaim": (
-                        oa.get("sweep_reclaim")
-                        or ob.get("sweep_reclaim")
+                        (oa.get("sweep_reclaim") if oa else None)
+                        or (ob.get("sweep_reclaim") if ob else None)
                         or "—"
                     ),
                 })
