@@ -35,6 +35,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
@@ -164,6 +165,83 @@ def _trades_df(trades: list) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def _safe_float(x, default: float = 0.0) -> float:
+    """
+    Coerce to float; None / NaN / Inf / blank → default.
+
+    Needed because pandas NaN is truthy, so `x or default` keeps NaN and
+    f-strings then render '$nan' or raise on non-str last_updated.
+    """
+    try:
+        if x is None:
+            return default
+        if isinstance(x, str) and not x.strip():
+            return default
+        # pd.isna covers None, NaN, NaT; skip non-scalars.
+        try:
+            if pd.isna(x):
+                return default
+        except (TypeError, ValueError):
+            pass
+        v = float(x)
+        if not math.isfinite(v):
+            return default
+        return v
+    except (TypeError, ValueError):
+        return default
+
+
+def _updated_hhmm_et(updated) -> str | None:
+    """HH:MM from ISO-ish last_updated, or None if not a usable string."""
+    if not isinstance(updated, str):
+        return None
+    s = updated.strip()
+    if len(s) < 16:
+        return None
+    return s[11:16]
+
+
+def _oneshot_polygon_mark(ticker: str) -> float | None:
+    """
+    Fail-soft live mark when Supabase current_price is null (until next monitor).
+    One attempt per ticker per Streamlit session.
+    """
+    t = str(ticker or "").upper().strip()
+    if not t:
+        return None
+    cache_key = f"_oneshot_mark_{t}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    price: float | None = None
+    try:
+        import requests
+
+        api_key = ensure_polygon_key_from_secrets()
+        if not api_key:
+            st.session_state[cache_key] = None
+            return None
+        url = (
+            f"https://api.polygon.io/v2/snapshot/"
+            f"locale/us/markets/stocks/tickers/{t}"
+        )
+        resp = requests.get(url, params={"apiKey": api_key}, timeout=5)
+        resp.raise_for_status()
+        data = resp.json().get("ticker") or {}
+        last = (data.get("lastTrade") or {}).get("p")
+        day_c = (data.get("day") or {}).get("c")
+        prev_c = (data.get("prevDay") or {}).get("c")
+        for raw in (last, day_c, prev_c):
+            px = _safe_float(raw, 0.0)
+            if px > 0:
+                price = px
+                break
+    except Exception as exc:
+        print(f"  oneshot mark failed ({t}): {exc}")
+        price = None
+    st.session_state[cache_key] = price
+    return price
 
 
 # Statuses that must never appear in Live Status Open Positions / open KPI.
@@ -356,36 +434,25 @@ def _trade_fill_columns(trade: dict | None) -> dict[str, str]:
         return blank
 
     def _money(val) -> str:
-        try:
-            if val is None or val == "":
-                return "—"
-            return f"${float(val):.2f}"
-        except (TypeError, ValueError):
+        v = _safe_float(val, float("nan"))
+        if not math.isfinite(v):
             return "—"
+        return f"${v:.2f}"
 
     entry = trade.get("entry_price")
     stop = trade.get("stop_price")
     target = trade.get("target_2r")
-    pnl = trade.get("pnl_dollars")
-    pct = trade.get("pnl_pct")
+    pnl_f = _safe_float(trade.get("pnl_dollars"), float("nan"))
+    pct_f = _safe_float(trade.get("pnl_pct"), float("nan"))
 
     pnl_str = "—"
-    try:
-        if pnl is not None and pnl != "":
-            pnl_f = float(pnl)
-            pct_part = ""
-            try:
-                if pct is not None and pct != "":
-                    pct_f = float(pct)
-                    # Trades store fraction (0.012) or already-percent; tolerate both.
-                    if abs(pct_f) <= 1.0:
-                        pct_f *= 100.0
-                    pct_part = f" ({pct_f:+.1f}%)"
-            except (TypeError, ValueError):
-                pct_part = ""
-            pnl_str = f"${pnl_f:+.2f}{pct_part}"
-    except (TypeError, ValueError):
-        pnl_str = "—"
+    if math.isfinite(pnl_f):
+        pct_part = ""
+        if math.isfinite(pct_f):
+            # Trades store fraction (0.012) or already-percent; tolerate both.
+            disp = pct_f * 100.0 if abs(pct_f) <= 1.0 else pct_f
+            pct_part = f" ({disp:+.1f}%)"
+        pnl_str = f"${pnl_f:+.2f}{pct_part}"
 
     return {
         "Entry": _money(entry),
@@ -550,16 +617,49 @@ def tab_live_status(trades: list, pool_history: list) -> None:
             st.info("No open positions.")
         else:
             for _, trade in open_df.iterrows():
-                ticker = trade["ticker"]
-                entry_price = float(trade.get("entry_price") or 0)
-                stop_price = float(trade.get("stop_price") or 0)
-                target_2r = float(trade.get("target_2r") or 0)
-                pnl_dollars = float(trade.get("pnl_dollars") or 0)
-                pnl_pct_val = float(trade.get("pnl_pct") or 0)
-                current_price = float(trade.get("current_price") or entry_price)
-                r_mult = float(trade.get("r_multiple") or 0)
-                dist_stop = float(trade.get("dist_to_stop") or 0)
-                updated = trade.get("last_updated") or ""
+                ticker = str(trade.get("ticker") or "")
+                entry_price = _safe_float(trade.get("entry_price"), 0.0)
+                stop_price = _safe_float(trade.get("stop_price"), 0.0)
+                target_2r = _safe_float(trade.get("target_2r"), 0.0)
+                shares = int(_safe_float(trade.get("shares_total"), 0.0))
+
+                raw_mark = _safe_float(trade.get("current_price"), float("nan"))
+                if not math.isfinite(raw_mark) or raw_mark <= 0:
+                    fetched = _oneshot_polygon_mark(ticker)
+                    if fetched is not None and fetched > 0:
+                        raw_mark = fetched
+                current_price = (
+                    raw_mark
+                    if math.isfinite(raw_mark) and raw_mark > 0
+                    else entry_price
+                )
+
+                pnl_dollars = _safe_float(trade.get("pnl_dollars"), float("nan"))
+                pnl_pct_val = _safe_float(trade.get("pnl_pct"), float("nan"))
+                r_mult = _safe_float(trade.get("r_multiple"), float("nan"))
+                dist_stop = _safe_float(trade.get("dist_to_stop"), float("nan"))
+
+                # Recompute display P&L when marks were missing/NaN but price known.
+                if (
+                    (not math.isfinite(pnl_dollars) or not math.isfinite(pnl_pct_val))
+                    and entry_price > 0
+                    and current_price > 0
+                ):
+                    pnl_per = current_price - entry_price
+                    if not math.isfinite(pnl_dollars) and shares > 0:
+                        pnl_dollars = pnl_per * shares
+                    if not math.isfinite(pnl_pct_val):
+                        pnl_pct_val = pnl_per / entry_price
+                    risk = entry_price - stop_price
+                    if not math.isfinite(r_mult) and risk > 0:
+                        r_mult = pnl_per / risk
+                    if not math.isfinite(dist_stop) and current_price > 0:
+                        dist_stop = (current_price - stop_price) / current_price
+
+                pnl_dollars = _safe_float(pnl_dollars, 0.0)
+                pnl_pct_val = _safe_float(pnl_pct_val, 0.0)
+                r_mult = _safe_float(r_mult, 0.0)
+                dist_stop = _safe_float(dist_stop, 0.0)
 
                 col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1.5, 1.5, 2])
 
@@ -594,6 +694,8 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                         (target_2r - current_price) / current_price
                         if current_price > 0 else 0.0
                     )
+                    if not math.isfinite(to_go):
+                        to_go = 0.0
                     st.metric(
                         "Target",
                         f"${target_2r:.2f}",
@@ -601,19 +703,32 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                     )
 
                 with col5:
-                    if target_2r > stop_price:
-                        progress = (current_price - stop_price) / (target_2r - stop_price)
-                        progress = max(0.0, min(1.0, progress))
-                        st.progress(
-                            progress,
-                            text=(
-                                f"Stop ${stop_price:.2f} ──── "
-                                f"${current_price:.2f} ──── "
-                                f"Target ${target_2r:.2f}"
-                            ),
+                    price_ok = (
+                        math.isfinite(current_price)
+                        and current_price > 0
+                        and math.isfinite(stop_price)
+                        and math.isfinite(target_2r)
+                        and target_2r > stop_price
+                    )
+                    if price_ok:
+                        progress = (
+                            (current_price - stop_price) / (target_2r - stop_price)
                         )
-                    if updated:
-                        st.caption(f"Updated: {updated[11:16]} ET")
+                        if math.isfinite(progress):
+                            progress = max(0.0, min(1.0, progress))
+                            st.progress(
+                                progress,
+                                text=(
+                                    f"Stop ${stop_price:.2f} ──── "
+                                    f"${current_price:.2f} ──── "
+                                    f"Target ${target_2r:.2f}"
+                                ),
+                            )
+                    hhmm = _updated_hhmm_et(trade.get("last_updated"))
+                    if hhmm:
+                        st.caption(f"Updated: {hhmm} ET")
+                    else:
+                        st.caption("Updated: —")
 
                 st.divider()
 
