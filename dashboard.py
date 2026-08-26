@@ -155,6 +155,8 @@ def _trades_df(trades: list) -> pd.DataFrame:
     if not trades:
         return pd.DataFrame()
     df = pd.DataFrame(trades)
+    if "status" in df.columns:
+        df["status"] = df["status"].astype(str).str.upper().str.strip()
     for col in (
         "entry_price", "stop_price", "target_2r", "pnl_dollars", "pnl_pct",
         "current_price", "r_multiple", "dist_to_stop", "dist_to_target",
@@ -162,6 +164,21 @@ def _trades_df(trades: list) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+# Statuses that must never appear in Live Status Open Positions / open KPI.
+_NON_OPEN_STATUSES = frozenset({
+    "NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL",
+    "SKIPPED", "CLOSED",
+})
+
+
+def _open_positions_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Only real bracket opens — NEVER_FILLED / rejects excluded."""
+    if df.empty or "status" not in df.columns:
+        return pd.DataFrame()
+    mask = df["status"].isin(OPEN_STATUSES) & ~df["status"].isin(_NON_OPEN_STATUSES)
+    return df.loc[mask].copy()
 
 
 def _parse_ts(ts_str: str) -> datetime:
@@ -483,11 +500,12 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
     pnl_dollar = pool - STARTING_POOL
     pnl_pct = (pnl_dollar / STARTING_POOL) * 100 if STARTING_POOL else 0
-    open_df = df[df["status"].isin(OPEN_STATUSES)] if not df.empty else pd.DataFrame()
+    open_df = _open_positions_df(df)
     open_pos = len(open_df)
-    t3_count = len(df[df["status"] == "T3_TRAIL"]) if not df.empty else 0
+    t3_count = len(open_df[open_df["status"] == "T3_TRAIL"]) if not open_df.empty else 0
 
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
+    # Total Trades = closed exits only (win rate denominator); NEVER_FILLED excluded.
     total_trades = len(closed)
     winning_trades = len(closed[closed["pnl_dollars"] > 0]) if not closed.empty else 0
     losing_trades = total_trades - winning_trades

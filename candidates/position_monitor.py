@@ -62,6 +62,14 @@ image = (
 polygon_secret = modal.Secret.from_name("polygon-api-key")
 MAX_HOLD_DAYS = 5
 MANAGED_TRADE_SOURCES = frozenset({"telegram_yes", "autonomous_agent"})
+# Bracket / EOD only for real opens — never treat rejects as positions.
+OPEN_STATUSES = frozenset({
+    "OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC",
+})
+TERMINAL_NON_OPEN = frozenset({
+    "NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL",
+    "SKIPPED", "CLOSED",
+})
 
 
 @dataclass
@@ -80,7 +88,8 @@ def recalculate_pool_from_trades(pool_mgr: PoolManager, all_trades: list[dict]) 
     Fixes drift when incremental pool updates get out of sync.
     """
     starting_pool = float(pool_mgr.state.get("starting_pool", DEFAULT_STARTING_POOL))
-    active_statuses = ("OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL")
+    # NEVER_FILLED / REJECTED_* must not count as deployed capital.
+    active_statuses = tuple(OPEN_STATUSES - {"PENDING_MOC"})
 
     realized_pnl = sum(
         t.get("pnl_dollars", 0) for t in all_trades
@@ -88,7 +97,8 @@ def recalculate_pool_from_trades(pool_mgr: PoolManager, all_trades: list[dict]) 
     )
     deployed = sum(
         t.get("position_value", 0) for t in all_trades
-        if t.get("status") in active_statuses
+        if str(t.get("status") or "").upper() in active_statuses
+        and str(t.get("status") or "").upper() not in TERMINAL_NON_OPEN
     )
     pool = starting_pool + realized_pnl - deployed
 
@@ -324,17 +334,26 @@ class PositionMonitor:
         if not self.test_mode:
             self.fill_pending_moc_trades()
 
-        open_trades = [
-            t for t in self.trader.trades
-            if t.get("status") in ("OPEN", "T1_HIT", "T3_TRAIL", "PENDING_MOC")
-            and t.get("approved_by") in MANAGED_TRADE_SOURCES
-        ]
+        open_trades = []
+        for t in self.trader.trades:
+            status = str(t.get("status") or "").upper()
+            if status in TERMINAL_NON_OPEN:
+                continue
+            if (
+                status in OPEN_STATUSES
+                and t.get("approved_by") in MANAGED_TRADE_SOURCES
+            ):
+                open_trades.append(t)
 
         if not open_trades:
             print("  No open trades to monitor")
 
         for raw in open_trades:
-            if raw.get("status") == "PENDING_MOC":
+            status = str(raw.get("status") or "").upper()
+            if status == "PENDING_MOC":
+                continue
+            if status not in OPEN_STATUSES or status in TERMINAL_NON_OPEN:
+                print(f"  Skip {raw.get('ticker')}: status={status}")
                 continue
             updated = self.process_trade(raw)
             self._update_trade_in_store(updated)
@@ -468,8 +487,11 @@ def run_monitor() -> dict | None:
                 data = json.loads(trades_path.read_text(encoding="utf-8"))
                 all_trades = data.get("trades", [])
             for trade in all_trades:
-                if trade.get("approved_by") in MANAGED_TRADE_SOURCES:
-                    sync.upsert_trade(trade)
+                if trade.get("approved_by") not in MANAGED_TRADE_SOURCES:
+                    continue
+                # Pass through NEVER_FILLED / REJECTED_* as-is so Supabase
+                # cannot stay OPEN after a local fill-truth correction.
+                sync.upsert_trade(trade)
             pool_state = result.get("pool", {})
             sync.upsert_pool_snapshot(pool_state)
             open_count = result.get("summary", {}).get("open_trades", 0)

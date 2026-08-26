@@ -27,6 +27,11 @@ POLYGON_SLEEP = 0.12
 OPEN_STATUSES = frozenset({
     "OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC",
 })
+# Never mark / upsert live P&L for rejects or unfilled parents (fill-truth).
+TERMINAL_NON_OPEN = frozenset({
+    "NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL",
+    "SKIPPED", "CLOSED",
+})
 MANAGED_TRADE_SOURCES = frozenset({"telegram_yes", "autonomous_agent"})
 
 
@@ -111,11 +116,24 @@ def run_intraday_monitor() -> None:
     data = json.loads(trades_path.read_text(encoding="utf-8"))
     trades = data.get("trades", [])
 
-    open_trades = [
-        t for t in trades
-        if t.get("status") in OPEN_STATUSES
-        and t.get("approved_by") in MANAGED_TRADE_SOURCES
-    ]
+    open_trades = []
+    skipped_terminal = []
+    for t in trades:
+        status = str(t.get("status") or "").upper()
+        if status in TERMINAL_NON_OPEN:
+            if t.get("approved_by") in MANAGED_TRADE_SOURCES:
+                skipped_terminal.append(f"{t.get('ticker')}:{status}")
+            continue
+        if (
+            status in OPEN_STATUSES
+            and t.get("approved_by") in MANAGED_TRADE_SOURCES
+        ):
+            open_trades.append(t)
+
+    if skipped_terminal:
+        print(
+            f"Skip marks for non-open: {', '.join(skipped_terminal)}"
+        )
 
     if not open_trades:
         print("No open positions to monitor")
@@ -128,6 +146,12 @@ def run_intraday_monitor() -> None:
 
     for trade in open_trades:
         ticker = trade["ticker"]
+        status = str(trade.get("status") or "").upper()
+        # Belt-and-suspenders: never upsert OPEN marks for rejects.
+        if status not in OPEN_STATUSES or status in TERMINAL_NON_OPEN:
+            print(f"  Skip {ticker}: status={status} (not open)")
+            continue
+
         entry_price = float(trade.get("entry_price") or 0)
         shares = int(trade.get("shares_total") or trade.get("shares") or 0)
         stop_price = float(trade.get("stop_price") or 0)
@@ -193,9 +217,13 @@ def run_intraday_monitor() -> None:
             "stop_price": stop_price,
             "target_2r": target_2r,
             "shares_total": shares,
-            "status": trade.get("status"),
+            # Preserve ledger status; never coerce NEVER_FILLED → OPEN.
+            "status": status,
             "last_updated": datetime.now().isoformat(),
         }
+        if trade_update["status"] not in OPEN_STATUSES:
+            print(f"  Abort upsert {ticker}: status={trade_update['status']}")
+            continue
         updates.append(trade_update)
         sync.upsert_trade(trade_update)
 
