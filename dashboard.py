@@ -2093,12 +2093,26 @@ def tab_strategy_lab() -> None:
     lab_ahead_banner(ahead_label, margin, a_val, b_val)
 
     # --- Side-by-side pool cards ---
-    # Pool value alone on first row so $X,XXX.XX never ellipsizes in a 1/3 column.
+    # Strategy A: Pool value | T4 trailing on top row (same height as B's pool-only top).
     col_a, col_b = st.columns(2)
     with col_a:
         with st.container(border=True):
             section_header(pool_a.get("label") or "Strategy A (Trailing)")
-            st.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+            t4_runners, a_full_slots = _lab_trail_runner_stats(pool_a)
+            a_slots_free = max(0, LAB_MAX_SLOTS - a_full_slots)
+            a_top_l, a_top_r = st.columns(2)
+            with a_top_l:
+                st.metric("Pool value", f"${a_val:,.2f}", f"{a_ret:+.2f}%")
+            with a_top_r:
+                st.metric(
+                    "T4 trailing",
+                    str(t4_runners),
+                    f"{a_slots_free} slots free",
+                )
+                st.caption(
+                    f"full slots: {a_full_slots}/{LAB_MAX_SLOTS} · "
+                    "T4-only = trailing runner (not a full slot)"
+                )
             m2, m3 = st.columns(2)
             m2.metric("Realized P&L", f"${a_pnl:+,.2f}")
             m3.metric(
@@ -2108,15 +2122,6 @@ def tab_strategy_lab() -> None:
             m4, m5 = st.columns(2)
             m4.metric("Open slots", f"{a_slots}/{LAB_MAX_SLOTS}")
             m5.metric("Closed trades", str(a_taken))
-            # Lab T4 trailing runners only (not Live agent T3 Trailing).
-            t4_runners, a_full_slots = _lab_trail_runner_stats(pool_a)
-            a_slots_free = max(0, LAB_MAX_SLOTS - a_full_slots)
-            st.metric(
-                "T4 trailing",
-                str(t4_runners),
-                f"{a_slots_free} slots free · full slots: {a_full_slots}/{LAB_MAX_SLOTS}",
-            )
-            st.caption("T4-only = trailing runner (not a full slot)")
     with col_b:
         with st.container(border=True):
             section_header(pool_b.get("label") or "Strategy B (Target)")
