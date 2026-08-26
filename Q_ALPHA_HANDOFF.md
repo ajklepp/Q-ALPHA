@@ -149,7 +149,8 @@ Every 30m Modal intraday monitor (agent)
 🔧 System Health
 📓 Daily Reviews
 🔬 Ticker Profiles  — Supabase `ticker_profiles` (anon); local JSON fallback; Refresh gated if no POLYGON on Cloud
-🧪 Strategy Lab     — SIM A (trail) vs B (targets); open table shows mark_price / residual tranches / unrealized; **not** the IBKR agent book
+🧪 Strategy Lab     — SIM A (trail) vs B (targets); marks / residual tranches; closed = flat only
+🧪 Lab Trade Log    — chronological SIM closed + today's entries; **≠** IBKR agent Trade Log
 📖 Glossary         — renders GLOSSARY.md
 ```
 

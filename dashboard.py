@@ -1416,6 +1416,221 @@ def _lab_residuals_cell(pos: dict | None) -> str:
     return f"{tag} · {slot}"
 
 
+def _lab_closed_side_cells(rec: dict | None) -> dict:
+    """Display cells for one pool's closed_trades record (or empty)."""
+    if not rec or not rec.get("taken", True):
+        return {
+            "exits": "—",
+            "reason": "—",
+            "ret%": "—",
+            "pnl": "—",
+        }
+    pnl = rec.get("pnl_usd")
+    try:
+        pnl_s = f"${float(pnl):+,.2f}" if pnl is not None else "—"
+    except (TypeError, ValueError):
+        pnl_s = "—"
+    ret = rec.get("return_pct")
+    try:
+        ret_s = f"{float(ret):+.2f}%" if ret is not None else "—"
+    except (TypeError, ValueError):
+        ret_s = "—"
+    return {
+        "exits": _lab_tranche_exits(rec.get("tranches")),
+        "reason": _lab_exit_summary(rec.get("exit_reason_counts")),
+        "ret%": ret_s,
+        "pnl": pnl_s,
+    }
+
+
+def _lab_align_closed_trades(pool_a: dict, pool_b: dict) -> list[dict]:
+    """
+    Align A/B closed_trades by (ticker, flag_date).
+
+    Never includes tickers that are still open in that pool for the same
+    flag_date. Does not use report.per_ticker (which mixes day entries / opens).
+    """
+    open_a = pool_a.get("open_positions") or {}
+    open_b = pool_b.get("open_positions") or {}
+
+    def _index(pool: dict, opens: dict) -> dict[tuple[str, str], dict]:
+        out: dict[tuple[str, str], dict] = {}
+        for rec in pool.get("closed_trades") or []:
+            if not rec.get("taken", True):
+                continue
+            ticker = str(rec.get("ticker") or "").upper()
+            if not ticker:
+                continue
+            fd = str(rec.get("flag_date") or "")[:10]
+            # Skip if still open on same flag_date in this pool.
+            op = opens.get(ticker) or {}
+            if op and str(op.get("flag_date") or "")[:10] == fd:
+                continue
+            if ticker in opens and not op.get("flag_date") and not fd:
+                continue
+            out[(ticker, fd)] = rec
+        return out
+
+    by_a = _index(pool_a, open_a)
+    by_b = _index(pool_b, open_b)
+    still_open = set(open_a) | set(open_b)
+    keys = sorted(set(by_a) | set(by_b), key=lambda k: (k[1], k[0]))
+    rows: list[dict] = []
+    for ticker, fd in keys:
+        # Never list a name that still has any Lab residual open.
+        if ticker in still_open:
+            continue
+        ar = by_a.get((ticker, fd))
+        br = by_b.get((ticker, fd))
+        entry = None
+        if ar and ar.get("entry_price") is not None:
+            entry = ar.get("entry_price")
+        elif br and br.get("entry_price") is not None:
+            entry = br.get("entry_price")
+        ac = _lab_closed_side_cells(ar)
+        bc = _lab_closed_side_cells(br)
+        settled = (
+            (ar or {}).get("settled_at")
+            or (br or {}).get("settled_at")
+            or ""
+        )
+        rows.append({
+            "Date": fd or "—",
+            "Ticker": ticker,
+            "Entry": _lab_fmt_money(entry),
+            "A exits": ac["exits"],
+            "A reason": ac["reason"],
+            "A ret%": ac["ret%"],
+            "A pnl": ac["pnl"],
+            "B exits": bc["exits"],
+            "B reason": bc["reason"],
+            "B ret%": bc["ret%"],
+            "B pnl": bc["pnl"],
+            "sweep": (
+                (ar or {}).get("sweep_reclaim")
+                or (br or {}).get("sweep_reclaim")
+                or "—"
+            ),
+            "_settled_at": settled,
+        })
+    return rows
+
+
+def _lab_chrono_closed_rows(pool_a: dict, pool_b: dict) -> list[dict]:
+    """Flat chronological closed list (A and B as separate rows) for Lab Trade Log."""
+    rows: list[dict] = []
+    for pool_label, pool in (("A", pool_a), ("B", pool_b)):
+        opens = pool.get("open_positions") or {}
+        for rec in pool.get("closed_trades") or []:
+            if not rec.get("taken", True):
+                continue
+            ticker = str(rec.get("ticker") or "").upper()
+            fd = str(rec.get("flag_date") or "")[:10]
+            op = opens.get(ticker) or {}
+            if op and str(op.get("flag_date") or "")[:10] == fd:
+                continue
+            cells = _lab_closed_side_cells(rec)
+            rows.append({
+                "Date": fd or "—",
+                "Pool": pool_label,
+                "Ticker": ticker,
+                "Entry": _lab_fmt_money(rec.get("entry_price")),
+                "Reason": cells["reason"],
+                "Ret%": cells["ret%"],
+                "P&L": cells["pnl"],
+                "Exits": cells["exits"],
+                "Sweep": rec.get("sweep_reclaim") or "—",
+                "_settled_at": str(rec.get("settled_at") or ""),
+            })
+    rows.sort(key=lambda r: (r.get("Date") or "", r.get("_settled_at") or "", r.get("Ticker") or ""))
+    for r in rows:
+        r.pop("_settled_at", None)
+    return rows
+
+
+def _lab_today_entry_rows(state: dict) -> list[dict]:
+    """Today's Lab candidates/entries with open vs closed status (not agent book)."""
+    flag = str(state.get("flag_date") or "")[:10]
+    pool_a = state.get("pool_A_trailing") or {}
+    pool_b = state.get("pool_B_target") or {}
+    open_a = pool_a.get("open_positions") or {}
+    open_b = pool_b.get("open_positions") or {}
+    closed_a = {
+        str(r.get("ticker") or "").upper()
+        for r in (pool_a.get("closed_trades") or [])
+        if str(r.get("flag_date") or "")[:10] == flag and r.get("taken", True)
+    }
+    closed_b = {
+        str(r.get("ticker") or "").upper()
+        for r in (pool_b.get("closed_trades") or [])
+        if str(r.get("flag_date") or "")[:10] == flag and r.get("taken", True)
+    }
+
+    tickers: list[str] = []
+    seen: set[str] = set()
+    per = (state.get("report") or {}).get("per_ticker") or []
+    for row in per:
+        t = str(row.get("ticker") or "").upper()
+        if t and t not in seen:
+            tickers.append(t)
+            seen.add(t)
+    scan = state.get("scan") or {}
+    for t in scan.get("tickers") or []:
+        u = str(t or "").upper()
+        if u and u not in seen:
+            tickers.append(u)
+            seen.add(u)
+    for t in list(open_a) + list(open_b) + list(closed_a) + list(closed_b):
+        u = str(t or "").upper()
+        if u and u not in seen:
+            tickers.append(u)
+            seen.add(u)
+
+    def _status(ticker: str, opens: dict, closed: set[str]) -> str:
+        if ticker in opens:
+            pos = opens[ticker] or {}
+            residuals = pos.get("residual_tranche_ids") or []
+            if residuals == ["T4"] or (
+                isinstance(residuals, list)
+                and len(residuals) == 1
+                and residuals[0] == "T4"
+            ):
+                return "OPEN (T4)"
+            return "OPEN"
+        if ticker in closed:
+            return "CLOSED"
+        return "—"
+
+    rows = []
+    for t in tickers:
+        per_row = next(
+            (r for r in per if str(r.get("ticker") or "").upper() == t),
+            None,
+        )
+        skipped = bool(per_row and per_row.get("skipped"))
+        entry = None
+        if per_row and per_row.get("entry_price") is not None:
+            entry = per_row.get("entry_price")
+        elif t in open_a:
+            entry = (open_a[t] or {}).get("entry_price")
+        elif t in open_b:
+            entry = (open_b[t] or {}).get("entry_price")
+        rows.append({
+            "Date": flag or "—",
+            "Ticker": t,
+            "Entry": _lab_fmt_money(entry),
+            "A status": "SKIP" if skipped else _status(t, open_a, closed_a),
+            "B status": "SKIP" if skipped else _status(t, open_b, closed_b),
+            "Sweep": (
+                (per_row or {}).get("sweep_reclaim")
+                or (open_a.get(t) or {}).get("sweep_reclaim")
+                or (open_b.get(t) or {}).get("sweep_reclaim")
+                or "—"
+            ),
+        })
+    return rows
+
+
 OOS_R2_BACKTEST_PATH = ROOT / "strategy_lab" / "results" / "oos_r2_backtest.json"
 # Forward / gap R² is noise below this; still compute in runner, just don't show.
 OOS_R2_MIN_N = 20
@@ -1774,84 +1989,21 @@ def tab_strategy_lab() -> None:
                 hide_index=True,
             )
 
-    # --- Closed trades (side-by-side A vs B) ---
+    # --- Closed trades (closed_trades only — never report.per_ticker / opens) ---
     with st.container(border=True):
-        section_header("Closed Trades", "Aligned A / B exits")
-        # Prefer report.per_ticker (aligned A/B); else zip closed_trades by ticker.
-        per = (state.get("report") or {}).get("per_ticker") or []
-        closed_rows = []
-        if per:
-            for row in per:
-                if row.get("skipped"):
-                    continue
-                ar = row.get("A") or {}
-                br = row.get("B") or {}
-                if not ar.get("taken") and not br.get("taken"):
-                    continue
-                closed_rows.append({
-                    "Ticker": row.get("ticker"),
-                    "Entry": (
-                        f"${float(row['entry_price']):.4f}"
-                        if row.get("entry_price") is not None
-                        else "—"
-                    ),
-                    "A exits": _lab_tranche_exits(ar.get("tranches")),
-                    "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
-                    "A ret%": (
-                        f"{float(ar['return_pct']):+.2f}%"
-                        if ar.get("return_pct") is not None
-                        else "—"
-                    ),
-                    "B exits": _lab_tranche_exits(br.get("tranches")),
-                    "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
-                    "B ret%": (
-                        f"{float(br['return_pct']):+.2f}%"
-                        if br.get("return_pct") is not None
-                        else "—"
-                    ),
-                    "sweep_reclaim": row.get("sweep_reclaim") or "—",
-                })
-        else:
-            # Fallback: index closed_trades by ticker
-            by_a = {
-                t.get("ticker"): t
-                for t in (pool_a.get("closed_trades") or [])
-                if t.get("taken")
-            }
-            by_b = {
-                t.get("ticker"): t
-                for t in (pool_b.get("closed_trades") or [])
-                if t.get("taken")
-            }
-            for t in sorted(set(by_a) | set(by_b)):
-                ar = by_a.get(t) or {}
-                br = by_b.get(t) or {}
-                entry = ar.get("entry_price", br.get("entry_price"))
-                closed_rows.append({
-                    "Ticker": t,
-                    "Entry": f"${float(entry):.4f}" if entry is not None else "—",
-                    "A exits": _lab_tranche_exits(ar.get("tranches")),
-                    "A reason": _lab_exit_summary(ar.get("exit_reason_counts")),
-                    "A ret%": (
-                        f"{float(ar['return_pct']):+.2f}%"
-                        if ar.get("return_pct") is not None
-                        else "—"
-                    ),
-                    "B exits": _lab_tranche_exits(br.get("tranches")),
-                    "B reason": _lab_exit_summary(br.get("exit_reason_counts")),
-                    "B ret%": (
-                        f"{float(br['return_pct']):+.2f}%"
-                        if br.get("return_pct") is not None
-                        else "—"
-                    ),
-                    "sweep_reclaim": (
-                        ar.get("sweep_reclaim") or br.get("sweep_reclaim") or "—"
-                    ),
-                })
-
+        section_header("Closed Trades", "Fully flat A/B only · aligned by ticker + flag_date")
+        st.caption(
+            "SIM Lab ledger — not the IBKR agent Trade Log. "
+            "Still-open names (incl. T4 runners) stay in Open Positions above."
+        )
+        closed_rows = _lab_align_closed_trades(pool_a, pool_b)
         if closed_rows:
+            show = [
+                {k: v for k, v in r.items() if not k.startswith("_")}
+                for r in closed_rows
+            ]
             st.dataframe(
-                pd.DataFrame(closed_rows),
+                pd.DataFrame(show),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -1866,6 +2018,82 @@ def tab_strategy_lab() -> None:
             f"Candidates: {n_c or len(scan.get('tickers') or [])} — "
             f"{', '.join(scan.get('tickers') or [])}"
         )
+
+
+def tab_lab_trade_log() -> None:
+    """
+    Dedicated Strategy Lab trade review (SIM / Polygon).
+    Never mixes agent paper_trades / IBKR fills.
+    """
+    state = _load_forward_state()
+    with st.container(border=True):
+        section_header(
+            "Lab Trade Log",
+            "SIM Polygon Lab review — not the IBKR agent Trade Log",
+        )
+        st.caption(
+            "Lab **A** = trailing exits · Lab **B** = target exits. "
+            "Agent Live Status / Trade Log is a separate book."
+        )
+        if state is None:
+            st.info(
+                "No forward-test data yet — start `live_forward.py` "
+                "(or wait for Supabase `strategy_lab_state`)."
+            )
+            return
+
+        pool_a = state.get("pool_A_trailing") or {}
+        pool_b = state.get("pool_B_target") or {}
+        flag = state.get("flag_date") or "—"
+        st.caption(
+            f"flag_date **{flag}** · source **{state.get('_lab_state_source') or '—'}** · "
+            f"open A={len(pool_a.get('open_positions') or {})} "
+            f"B={len(pool_b.get('open_positions') or {})}"
+        )
+
+    with st.container(border=True):
+        section_header("Today's Lab entries", "Open vs closed for current flag_date")
+        today_rows = _lab_today_entry_rows(state)
+        if today_rows:
+            st.dataframe(
+                pd.DataFrame(today_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No Lab candidates/entries for this flag_date yet.")
+
+    with st.container(border=True):
+        section_header(
+            "Closed trades (chronological)",
+            "Each pool row is a fully flat SIM exit",
+        )
+        chrono = _lab_chrono_closed_rows(pool_a, pool_b)
+        if chrono:
+            st.dataframe(
+                pd.DataFrame(chrono),
+                use_container_width=True,
+                hide_index=True,
+                height=min(520, 56 + 38 * max(len(chrono), 1)),
+            )
+        else:
+            st.caption("No closed Lab trades yet.")
+
+    with st.container(border=True):
+        section_header("Closed trades (A vs B aligned)")
+        aligned = _lab_align_closed_trades(pool_a, pool_b)
+        if aligned:
+            show = [
+                {k: v for k, v in r.items() if not k.startswith("_")}
+                for r in aligned
+            ]
+            st.dataframe(
+                pd.DataFrame(show),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No aligned closed pairs yet.")
 
 
 GLOSSARY_PATH = ROOT / "GLOSSARY.md"
@@ -1925,7 +2153,7 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
@@ -1933,6 +2161,7 @@ def main() -> None:
         "📓 Daily Reviews",
         "🔬 Ticker Profiles",
         "🧪 Strategy Lab",
+        "🧪 Lab Trade Log",
         "📖 Glossary",
     ])
 
@@ -1951,6 +2180,8 @@ def main() -> None:
     with tab7:
         tab_strategy_lab()
     with tab8:
+        tab_lab_trade_log()
+    with tab9:
         tab_glossary()
 
     render_footer()

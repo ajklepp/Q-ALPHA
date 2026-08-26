@@ -1023,7 +1023,7 @@ def run_settle(
                 k: result[k]
                 for k in (
                     "closed_A", "closed_B", "pool_A_usd", "pool_B_usd",
-                    "open_positions",
+                    "open_positions", "open_A", "open_B",
                 )
                 if k in result
             },
@@ -1037,10 +1037,13 @@ def run_settle(
         b = float(result.get("pool_B_usd") or 0)
         closed_a = int(result.get("closed_A") or 0)
         closed_b = int(result.get("closed_B") or 0)
+        open_a = int(result.get("open_A") or 0)
+        open_b = int(result.get("open_B") or 0)
         msg = (
             f"🧪 {label.upper()}: Pool A ${a:.2f}, Pool B ${b:.2f}, "
             f"closed A={closed_a} B={closed_b}, "
-            f"still open={n_open}. "
+            f"open A={open_a} B={open_b} "
+            f"(names, not combined slots). "
             f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}."
         )
         if quiet:
@@ -1209,7 +1212,7 @@ def run_day(
                 f"🧪 EOD: Pool A ${float(state['pool_A_trailing']['value_usd']):.2f} "
                 f"(0.00%), Pool B ${float(state['pool_B_target']['value_usd']):.2f} "
                 f"(0.00%), trades today: 0, winner: tie. "
-                f"open=0. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+                f"open A=0 B=0. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
                 dry_run=dry,
             )
             return {
@@ -1284,10 +1287,9 @@ def run_day(
         except Exception as exc:
             print(f"[live_forward] WARN: print_summary skipped ({exc})")
 
-        n_open = (
-            len(state["pool_A_trailing"].get("open_positions") or {})
-            + len(state["pool_B_target"].get("open_positions") or {})
-        )
+        n_open_a = len(state["pool_A_trailing"].get("open_positions") or {})
+        n_open_b = len(state["pool_B_target"].get("open_positions") or {})
+        n_open = n_open_a + n_open_b
         set_phase(state, "eod", "writing end-of-day / entry summary")
         if mode == MODE_LIVE and n_open:
             state["status"] = "open_positions"
@@ -1303,6 +1305,8 @@ def run_day(
             "tickers": report.get("tickers"),
             "winner": report.get("winner"),
             "open_positions": n_open,
+            "open_A": n_open_a,
+            "open_B": n_open_b,
             "pool_A": {
                 "end_usd": report["pool_A_trailing"]["end_usd"],
                 "return_pct": report["pool_A_trailing"]["return_pct"],
@@ -1356,7 +1360,8 @@ def run_day(
             f"🧪 EOD: Pool A ${a_end:.2f} ({a_ret_s}), "
             f"Pool B ${b_end:.2f} ({b_ret_s}), "
             f"trades today: {n_trades}, winner: {winner_label}, "
-            f"open={n_open}. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+            f"open A={n_open_a} B={n_open_b}. "
+            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
             dry_run=dry,
         )
 

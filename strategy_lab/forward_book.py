@@ -712,16 +712,17 @@ def settle_open_positions(
 
     a_val = float(state["pool_A_trailing"]["value_usd"])
     b_val = float(state["pool_B_target"]["value_usd"])
-    n_open = (
-        len(state["pool_A_trailing"].get("open_positions") or {})
-        + len(state["pool_B_target"].get("open_positions") or {})
-    )
+    n_open_a = len(state["pool_A_trailing"].get("open_positions") or {})
+    n_open_b = len(state["pool_B_target"].get("open_positions") or {})
+    n_open = n_open_a + n_open_b
     return {
         "closed_A": len(closed_a),
         "closed_B": len(closed_b),
         "pool_A_usd": round(a_val, 4),
         "pool_B_usd": round(b_val, 4),
         "open_positions": n_open,
+        "open_A": n_open_a,
+        "open_B": n_open_b,
         "closed_trades_A": closed_a,
         "closed_trades_B": closed_b,
     }
