@@ -1603,6 +1603,56 @@ def _lab_residuals_cell(pos: dict | None) -> str:
     return f"{tag} · {slot}"
 
 
+_LAB_FULL_TRANCHE_IDS = frozenset({"T1", "T2", "T3"})
+
+
+def _lab_is_t4_only_runner(pos: dict | None) -> bool:
+    """
+    Lab trailing runner: residual is T4-only (no T1/T2/T3 still working).
+
+    Uses residual_tranche_ids when present; else counts_as_full_slot is False.
+    Lab semantics only — not Live agent T3 trailing.
+    """
+    if not pos:
+        return False
+    ids = pos.get("residual_tranche_ids")
+    if isinstance(ids, list) and ids:
+        residual = {str(x) for x in ids}
+        return "T4" in residual and not (residual & _LAB_FULL_TRANCHE_IDS)
+    return pos.get("counts_as_full_slot") is False
+
+
+def _lab_trail_runner_stats(pool: dict) -> tuple[int, int]:
+    """
+    Strategy A display: (t4_only_runner_count, full_slots_used).
+
+    full_slots_used prefers counts_as_full_slot; falls back to residual ∩ {T1,T2,T3}.
+    """
+    opens = pool.get("open_positions") or {}
+    t4_only = 0
+    full_slots = 0
+    for pos in opens.values():
+        if not isinstance(pos, dict):
+            continue
+        if _lab_is_t4_only_runner(pos):
+            t4_only += 1
+        full = pos.get("counts_as_full_slot")
+        if full is True:
+            full_slots += 1
+        elif full is False:
+            continue
+        else:
+            ids = pos.get("residual_tranche_ids")
+            if isinstance(ids, list) and ids:
+                residual = {str(x) for x in ids}
+                if residual & _LAB_FULL_TRANCHE_IDS:
+                    full_slots += 1
+            else:
+                # Pre-settle open with no residuals yet → full slot.
+                full_slots += 1
+    return t4_only, full_slots
+
+
 def _lab_closed_side_cells(rec: dict | None) -> dict:
     """Display cells for one pool's closed_trades record (or empty)."""
     if not rec or not rec.get("taken", True):
@@ -2058,6 +2108,15 @@ def tab_strategy_lab() -> None:
             m4, m5 = st.columns(2)
             m4.metric("Open slots", f"{a_slots}/{LAB_MAX_SLOTS}")
             m5.metric("Closed trades", str(a_taken))
+            # Lab T4 trailing runners only (not Live agent T3 Trailing).
+            t4_runners, a_full_slots = _lab_trail_runner_stats(pool_a)
+            a_slots_free = max(0, LAB_MAX_SLOTS - a_full_slots)
+            st.metric(
+                "T4 trailing",
+                str(t4_runners),
+                f"{a_slots_free} slots free · full slots: {a_full_slots}/{LAB_MAX_SLOTS}",
+            )
+            st.caption("T4-only = trailing runner (not a full slot)")
     with col_b:
         with st.container(border=True):
             section_header(pool_b.get("label") or "Strategy B (Target)")
