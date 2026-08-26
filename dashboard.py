@@ -203,6 +203,58 @@ def _updated_hhmm_et(updated) -> str | None:
     return s[11:16]
 
 
+def _open_mark_notional(trade) -> float:
+    """
+    Display market value of one open: mark×shares when current_price is
+    valid, else entry notional (position_size / position_value / entry×shares).
+    Display-only — does not change pool_state accounting.
+    """
+    entry = _safe_float(trade.get("entry_price"), 0.0)
+    shares = int(_safe_float(trade.get("shares_total"), 0.0))
+    entry_notional = _safe_float(trade.get("position_size"), float("nan"))
+    if not math.isfinite(entry_notional) or entry_notional <= 0:
+        entry_notional = _safe_float(trade.get("position_value"), float("nan"))
+    if not math.isfinite(entry_notional) or entry_notional <= 0:
+        entry_notional = entry * shares if entry > 0 and shares > 0 else 0.0
+
+    mark = _safe_float(trade.get("current_price"), float("nan"))
+    if math.isfinite(mark) and mark > 0 and shares > 0:
+        return mark * shares
+
+    pnl = _safe_float(trade.get("pnl_dollars"), float("nan"))
+    if math.isfinite(pnl) and entry_notional > 0:
+        return entry_notional + pnl
+    return float(entry_notional)
+
+
+def _display_pool_equity(
+    pool_history: list,
+    open_df: pd.DataFrame,
+) -> tuple[float, float, float, float]:
+    """
+    Live Status equity display: cash + open mark (or entry notional).
+
+    Returns (equity, cash, deployed_book, starting).
+    Does not mutate pool_state / snapshots.
+    """
+    starting = STARTING_POOL
+    cash = STARTING_POOL
+    deployed_book = 0.0
+    if pool_history:
+        snap = pool_history[-1] or {}
+        cash = _safe_float(snap.get("pool"), STARTING_POOL)
+        deployed_book = _safe_float(snap.get("deployed"), 0.0)
+        starting = _safe_float(snap.get("starting_pool"), STARTING_POOL)
+
+    if open_df is not None and not open_df.empty:
+        open_value = sum(_open_mark_notional(row) for _, row in open_df.iterrows())
+    else:
+        open_value = deployed_book
+
+    equity = cash + open_value
+    return equity, cash, deployed_book, starting
+
+
 def _oneshot_polygon_mark(ticker: str) -> float | None:
     """
     Fail-soft live mark when Supabase current_price is null (until next monitor).
@@ -561,13 +613,12 @@ def tab_live_status(trades: list, pool_history: list) -> None:
     else:
         watch_load_err = None
 
-    pool = STARTING_POOL
-    if pool_history:
-        pool = float(pool_history[-1].get("pool", STARTING_POOL))
-
-    pnl_dollar = pool - STARTING_POOL
-    pnl_pct = (pnl_dollar / STARTING_POOL) * 100 if STARTING_POOL else 0
     open_df = _open_positions_df(df)
+    equity, cash, deployed_book, starting = _display_pool_equity(
+        pool_history, open_df,
+    )
+    pnl_dollar = equity - starting
+    pnl_pct = (pnl_dollar / starting) * 100 if starting else 0.0
     open_pos = len(open_df)
     t3_count = len(open_df[open_df["status"] == "T3_TRAIL"]) if not open_df.empty else 0
 
@@ -584,9 +635,12 @@ def tab_live_status(trades: list, pool_history: list) -> None:
         with col1:
             st.metric(
                 "Pool Value",
-                f"${pool:,.2f}",
+                f"${equity:,.2f}",
                 f"{pnl_dollar:+.2f} ({pnl_pct:+.1f}%)",
                 delta_color="normal",
+            )
+            st.caption(
+                f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}"
             )
         with col2:
             st.metric(
