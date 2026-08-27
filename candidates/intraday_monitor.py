@@ -1,11 +1,17 @@
 """
-Q-Alpha intraday position monitor.
+Q-Alpha intraday position monitor (Modal — Polygon fallback marks ONLY).
 
 Runs on Modal every 30 minutes during market hours (scheduler Cron
-``*/30 13-20 * * 1-5`` ≈ 9:30–4:00 PM ET). Marks are Polygon snapshots —
-NOT TWS. TWS is for orders/fills + reconcile_unfilled_opens only.
-Updates Supabase with live unrealized P&L for the dashboard.
-Does NOT trigger exits. Never reopens NEVER_FILLED / REJECTED_* rows.
+``*/30 13-20 * * 1-5`` ≈ 9:30–4:00 PM ET).
+
+CRITICAL:
+  Modal cannot reach local TWS (127.0.0.1:7497). This job does NOT close
+  trades and must NEVER keep/reopen a name that local TWS sync already
+  marked CLOSED or NEVER_FILLED.
+  Live SoT for marks + filled-flat→CLOSED is local
+  ``candidates/tws_intraday_sync.py`` (Task Scheduler, clientId 96).
+
+Polygon marks here are secondary/fallback for still-OPEN ledger rows only.
 """
 from __future__ import annotations
 
@@ -118,7 +124,9 @@ def _supabase_status_is_terminal(sync, ticker: str, entry_date: str) -> bool:
 def run_intraday_monitor() -> None:
     """
     Fetch Polygon marks for open positions only; upsert unrealized P&L.
-    Skips NEVER_FILLED / REJECTED_* and will not overwrite those in Supabase.
+
+    Does not close positions. Skips CLOSED / NEVER_FILLED / REJECTED_* locally
+    and will not overwrite those statuses in Supabase (no re-OPEN).
     """
     load_dotenv_if_available()
 
@@ -178,11 +186,11 @@ def run_intraday_monitor() -> None:
         if status not in OPEN_STATUSES or status in TERMINAL_NON_OPEN:
             print(f"  Skip {ticker}: status={status} (not open)")
             continue
-        # Do not resurrect a Cloud NEVER_FILLED with stale Modal OPEN marks.
+        # Do not resurrect Cloud CLOSED / NEVER_FILLED with stale Modal OPEN marks.
         if entry_date and _supabase_status_is_terminal(sync, ticker, entry_date):
             print(
-                f"  Skip {ticker}: Supabase already NEVER_FILLED/REJECTED "
-                f"(will not upsert OPEN marks)"
+                f"  Skip {ticker}: Supabase already CLOSED/NEVER_FILLED/REJECTED "
+                f"(will not upsert OPEN marks / will not re-OPEN)"
             )
             continue
 

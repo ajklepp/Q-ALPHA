@@ -954,7 +954,8 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
         if abs(pos) >= 1e-6:
             continue  # real position — leave alone
         if ibkr_st == "Filled" and not never_filled_hint:
-            # Filled flag but flat now → likely closed elsewhere; do not ghost-fix here.
+            # Filled then flat → CLOSED is owned by local tws_intraday_sync.py
+            # (30m Task Scheduler). Morning reconcile stays NEVER_FILLED-only.
             continue
 
         pv = float(t.get("position_value") or t.get("position_size") or 0)

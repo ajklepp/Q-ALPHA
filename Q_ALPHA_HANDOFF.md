@@ -120,12 +120,23 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 9:29     Premarket Telegram (agent)
 9:30–11:00 Entries (agent)
 9:35     Strategy Lab live_forward (parallel SIM — no IBKR)
-10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase)
+10:00–16:00  Live TWS sync every 30m (LOCAL — marks + filled-flat→CLOSED)
+10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase SIM)
 11:00    Agent session recap Telegram
 ~4:15    Modal EOD monitor (agent)
 ~4:20    Strategy Lab --settle (primary EOD; optional 16:40 backup)
-Every 30m Modal intraday monitor (agent)
+Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
+         does NOT close; must never re-OPEN CLOSED / NEVER_FILLED
 ```
+
+**Live marks/closes SoT:** local `candidates/tws_intraday_sync.py` (TWS clientId **96**).
+Modal cannot reach `127.0.0.1:7497`. Register (Aaron runs once):
+
+```powershell
+schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
+```
+
+Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`
 
 ### Agent morning list (Phase 2 — TWS pipeline)
 
@@ -232,6 +243,7 @@ Q-ALPHA/
 ## KNOWN DEBT (do not implement from this list without a dedicated spec)
 
 - **IB reject / fill-truth (JEM-class):** DONE 2026-08-26 — book OPEN only on parent **FILLED**; rejects → `NEVER_FILLED` (not OPEN); `reconcile_unfilled_opens` frees ghost opens; dashboard shows **Never filled**. JEM 2026-08-25 ledger corrected (TWS had no position); SEDG 2026-08-26 kept (TWS 8 sh).
+- **Live filled-flat→CLOSED mid-day:** DONE 2026-08-27 — local `tws_intraday_sync.py` (clientId 96, schtasks `QAlpha Live TWS Sync`) books CLOSED when TWS POS=0 after a confirmed fill; Modal Polygon marks never close / never re-OPEN.
 - **ENTRY-CONVENTION LIMITATION:** SIM entries fill at the 09:30 1-min close, which on the 15-min delayed tier is not visible until ~09:45 — fills are therefore not executable at that price in real money. Real-money transition requires the real-time tier OR re-basing entry fills to the first executable visible bar. Deferred: latency-cost study quantifying the gap.
 - **Latency-cost study:** for historical flagged gappers, recompute entries with fills at (i) 09:30 close vs (ii) first bar visible under 15-min delay; report per-trade and aggregate P&L difference → informs $199 Stocks Advanced upgrade decision.
 - **Monitor marks:** with Snapshot, all open-position marks cost ONE call; marks will be ~15 min stale (acceptable — settle is source of truth).
@@ -256,7 +268,7 @@ Q-ALPHA/
 ```
 TWS paper port: 7497
 Account (paper): DUR857496
-Client IDs: ibkr_connector=1 · autonomous_agent=5 · MD probes use a free id (e.g. 98)
+Client IDs: ibkr_connector=1 · autonomous_agent=5 · Live TWS sync=96 · spike/scan=97 · MD probes=98–99
 ```
 
 **Paper market data — verified 2026-08-24 ~19:34 EDT** (read-only probe, SPY, clientId 98):
@@ -288,12 +300,16 @@ Paper L2 gate 2026-08-24: AAPL/TSLA/SPY smart depth = PARTIAL_IEX_SMART (2152 mi
 # Agent (TWS open)
 .\venv\Scripts\python.exe candidates\autonomous_agent.py
 
+# Live TWS sync (marks + filled-flat→CLOSED; TWS open)
+.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair
+
 # Dashboard detached
 .\start_dashboard.ps1
 
 # Task checks
 schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST
 schtasks /Query /TN "QAlpha Autonomous Agent" /V /FO LIST
+schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST
 schtasks /Query /TN "QAlpha Strategy Lab Settle" /FO LIST
 schtasks /Query /TN "QAlpha Readonly Mirror Sync" /FO LIST
 
