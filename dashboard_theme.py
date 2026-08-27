@@ -160,10 +160,15 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] span {
 }
 div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
   font-family: "IBM Plex Mono", ui-monospace, monospace !important;
-  font-size: 0.95rem !important;
-  white-space: normal !important;
+  font-size: 0.85rem !important;
+  white-space: nowrap !important;
   overflow: visible !important;
   text-overflow: clip !important;
+  max-width: none !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricDelta"] svg {
+  /* keep pill icons; do not clip sibling text */
+  flex-shrink: 0;
 }
 
 /* Narrow columns still show full pool values */

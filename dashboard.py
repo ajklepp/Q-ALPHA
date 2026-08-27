@@ -293,8 +293,10 @@ def _display_pool_kpis(
         cash = max(0.0, starting - deployed_book)
 
     pool_book = cash + deployed_book
-    # MTM equity for P&L only — never shown as "Pool".
-    mtm_equity = cash + (opens_mark if has_opens else deployed_book)
+    # MTM equity = residual cash + open marks only.
+    # Never cash + (undeployed snap) + marks — that invents phantom equity
+    # (e.g. $3717 when pool is ~$3k). With 0 opens → mtm = cash ≈ pool.
+    mtm_equity = cash + opens_mark
     pnl_dollar = mtm_equity - starting
     return pool_book, pnl_dollar, cash, deployed_book, starting
 
@@ -348,11 +350,16 @@ _NON_OPEN_STATUSES = frozenset({
 
 
 def _open_positions_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Only real bracket opens — NEVER_FILLED / rejects excluded."""
+    """Only real bracket opens — CLOSED / NEVER_FILLED / rejects excluded."""
     if df.empty or "status" not in df.columns:
         return pd.DataFrame()
     mask = df["status"].isin(OPEN_STATUSES) & ~df["status"].isin(_NON_OPEN_STATUSES)
-    return df.loc[mask].copy()
+    out = df.loc[mask].copy()
+    # Flat ledger ghosts (shares zeroed) must not appear as open cards.
+    if not out.empty and "shares_total" in out.columns:
+        shares = pd.to_numeric(out["shares_total"], errors="coerce").fillna(0)
+        out = out.loc[shares > 0].copy()
+    return out
 
 
 def _parse_ts(ts_str: str) -> datetime:
@@ -676,20 +683,26 @@ def tab_live_status(trades: list, pool_history: list) -> None:
         section_header("Session KPIs", "Pool, slots, and hit rate")
         # All six: st.metric + colored delta pills (no captions, no delta_color="off").
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        mtm_total = starting + pnl_dollar
+        # MTM equity; with 0 opens equals cash (≈ pool when deployed=0).
+        mtm_total = cash + sum(
+            _open_mark_notional(row) for _, row in open_df.iterrows()
+        ) if open_pos else cash
+        # Short deltas only — long strings truncate to "+23...." in 6-col layout.
         with col1:
             st.metric(
                 "Pool",
                 f"${pool_book:,.2f}",
-                f"${cash:,.0f} cash · ${deployed_book:,.0f} dep",
+                f"${cash:,.0f}/${deployed_book:,.0f}",
                 delta_color="normal",
+                help=f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}",
             )
         with col2:
             st.metric(
                 "P&L",
                 f"${mtm_total:,.2f}",
-                f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)",
+                f"{pnl_dollar:+.0f}",
                 delta_color="normal",
+                help=f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%) vs ${starting:,.0f} start",
             )
         with col3:
             st.metric(
@@ -793,16 +806,20 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                     )
 
                 with col3:
-                    stop_color = (
-                        "🔴" if dist_stop < 0.02
-                        else "🟡" if dist_stop < 0.05
-                        else "🟢"
-                    )
-                    st.metric(
-                        "Stop",
-                        f"${stop_price:.2f}",
-                        f"{stop_color} {dist_stop:.1%} away",
-                    )
+                    if (
+                        math.isfinite(stop_price)
+                        and stop_price > 0
+                        and current_price <= stop_price
+                    ):
+                        stop_delta = "HIT / through stop"
+                    else:
+                        stop_color = (
+                            "🔴" if dist_stop < 0.02
+                            else "🟡" if dist_stop < 0.05
+                            else "🟢"
+                        )
+                        stop_delta = f"{stop_color} {dist_stop:.1%} away"
+                    st.metric("Stop", f"${stop_price:.2f}", stop_delta)
 
                 with col4:
                     to_go = (
@@ -811,11 +828,15 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                     )
                     if not math.isfinite(to_go):
                         to_go = 0.0
-                    st.metric(
-                        "Target",
-                        f"${target_2r:.2f}",
-                        f"{to_go:.1%} to go",
-                    )
+                    if (
+                        math.isfinite(target_2r)
+                        and target_2r > 0
+                        and current_price >= target_2r
+                    ):
+                        target_delta = "HIT / past"
+                    else:
+                        target_delta = f"{to_go:.1%} to go"
+                    st.metric("Target", f"${target_2r:.2f}", target_delta)
 
                 with col5:
                     price_ok = (
@@ -826,19 +847,32 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                         and target_2r > stop_price
                     )
                     if price_ok:
-                        progress = (
-                            (current_price - stop_price) / (target_2r - stop_price)
-                        )
-                        if math.isfinite(progress):
-                            progress = max(0.0, min(1.0, progress))
-                            st.progress(
-                                progress,
-                                text=(
-                                    f"Stop ${stop_price:.2f} ──── "
-                                    f"${current_price:.2f} ──── "
-                                    f"Target ${target_2r:.2f}"
-                                ),
+                        if current_price < stop_price:
+                            progress = 0.0
+                            bar_label = (
+                                f"below stop · ${current_price:.2f} "
+                                f"< stop ${stop_price:.2f}"
                             )
+                        elif current_price > target_2r:
+                            progress = 1.0
+                            bar_label = (
+                                f"past target · ${current_price:.2f} "
+                                f"> target ${target_2r:.2f}"
+                            )
+                        else:
+                            progress = (
+                                (current_price - stop_price)
+                                / (target_2r - stop_price)
+                            )
+                            if not math.isfinite(progress):
+                                progress = 0.0
+                            progress = max(0.0, min(1.0, progress))
+                            bar_label = (
+                                f"Stop ${stop_price:.2f} ──── "
+                                f"${current_price:.2f} ──── "
+                                f"Target ${target_2r:.2f}"
+                            )
+                        st.progress(progress, text=bar_label)
                     hhmm = _updated_hhmm_et(trade.get("last_updated"))
                     if hhmm:
                         st.caption(f"Updated: {hhmm} ET")

@@ -45,6 +45,8 @@ ET = pytz.timezone("America/New_York")
 MANAGED_SOURCES = frozenset({"autonomous_agent", "telegram_yes"})
 OPEN_LEDGER = frozenset({"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"})
 FILL_CONFIRMED = frozenset({"Filled", "FILLED"})
+# Exit px must match TWS sell within this relative band or repair overwrites.
+EXIT_PX_TOL_FRAC = 0.0025  # 0.25%
 
 
 def _finite(val: Any) -> float | None:
@@ -133,44 +135,95 @@ def _tws_mark_price(ib, symbol: str) -> float | None:
     return None
 
 
-def _collect_sell_fills(ib, symbol: str, since_date: str) -> list[dict[str, Any]]:
-    """
-    Executions for symbol on/after entry_date that look like sells (side SLD).
-    Best-effort — paper may return sparse history.
-    """
-    from ib_insync import ExecutionFilter
+def _fill_side(ex) -> str:
+    return str(getattr(ex, "side", "") or "").upper()
 
-    fills: list[dict[str, Any]] = []
+
+def _fill_record(ex) -> dict[str, Any] | None:
+    px = _finite(getattr(ex, "price", None) or getattr(ex, "avgPrice", None))
+    qty = _finite(getattr(ex, "shares", None) or getattr(ex, "cumQty", None))
+    if px is None or px <= 0:
+        return None
+    return {
+        "price": px,
+        "qty": qty or 0.0,
+        "order_id": getattr(ex, "orderId", None),
+        "time": str(getattr(ex, "time", "") or ""),
+        "side": _fill_side(ex) or "",
+    }
+
+
+def _collect_symbol_fills(ib, symbol: str, since_date: str) -> tuple[list[dict], list[dict]]:
+    """
+    Buys + sells for symbol from session fills and reqExecutions.
+    Never set ExecutionFilter.side (IB Error 321 on some builds).
+    """
+    buys: list[dict[str, Any]] = []
+    sells: list[dict[str, Any]] = []
+    seen: set[tuple] = set()
+
+    def _ingest(ex, contract_sym: str = "") -> None:
+        sym = (contract_sym or symbol).upper()
+        if sym != symbol.upper():
+            return
+        rec = _fill_record(ex)
+        if rec is None:
+            return
+        key = (rec["side"], rec["price"], rec["qty"], rec["time"], rec["order_id"])
+        if key in seen:
+            return
+        seen.add(key)
+        side = rec["side"]
+        if side in {"BOT", "BUY"}:
+            buys.append(rec)
+        elif side in {"SLD", "SELL"} or not side:
+            # Empty side: treat as sell candidate only if we already have buys
+            # for this symbol in the same pull — else keep as sell (exit path).
+            sells.append(rec)
+
     try:
+        for fill in ib.fills() or []:
+            c = getattr(fill, "contract", None)
+            sym = str(getattr(c, "symbol", "") or "").upper() if c else ""
+            ex = getattr(fill, "execution", None) or fill
+            _ingest(ex, sym)
+    except Exception as exc:
+        print(f"  ib.fills warn: {exc}")
+
+    try:
+        from ib_insync import ExecutionFilter
+
         filt = ExecutionFilter()
         filt.symbol = symbol
-        # Do NOT set filt.side — IB Error 321 "Invalid side" on some builds.
         if since_date:
-            # IB wants yyyymmdd-hh:mm:ss in some builds; date alone often works.
             filt.time = f"{since_date.replace('-', '')}-00:00:00"
         for fill in ib.reqExecutions(filt) or []:
+            c = getattr(fill, "contract", None)
+            sym = str(getattr(c, "symbol", "") or symbol).upper()
             ex = getattr(fill, "execution", None) or fill
-            side = str(getattr(ex, "side", "") or "").upper()
-            if side in {"BOT", "BUY"}:
-                continue
-            # Keep SLD/SELL/empty (empty: rare wrappers)
-            if side and side not in {"SLD", "SELL"}:
-                continue
-            px = _finite(getattr(ex, "price", None) or getattr(ex, "avgPrice", None))
-            qty = _finite(getattr(ex, "shares", None))
-            if px is None or px <= 0:
-                continue
-            order_id = getattr(ex, "orderId", None)
-            fills.append({
-                "price": px,
-                "qty": qty or 0.0,
-                "order_id": order_id,
-                "time": str(getattr(ex, "time", "") or ""),
-                "side": side or "SLD",
-            })
+            _ingest(ex, sym)
     except Exception as exc:
         print(f"  executions {symbol} warn: {exc}")
-    return fills
+
+    # Drop empty-side rows that are clearly buys if price≈entry handled later.
+    sells = [s for s in sells if s["side"] in {"SLD", "SELL", ""}]
+    return buys, sells
+
+
+def _vwap(fills: list[dict]) -> float | None:
+    if not fills:
+        return None
+    num = 0.0
+    den = 0.0
+    for f in fills:
+        q = float(f.get("qty") or 0)
+        p = float(f.get("price") or 0)
+        if q > 0 and p > 0:
+            num += p * q
+            den += q
+    if den > 0:
+        return num / den
+    return float(fills[-1]["price"])
 
 
 def _infer_exit(
@@ -179,7 +232,7 @@ def _infer_exit(
     mark: float | None,
 ) -> tuple[float, str]:
     """
-    Prefer TWS sell fill evidence; classify STOP / TARGET_2R / BROKER_EXIT.
+    Prefer TWS sell VWAP; classify STOP / TARGET_2R / BROKER_EXIT.
     Never leave without an exit price when TWS is flat.
     """
     entry = float(trade.get("entry_price") or 0)
@@ -187,20 +240,21 @@ def _infer_exit(
     target_2r = float(trade.get("target_2r") or 0)
     tol = max(0.02, entry * 0.002) if entry > 0 else 0.02
 
-    if sell_fills:
-        # Use most recent / volume-weighted last fill price.
-        last = sell_fills[-1]
-        px = float(last["price"])
-        if stop > 0 and px <= stop + tol:
-            return px, "STOP"
+    px = _vwap(sell_fills)
+    if px is not None and px > 0:
+        # Prefer target classification when fill is at/through 2R even if
+        # also near stop (should not happen); stop if at/through stop.
         if target_2r > 0 and px >= target_2r - tol:
-            return px, "TARGET_2R"
-        return px, "BROKER_EXIT"
+            return float(px), "TARGET_2R"
+        if stop > 0 and px <= stop + tol:
+            return float(px), "STOP"
+        return float(px), "BROKER_EXIT"
 
-    # No fill tape — infer from stop/mark.
     if mark is not None and mark > 0:
         if stop > 0 and mark <= stop + tol:
             return float(stop if stop > 0 else mark), "STOP"
+        if target_2r > 0 and mark >= target_2r - tol:
+            return float(mark), "TARGET_2R"
         return float(mark), "BROKER_EXIT"
 
     if stop > 0:
@@ -211,13 +265,18 @@ def _infer_exit(
 
 
 def _original_shares(trade: dict) -> int:
-    shares = int(trade.get("shares_total") or 0)
-    if shares > 0:
-        return shares
+    """Recover share count even after shares_total was zeroed on close."""
+    for key in ("shares_total", "shares_t1", "shares"):
+        try:
+            n = int(trade.get(key) or 0)
+            if n > 0:
+                return n
+        except (TypeError, ValueError):
+            pass
     plan = trade.get("order_plan") or {}
     for key in ("shares", "tranche_1_shares", "shares_t1"):
         try:
-            n = int(plan.get(key) or trade.get(key) or 0)
+            n = int(plan.get(key) or 0)
             if n > 0:
                 return n
         except (TypeError, ValueError):
@@ -225,60 +284,74 @@ def _original_shares(trade: dict) -> int:
     return 0
 
 
-def _book_closed(
+def _position_cost(trade: dict) -> float:
+    """Dollar cost basis reserved at open (prefer order_plan)."""
+    plan = trade.get("order_plan") or {}
+    for raw in (
+        trade.get("position_value"),
+        trade.get("position_size"),
+        plan.get("position_value"),
+    ):
+        px = _finite(raw)
+        if px is not None and px > 0:
+            return float(px)
+    shares = _original_shares(trade)
+    entry = _finite(trade.get("entry_price")) or _finite(plan.get("entry_price")) or 0.0
+    if shares > 0 and entry > 0:
+        return round(entry * shares, 2)
+    return 0.0
+
+
+def _set_closed_fields(
     trade: dict,
     *,
     exit_price: float,
     exit_reason: str,
-    pool: PoolManager,
-) -> dict:
-    """Mutate trade → CLOSED and update pool cash/deployed from cost vs proceeds."""
+) -> None:
+    """Write CLOSED fields + realized PnL; does not touch pool (recalc later)."""
     shares = _original_shares(trade)
-    cost = float(
-        trade.get("position_value")
-        or trade.get("position_size")
-        or (float(trade.get("entry_price") or 0) * shares)
-    )
+    cost = _position_cost(trade)
     if shares <= 0 and cost > 0 and float(trade.get("entry_price") or 0) > 0:
         shares = max(1, int(round(cost / float(trade["entry_price"]))))
     proceeds = round(exit_price * shares, 2) if shares > 0 else 0.0
-    entry = float(trade.get("entry_price") or 0)
     pnl = round(proceeds - cost, 2) if cost else 0.0
     pnl_pct = round(pnl / cost, 4) if cost > 0 else 0.0
 
+    # Keep share memory for future repairs.
+    if shares > 0:
+        trade["shares_t1"] = int(trade.get("shares_t1") or shares)
+        plan = dict(trade.get("order_plan") or {})
+        if not plan.get("shares"):
+            plan["shares"] = shares
+        if not plan.get("position_value") and cost > 0:
+            plan["position_value"] = cost
+        trade["order_plan"] = plan
+
     trade["status"] = "CLOSED"
     trade["exit_reason"] = exit_reason
-    trade["tranche_1_exit"] = exit_price
-    trade["stop_hit_price"] = exit_price if exit_reason == "STOP" else trade.get("stop_hit_price")
+    trade["tranche_1_exit"] = round(exit_price, 4)
+    trade["stop_hit_price"] = (
+        exit_price if exit_reason == "STOP" else trade.get("stop_hit_price")
+    )
     trade["stop_hit_date"] = (
-        datetime.now(ET).strftime("%Y-%m-%d") if exit_reason == "STOP" else trade.get("stop_hit_date")
+        datetime.now(ET).strftime("%Y-%m-%d")
+        if exit_reason == "STOP"
+        else trade.get("stop_hit_date")
     )
     trade["pnl_dollars"] = pnl
     trade["pnl_pct"] = pnl_pct
-    trade["current_price"] = exit_price
+    trade["current_price"] = round(exit_price, 4)
     trade["shares_total"] = 0
     trade["remaining_t1"] = 0
     trade["remaining_t2"] = 0
     trade["remaining_t3"] = 0
     trade["position_value"] = 0.0
     trade["last_updated"] = datetime.now(timezone.utc).isoformat()
-    trade["ibkr_status"] = trade.get("ibkr_status") or "Closed"
-
-    # Accounting: open_trade did pool-=cost, deployed+=cost.
-    # Close: pool+=proceeds, deployed-=cost → equity moves by PnL.
-    if cost > 0 and pool.deployed + 1e-6 >= min(cost, pool.deployed):
-        pool.state["deployed"] = round(max(0.0, pool.deployed - cost), 2)
-    pool.state["pool"] = round(pool.pool + proceeds, 2)
-    pool.state["open_positions"] = max(0, pool.open_positions - 1)
-    if pnl > 0:
-        pool.state["winning_trades"] = int(pool.state.get("winning_trades") or 0) + 1
-    pool.save_state()
-
+    trade["ibkr_status"] = "Filled"
     print(
-        f"  CLOSED {trade.get('ticker')} @ ${exit_price:.2f} "
-        f"({exit_reason}) pnl=${pnl:+.2f} shares={shares}"
+        f"  CLOSED {trade.get('ticker')} @ ${exit_price:.4f} "
+        f"({exit_reason}) pnl=${pnl:+.2f} shares={shares} cost=${cost:.2f}"
     )
-    return trade
 
 
 def _apply_mark(trade: dict, mark: float) -> None:
@@ -307,23 +380,61 @@ def _was_filled(trade: dict) -> bool:
     st = str(trade.get("ibkr_status") or "")
     if st in FILL_CONFIRMED:
         return True
-    # Explicit NEVER_FILLED / reject reasons → not a fill.
     reason = str(trade.get("exit_reason") or "").upper()
     if "NEVER_FILLED" in reason or reason.startswith("REJECTED"):
         return False
-    # OPEN with positive shares booked after agent fill path.
     if int(trade.get("shares_total") or 0) > 0 and st not in {
         "SUBMITTED", "PreSubmitted", "PendingSubmit", "Cancelled", "Inactive",
         "Rejected", "",
     }:
         return True
+    # Already CLOSED with a prior fill booking.
+    if str(trade.get("status") or "").upper() == "CLOSED" and st in FILL_CONFIRMED:
+        return True
     return st == "Filled"
+
+
+def _exit_needs_repair(trade: dict, exit_px: float) -> bool:
+    """True if booked exit differs from TWS sell VWAP."""
+    booked = _finite(trade.get("tranche_1_exit")) or _finite(trade.get("current_price"))
+    if booked is None or booked <= 0:
+        return True
+    if exit_px <= 0:
+        return False
+    tol = max(0.01, exit_px * EXIT_PX_TOL_FRAC)
+    return abs(booked - exit_px) > tol
+
+
+def _rebuild_pool_counters(pool: PoolManager, trades: list[dict]) -> None:
+    """Rebuild cash/deployed + trade counters from ledger (no double-count)."""
+    from position_monitor import recalculate_pool_from_trades
+
+    recalculate_pool_from_trades(pool, trades)
+    closed = [
+        t for t in trades if str(t.get("status") or "").upper() == "CLOSED"
+    ]
+    opens = [
+        t for t in trades if str(t.get("status") or "").upper() in OPEN_LEDGER
+    ]
+    pool.state["total_trades"] = len(closed)
+    pool.state["winning_trades"] = sum(
+        1 for t in closed if float(t.get("pnl_dollars") or 0) > 0
+    )
+    pool.state["open_positions"] = len(opens)
+    pool.state["last_updated"] = datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
+    pool.save_state()
+
+
+def _is_managed_ibkr(t: dict) -> bool:
+    if t.get("approved_by") not in MANAGED_SOURCES:
+        return False
+    return str(t.get("execution_mode") or "") == "IBKR_PAPER"
 
 
 def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
     """
     Connect TWS → mark opens still long → CLOSE filled-then-flat →
-    reconcile never-filled ghosts → sync Supabase.
+    repair wrong exit px on already-CLOSED flats → rebuild pool → sync Supabase.
     """
     from ib_insync import IB, util
 
@@ -332,6 +443,7 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "marked": [],
         "closed": [],
+        "repaired": [],
         "reconciled": [],
         "errors": [],
         "repair": repair,
@@ -353,6 +465,13 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         return summary
 
     try:
+        # Warm fills cache.
+        try:
+            ib.reqExecutions()
+            ib.sleep(1.0)
+        except Exception:
+            pass
+
         pos_map = _ib_position_map(ib)
         print(f"  TWS positions: {pos_map or '(flat)'}")
 
@@ -368,7 +487,6 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
             from autonomous_agent import reconcile_unfilled_opens
             reconciled = reconcile_unfilled_opens(ib)
             summary["reconciled"] = [c.get("ticker") for c in reconciled]
-            # Reload after reconcile mutated files.
             data = store.load()
             trades = data.get("trades") or []
             pool = PoolManager(state_path=state_path("pool_state.json"))
@@ -377,81 +495,134 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
             summary["errors"].append(f"reconcile: {exc}")
 
         closed_now: list[str] = []
+        repaired_now: list[str] = []
         marked_now: list[str] = []
+        ledger_dirty = False
 
         for t in trades:
+            if not _is_managed_ibkr(t):
+                continue
             status = str(t.get("status") or "").upper()
-            if status not in OPEN_LEDGER:
-                continue
-            if t.get("approved_by") not in MANAGED_SOURCES:
-                continue
-            if str(t.get("execution_mode") or "") != "IBKR_PAPER":
-                continue
             ticker = str(t.get("ticker") or "").upper()
             if not ticker:
                 continue
 
             tws_qty = float(pos_map.get(ticker, 0.0))
-            filled = _was_filled(t)
+            entry_date = str(t.get("entry_date") or "")[:10]
 
-            # Still long → mark from TWS.
+            # Still long → mark from TWS (OPEN ledger only).
             if abs(tws_qty) >= 1e-6:
+                if status not in OPEN_LEDGER:
+                    print(f"  WARN {ticker}: TWS long but ledger={status}")
                 mark = _tws_mark_price(ib, ticker)
-                if mark is not None:
+                if mark is not None and status in OPEN_LEDGER:
                     _apply_mark(t, mark)
                     marked_now.append(ticker)
+                    ledger_dirty = True
                     sync_live_book_safe(trade=dict(t), pool_state=None)
                     print(
                         f"  MARK {ticker} TWS@{mark:.2f} "
                         f"pnl=${float(t.get('pnl_dollars') or 0):+.2f}"
                     )
-                else:
-                    print(f"  MARK {ticker}: no TWS price (left as-is)")
                 continue
 
             # TWS flat.
-            if not filled:
-                # Unfilled flat should already be NEVER_FILLED via reconcile.
-                print(f"  SKIP {ticker}: flat + not confirmed fill (reconcile owns)")
+            buys, sells = _collect_symbol_fills(ib, ticker, entry_date)
+            sell_vwap = _vwap(sells)
+            buy_vwap = _vwap(buys)
+            if buy_vwap and buy_vwap > 0 and status in OPEN_LEDGER | {"CLOSED"}:
+                # Optional: align entry to TWS bot VWAP when repair + material drift.
+                booked_entry = _finite(t.get("entry_price")) or 0.0
+                if (
+                    repair
+                    and booked_entry > 0
+                    and abs(booked_entry - buy_vwap) > max(0.01, buy_vwap * EXIT_PX_TOL_FRAC)
+                ):
+                    print(
+                        f"  ENTRY note {ticker}: ledger ${booked_entry:.4f} "
+                        f"vs TWS bot VWAP ${buy_vwap:.4f} (keeping ledger entry)"
+                    )
+
+            filled = _was_filled(t) or bool(sells) or bool(buys)
+
+            if status in OPEN_LEDGER:
+                if not filled:
+                    print(f"  SKIP {ticker}: flat + not confirmed fill (reconcile owns)")
+                    continue
+                exit_px, exit_reason = _infer_exit(
+                    t, sells, _finite(t.get("current_price")),
+                )
+                if exit_px <= 0:
+                    exit_px = float(t.get("stop_price") or t.get("entry_price") or 0)
+                    exit_reason = exit_reason or "BROKER_EXIT"
+                _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
+                closed_now.append(ticker)
+                ledger_dirty = True
+                row = dict(t)
+                row["position_size"] = 0.0
+                sync_live_book_safe(trade=row, pool_state=None)
+                _send_telegram(
+                    f"LIVE CLOSED {ticker} @ ${exit_px:.2f} ({exit_reason})\n"
+                    f"P&L ${float(t.get('pnl_dollars') or 0):+.2f}"
+                )
                 continue
 
-            # Filled then flat → BOOK CLOSED (the missing mid-day path).
-            entry_date = str(t.get("entry_date") or "")[:10]
-            sells = _collect_sell_fills(ib, ticker, entry_date)
-            mark_hint = _finite(t.get("current_price"))
-            exit_px, exit_reason = _infer_exit(t, sells, mark_hint)
-            if exit_px <= 0:
-                exit_px = float(t.get("stop_price") or t.get("entry_price") or 0)
-                exit_reason = exit_reason or "BROKER_EXIT"
-            _book_closed(t, exit_price=exit_px, exit_reason=exit_reason, pool=pool)
-            closed_now.append(ticker)
-            row = dict(t)
-            row["position_size"] = 0.0
-            sync_live_book_safe(trade=row, pool_state=None)
-            _send_telegram(
-                f"LIVE CLOSED {ticker} @ ${exit_px:.2f} ({exit_reason})\n"
-                f"P&L ${float(t.get('pnl_dollars') or 0):+.2f}"
-            )
+            # Already CLOSED but flat: repair exit px from TWS sells.
+            if status == "CLOSED" and (repair or sell_vwap):
+                if not sell_vwap:
+                    continue
+                exit_px, exit_reason = _infer_exit(t, sells, sell_vwap)
+                if exit_px <= 0:
+                    continue
+                if _exit_needs_repair(t, exit_px) or (
+                    repair and str(t.get("exit_reason") or "") != exit_reason
+                ):
+                    old = t.get("tranche_1_exit")
+                    _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
+                    repaired_now.append(ticker)
+                    ledger_dirty = True
+                    row = dict(t)
+                    row["position_size"] = 0.0
+                    sync_live_book_safe(trade=row, pool_state=None)
+                    print(
+                        f"  REPAIR {ticker}: exit {old} -> {exit_px:.4f} ({exit_reason})"
+                    )
 
         summary["marked"] = marked_now
         summary["closed"] = closed_now
+        summary["repaired"] = repaired_now
 
-        # Persist ledger + pool snapshot once.
+        # Always rebuild pool from ledger so cash/deployed/Total Trades match.
+        _rebuild_pool_counters(pool, trades)
+
         open_n = sum(
             1 for x in trades if str(x.get("status") or "").upper() in OPEN_LEDGER
         )
         data["summary"] = {
             **(data.get("summary") or {}),
             "open_trades": open_n,
+            "closed_trades": int(pool.state.get("total_trades") or 0),
         }
         store.save(data)
+
+        # Force-upsert every managed trade + pool so Cloud cannot lag.
+        for t in trades:
+            if not _is_managed_ibkr(t):
+                continue
+            row = dict(t)
+            if str(row.get("status") or "").upper() in {"CLOSED", "NEVER_FILLED"}:
+                row["position_size"] = 0.0
+                row["shares_total"] = int(row.get("shares_total") or 0)
+            sync_live_book_safe(trade=row, pool_state=None)
         sync_live_book_safe(trade=None, pool_state=pool.state)
 
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "
-            f"reconciled={summary['reconciled']} "
+            f"repaired={repaired_now} reconciled={summary['reconciled']} "
             f"pool=${pool.pool:.2f} deployed=${pool.deployed:.2f} "
-            f"open_slots={pool.open_positions}"
+            f"open_slots={pool.open_positions} "
+            f"total_trades={pool.state.get('total_trades')} "
+            f"dirty={ledger_dirty}"
         )
     finally:
         try:
@@ -467,13 +638,15 @@ def main() -> int:
     parser.add_argument(
         "--repair",
         action="store_true",
-        help="Ops alias: run full sync (filled+flat → CLOSED). Default behavior.",
+        help="Re-price CLOSED exits from TWS sells + force Supabase upsert.",
     )
     args = parser.parse_args()
     if args.repair:
-        print("  --repair: full filled-flat->CLOSED sync (always on)")
+        print("  --repair: re-price CLOSED from TWS sell fills + full sync")
     result = run_tws_intraday_sync(repair=bool(args.repair))
-    if result.get("errors") and not result.get("marked") and not result.get("closed"):
+    if result.get("errors") and not (
+        result.get("marked") or result.get("closed") or result.get("repaired")
+    ):
         return 2
     return 0
 

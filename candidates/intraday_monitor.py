@@ -97,10 +97,10 @@ def get_current_price_polygon(ticker: str, api_key: str) -> float:
         return 0.0
 
 
-def _supabase_status_is_terminal(sync, ticker: str, entry_date: str) -> bool:
+def _supabase_terminal_status(sync, ticker: str, entry_date: str) -> str | None:
     """
-    True if Supabase already has NEVER_FILLED / REJECTED_* for this key.
-    Prevents stale Modal volume OPEN rows from resurrecting ghosts.
+    Return Supabase status when it is terminal (CLOSED / NEVER_FILLED / …).
+    Used to block OPEN mark upserts and heal stale Modal volume rows.
     """
     try:
         result = (
@@ -113,12 +113,19 @@ def _supabase_status_is_terminal(sync, ticker: str, entry_date: str) -> bool:
         )
         rows = result.data or []
         if not rows:
-            return False
+            return None
         existing = str(rows[0].get("status") or "").upper()
-        return existing in TERMINAL_NON_OPEN
+        if existing in TERMINAL_NON_OPEN:
+            return existing
+        return None
     except Exception as exc:
         print(f"  Supabase status check warn ({ticker}): {exc}")
-        return False
+        return None
+
+
+def _supabase_status_is_terminal(sync, ticker: str, entry_date: str) -> bool:
+    """True if Supabase already has CLOSED / NEVER_FILLED / REJECTED_*."""
+    return _supabase_terminal_status(sync, ticker, entry_date) is not None
 
 
 def run_intraday_monitor() -> None:
@@ -158,6 +165,11 @@ def run_intraday_monitor() -> None:
             if t.get("approved_by") in MANAGED_TRADE_SOURCES:
                 skipped_terminal.append(f"{t.get('ticker')}:{status}")
             continue
+        shares = int(t.get("shares_total") or t.get("shares") or 0)
+        if shares <= 0:
+            if t.get("approved_by") in MANAGED_TRADE_SOURCES:
+                skipped_terminal.append(f"{t.get('ticker')}:shares=0")
+            continue
         if (
             status in OPEN_STATUSES
             and t.get("approved_by") in MANAGED_TRADE_SOURCES
@@ -177,6 +189,7 @@ def run_intraday_monitor() -> None:
 
     sync = SupabaseSync()
     updates = []
+    volume_healed = False
 
     for trade in open_trades:
         ticker = trade["ticker"]
@@ -187,11 +200,20 @@ def run_intraday_monitor() -> None:
             print(f"  Skip {ticker}: status={status} (not open)")
             continue
         # Do not resurrect Cloud CLOSED / NEVER_FILLED with stale Modal OPEN marks.
-        if entry_date and _supabase_status_is_terminal(sync, ticker, entry_date):
+        cloud_status = (
+            _supabase_terminal_status(sync, ticker, entry_date)
+            if entry_date else None
+        )
+        if cloud_status:
             print(
-                f"  Skip {ticker}: Supabase already CLOSED/NEVER_FILLED/REJECTED "
+                f"  Skip {ticker}: Supabase already {cloud_status} "
                 f"(will not upsert OPEN marks / will not re-OPEN)"
             )
+            # Heal volume/local ledger so the next cron does not retry.
+            trade["status"] = cloud_status
+            if int(trade.get("shares_total") or 0) > 0:
+                trade["shares_total"] = 0
+            volume_healed = True
             continue
 
         entry_price = float(trade.get("entry_price") or 0)
@@ -271,6 +293,15 @@ def run_intraday_monitor() -> None:
             continue
         updates.append(trade_update)
         sync.upsert_trade(trade_update)
+
+    if volume_healed:
+        try:
+            trades_path.write_text(
+                json.dumps(data, indent=2), encoding="utf-8",
+            )
+            print("  Healed volume/local paper_trades to match Supabase terminal statuses")
+        except Exception as exc:
+            print(f"  Volume heal warn: {exc}")
 
     if updates:
         total_pnl = sum(u["pnl_dollars"] for u in updates)
