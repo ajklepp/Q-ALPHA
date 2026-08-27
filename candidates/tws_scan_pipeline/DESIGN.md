@@ -126,6 +126,25 @@ This path only changes how the **live agent** builds its morning candidate list 
 
 ---
 
+## Scanner filter spike (2026-08-26 evening, paper DUR857496, clientId 97)
+
+| Arm | Result |
+|-----|--------|
+| Baseline MOST_ACTIVE (50) | Includes SOXL/TQQQ/SQQQ/NVDL/ETHU; `stockType` blank on all rows |
+| `stockTypeFilter=CORP` only | **Works** — 50 rows, those ETFs gone; NVDA/INTC remain |
+| `stockTypeFilter=CORP,ADR` | Re-admits NVDL — **do not use** |
+| `marketCapAbove/Below` on `ScannerSubscription` | **Fails** — 0 rows, IB 165 “no items retrieved” |
+| TagValue `AVGVOLUME` / `CHANGEPERC` / `STKTYPE` | **Disabled** on paper (“Scanner filter X is disabled”) |
+| `aboveVolume` | ≠ average volume — never treat as avg vol |
+
+**Verdict:** **partial** — API `stockTypeFilter=CORP` strips ETFs at request time; keep name/ETF post-filter + Polygon mcap lanes. Avg-vol / change% / subscription mcap must stay client-side (or wait for live entitlement).
+
+Wired into `pipeline.py`: `SCANNER_STOCK_TYPE_FILTER="CORP"`; TRADE hard-drop `gap_pct < 0.03`; snapshot stores `scanner_union_raw` / `scored_all` / `filter_stats`. LEARN band unchanged (ask before narrowing).
+
+Script: `candidates/tws_scan_pipeline/spike_scanner_filters.py`
+
+---
+
 - Connect TWS paper `127.0.0.1:7497`, `clientId=97`
 - Request 1–2 scanner types (`TOP_PERC_GAIN`, `MOST_ACTIVE`; try `HOT_BY_VOLUME` if parameters list it)
 - Print top 25 symbols + key fields per scan

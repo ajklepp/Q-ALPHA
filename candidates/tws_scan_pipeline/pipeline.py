@@ -40,6 +40,11 @@ MCAP_LEARN_MIN = 50_000_000
 SCAN_CODES = ("TOP_PERC_GAIN", "MOST_ACTIVE", "HOT_BY_VOLUME")
 LOCATION = "STK.US.MAJOR"
 INSTRUMENT = "STK"
+# API-side ETF strip (spike 2026-08-26): stockTypeFilter=CORP removes SOXL/TQQQ/NVDL.
+# CORP,ADR re-admitted NVDL — do not use. marketCapAbove/Below on ScannerSubscription
+# returns 0 rows on paper (error 165). TagValue AVGVOLUME/CHANGEPERC disabled on paper.
+# Keep Polygon mcap lanes + passes_instrument_safety post-filter.
+SCANNER_STOCK_TYPE_FILTER = "CORP"
 # Production funnel (Aaron 2026-08-25 addendum) — not the spike's 25-row cap.
 SCAN_ROWS_PER_CODE = 50  # IB max per scanner is typically ~50
 SCAN_ROWS = SCAN_ROWS_PER_CODE  # alias
@@ -47,9 +52,9 @@ TARGET_UNIVERSE = 100  # hunting-set target after union+dedupe (~3×50)
 WATCH_TOP_N = 10  # Telegram / dashboard / profiles / session tracker
 TRADE_TOP_N = 3  # MAX_TRADES_DAY entries from TRADE lane only
 
-# Soft TRADE entry quality (not a $5 floor): scanners include mega-caps with tiny gaps.
+# Hard TRADE gap floor (not a soft AND with pm_vol): drop RHI-style ~0% names.
 MIN_GAP_FRAC_TRADE = 0.03
-MIN_PM_VOL_TRADE = 1.5
+MIN_PM_VOL_TRADE = 1.5  # retained for diagnostics; not required for TRADE hard drop
 
 RESULTS_DIR = PKG / "results"
 LEARN_DIR = CANDIDATES / "full_scan"
@@ -150,18 +155,28 @@ def _scan_row_meta(sd) -> dict[str, Any]:
 
 
 def fetch_tws_scanner_union(ib, *, rows: int = SCAN_ROWS_PER_CODE) -> list[dict[str, Any]]:
-    """Union+dedupe TOP_PERC_GAIN / MOST_ACTIVE / HOT_BY_VOLUME (~IB max rows each)."""
+    """
+    Union+dedupe TOP_PERC_GAIN / MOST_ACTIVE / HOT_BY_VOLUME (~IB max rows each).
+
+    Applies SCANNER_STOCK_TYPE_FILTER at request time (CORP). Does NOT set
+    marketCapAbove/Below — paper returns empty (spike). Post-filter still required.
+    """
     from ib_insync import ScannerSubscription
 
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
+    print(
+        f"  [tws_scan] API stockTypeFilter={SCANNER_STOCK_TYPE_FILTER!r} "
+        f"(mcap TagValues not applied — paper disabled / empty)"
+    )
     for code in SCAN_CODES:
         sub = ScannerSubscription(
             instrument=INSTRUMENT,
             locationCode=LOCATION,
             scanCode=code,
             numberOfRows=rows,
+            stockTypeFilter=SCANNER_STOCK_TYPE_FILTER,
         )
         try:
             data = ib.reqScannerData(sub) or []
@@ -454,6 +469,10 @@ def persist_scan_snapshot(
     trade: list,
     learn: list,
     ignore: list,
+    *,
+    scanner_union_raw: list | None = None,
+    scored_all: list | None = None,
+    filter_stats: dict | None = None,
 ) -> Path:
     day = datetime.now(ET).strftime("%Y-%m-%d")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -466,8 +485,13 @@ def persist_scan_snapshot(
             "TARGET_UNIVERSE": TARGET_UNIVERSE,
             "WATCH_TOP_N": WATCH_TOP_N,
             "TRADE_TOP_N": TRADE_TOP_N,
+            "SCANNER_STOCK_TYPE_FILTER": SCANNER_STOCK_TYPE_FILTER,
+            "MIN_GAP_FRAC_TRADE": MIN_GAP_FRAC_TRADE,
         },
         "stats": stats,
+        "filter_stats": filter_stats or {},
+        "scanner_union_raw": scanner_union_raw or [],
+        "scored_all": scored_all or [],
         "watch": watch,
         "trade": trade,
         "learn": learn,
@@ -520,6 +544,7 @@ def run_morning_pipeline(
     trade_lane: list[dict] = []
     learn_rows: list[dict] = []
     ignore_rows: list[dict] = []
+    scored_all: list[dict] = []
     stats = {
         "scanner_union": len(raw),
         "scored_shortlist": 0,
@@ -531,6 +556,14 @@ def run_morning_pipeline(
         "blocked_safety": 0,
         "blocked_affordability": 0,
         "blocked_gap_quality": 0,
+    }
+    filter_stats = {
+        "api_stock_type_filter": SCANNER_STOCK_TYPE_FILTER,
+        "api_mcap_filter_applied": False,  # paper: subscription mcap → empty
+        "api_tagvalue_avgvol_change": False,  # paper: filters disabled
+        "post_filter_etf_or_safety": 0,
+        "trade_hard_dropped_gap_lt_3pct": 0,
+        "scanner_union_raw_n": len(raw),
     }
 
     for i, meta in enumerate(raw, start=1):
@@ -550,6 +583,7 @@ def run_morning_pipeline(
             sym, name=name, stock_type=stock_type, require_cs_cache=False,
         ):
             stats["blocked_safety"] += 1
+            filter_stats["post_filter_etf_or_safety"] += 1
             ignore_rows.append({
                 "ticker": sym, "lane": "IGNORE", "reason": "safety",
                 "market_cap": mcap, "stock_type": stock_type, "name": name,
@@ -559,6 +593,7 @@ def run_morning_pipeline(
         poly_type = str(poly.get("type") or "").upper()
         if poly_type in {"ETF", "ETN", "ETS", "FUND"} or is_leveraged_or_fund(name):
             stats["blocked_safety"] += 1
+            filter_stats["post_filter_etf_or_safety"] += 1
             ignore_rows.append({
                 "ticker": sym, "lane": "IGNORE", "reason": "fund/etf",
                 "market_cap": mcap, "type": poly_type, "name": name,
@@ -596,26 +631,32 @@ def run_morning_pipeline(
         row["quality_score"] = score_row(row)
         shaped = _agent_shaped(row)
         stats["scored_shortlist"] += 1
+        scored_all.append(shaped)
 
         if lane == "LEARN":
             stats["learn"] += 1
             learn_rows.append(shaped)
             continue
 
-        # TRADE lane — score everyone; entry filters applied when building trade top-N.
+        # TRADE lane — hard drop gap < 3% (RHI-style 0% names must not clog).
+        gap_abs = abs(float(row.get("gap_pct") or 0.0))
+        if gap_abs < MIN_GAP_FRAC_TRADE:
+            stats["blocked_gap_quality"] += 1
+            filter_stats["trade_hard_dropped_gap_lt_3pct"] += 1
+            shaped["entry_eligible"] = False
+            shaped["entry_block"] = "hard_gap_lt_3pct"
+            ignore_rows.append({
+                "ticker": sym, "lane": "TRADE", "reason": "hard_gap_lt_3pct",
+                "market_cap": mcap, "gap_pct": row.get("gap_pct"),
+            })
+            continue
+
         stats["trade_lane"] += 1
         shaped["entry_eligible"] = True
         if row["last_price"] > max_px:
             shaped["entry_eligible"] = False
             shaped["entry_block"] = "above_max_affordable"
             stats["blocked_affordability"] += 1
-        elif (
-            abs(float(row["gap_pct"])) < MIN_GAP_FRAC_TRADE
-            and float(row["pm_vol_ratio"]) < MIN_PM_VOL_TRADE
-        ):
-            shaped["entry_eligible"] = False
-            shaped["entry_block"] = "weak_gap_and_pm_vol"
-            stats["blocked_gap_quality"] += 1
         else:
             stats["trade_entry_eligible"] += 1
         trade_lane.append(shaped)
@@ -633,7 +674,12 @@ def run_morning_pipeline(
     trade = trade_eligible[: int(trade_n)]
 
     persist_learn_file(learn_rows)
-    persist_scan_snapshot(stats, watch, trade, learn_rows, ignore_rows)
+    persist_scan_snapshot(
+        stats, watch, trade, learn_rows, ignore_rows,
+        scanner_union_raw=raw,
+        scored_all=scored_all,
+        filter_stats=filter_stats,
+    )
 
     print(
         f"  [tws_scan] DONE scored={stats['scored_shortlist']} "
@@ -641,6 +687,8 @@ def run_morning_pipeline(
         f"entry_eligible={stats['trade_entry_eligible']} "
         f"learn={stats['learn']} ignore={stats['ignore']} "
         f"safety_block={stats['blocked_safety']} "
+        f"gap_hard_drop={filter_stats['trade_hard_dropped_gap_lt_3pct']} "
+        f"post_etf_safety={filter_stats['post_filter_etf_or_safety']} "
         f"→ watch={len(watch)} trade={len(trade)}"
     )
     for idx, c in enumerate(watch, start=1):
@@ -664,6 +712,9 @@ def run_morning_pipeline(
         "learn": learn_rows,
         "ignore": ignore_rows,
         "stats": stats,
+        "filter_stats": filter_stats,
+        "scanner_union_raw": raw,
+        "scored_all": scored_all,
         "pool": pool,
         "max_affordable_price": max_px,
     }
