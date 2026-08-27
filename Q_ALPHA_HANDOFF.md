@@ -130,14 +130,15 @@ Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
 ```
 
 **Live marks/closes SoT:** local `candidates/tws_intraday_sync.py` (TWS clientId **96**).
-Modal cannot reach `127.0.0.1:7497`. Register (Aaron runs once — task was **missing** 2026-08-27):
+Modal cannot reach `127.0.0.1:7497`. Agents **cannot** create Windows tasks — Aaron runs once:
 
 ```powershell
 schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
 ```
 
-Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`
-Then refresh dashboard — Open Positions must match TWS POS; exits use TWS sell VWAP.
+Verify: `schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST`  
+Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`  
+`--repair` re-reads today's CLOSED IBKR_PAPER sells; TWS fill px/reason wins over stop_price; pool rebuilt (no double-close).
 
 ### Agent morning list (Phase 2 — TWS pipeline)
 

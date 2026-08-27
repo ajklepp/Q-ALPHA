@@ -1018,8 +1018,15 @@ def tab_trade_log(trades: list) -> None:
         else:
             log = closed.copy()
             log["Exit"] = log.apply(
-                lambda r: r.get("tranche_3_exit") or r.get("tranche_2_exit")
-                or r.get("tranche_1_exit") or r.get("stop_hit_price") or r.get("entry_price"),
+                lambda r: (
+                    r.get("exit_price")
+                    or r.get("tranche_3_exit")
+                    or r.get("tranche_2_exit")
+                    or r.get("tranche_1_exit")
+                    or r.get("current_price")  # Supabase stores exit here
+                    or r.get("stop_hit_price")
+                    or r.get("entry_price")
+                ),
                 axis=1,
             )
             log = log.rename(columns={

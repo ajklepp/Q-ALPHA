@@ -230,10 +230,12 @@ def _infer_exit(
     trade: dict,
     sell_fills: list[dict],
     mark: float | None,
+    *,
+    allow_stop_fallback: bool = True,
 ) -> tuple[float, str]:
     """
-    Prefer TWS sell VWAP; classify STOP / TARGET_2R / BROKER_EXIT.
-    Never leave without an exit price when TWS is flat.
+    Prefer TWS sell VWAP over stop_price / marks / Polygon.
+    When sell fills exist, exit px is ALWAYS the sell VWAP (never stop_price).
     """
     entry = float(trade.get("entry_price") or 0)
     stop = float(trade.get("stop_price") or 0)
@@ -242,22 +244,23 @@ def _infer_exit(
 
     px = _vwap(sell_fills)
     if px is not None and px > 0:
-        # Prefer target classification when fill is at/through 2R even if
-        # also near stop (should not happen); stop if at/through stop.
+        # Classify from fill vs levels; price itself stays the TWS fill.
         if target_2r > 0 and px >= target_2r - tol:
             return float(px), "TARGET_2R"
         if stop > 0 and px <= stop + tol:
             return float(px), "STOP"
         return float(px), "BROKER_EXIT"
 
+    # No TWS sell tape — only then consider mark / stop fallback.
     if mark is not None and mark > 0:
-        if stop > 0 and mark <= stop + tol:
-            return float(stop if stop > 0 else mark), "STOP"
         if target_2r > 0 and mark >= target_2r - tol:
             return float(mark), "TARGET_2R"
+        if stop > 0 and mark <= stop + tol:
+            # Use mark (through-stop fill), not the theoretical stop_price.
+            return float(mark), "STOP"
         return float(mark), "BROKER_EXIT"
 
-    if stop > 0:
+    if allow_stop_fallback and stop > 0:
         return float(stop), "STOP"
     if entry > 0:
         return float(entry), "BROKER_EXIT"
@@ -329,15 +332,16 @@ def _set_closed_fields(
 
     trade["status"] = "CLOSED"
     trade["exit_reason"] = exit_reason
+    trade["exit_price"] = round(exit_price, 4)
     trade["tranche_1_exit"] = round(exit_price, 4)
-    trade["stop_hit_price"] = (
-        exit_price if exit_reason == "STOP" else trade.get("stop_hit_price")
-    )
-    trade["stop_hit_date"] = (
-        datetime.now(ET).strftime("%Y-%m-%d")
-        if exit_reason == "STOP"
-        else trade.get("stop_hit_date")
-    )
+    # Clear stale stop_hit when exit was target/broker — Trade Log used to
+    # fall through to stop_hit_price and show 24.98 after a 26.51 target fill.
+    if exit_reason == "STOP":
+        trade["stop_hit_price"] = round(exit_price, 4)
+        trade["stop_hit_date"] = datetime.now(ET).strftime("%Y-%m-%d")
+    else:
+        trade["stop_hit_price"] = None
+        trade["stop_hit_date"] = None
     trade["pnl_dollars"] = pnl
     trade["pnl_pct"] = pnl_pct
     trade["current_price"] = round(exit_price, 4)
@@ -394,9 +398,22 @@ def _was_filled(trade: dict) -> bool:
     return st == "Filled"
 
 
-def _exit_needs_repair(trade: dict, exit_px: float) -> bool:
-    """True if booked exit differs from TWS sell VWAP."""
-    booked = _finite(trade.get("tranche_1_exit")) or _finite(trade.get("current_price"))
+def _booked_exit_px(trade: dict) -> float | None:
+    """Best booked exit for disagreement checks."""
+    for key in ("exit_price", "tranche_1_exit", "current_price", "stop_hit_price"):
+        px = _finite(trade.get(key))
+        if px is not None and px > 0:
+            return px
+    return None
+
+
+def _exit_disagrees(trade: dict, exit_px: float, exit_reason: str) -> bool:
+    """True if booked exit price or reason disagrees with TWS sell evidence."""
+    booked_reason = str(trade.get("exit_reason") or "").upper().strip()
+    want_reason = str(exit_reason or "").upper().strip()
+    if booked_reason != want_reason:
+        return True
+    booked = _booked_exit_px(trade)
     if booked is None or booked <= 0:
         return True
     if exit_px <= 0:
@@ -498,6 +515,7 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         repaired_now: list[str] = []
         marked_now: list[str] = []
         ledger_dirty = False
+        today_et = datetime.now(ET).strftime("%Y-%m-%d")
 
         for t in trades:
             if not _is_managed_ibkr(t):
@@ -526,17 +544,17 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                     )
                 continue
 
-            # TWS flat.
+            # TWS flat — pull executions (SoT for exit px).
             buys, sells = _collect_symbol_fills(ib, ticker, entry_date)
             sell_vwap = _vwap(sells)
             buy_vwap = _vwap(buys)
             if buy_vwap and buy_vwap > 0 and status in OPEN_LEDGER | {"CLOSED"}:
-                # Optional: align entry to TWS bot VWAP when repair + material drift.
                 booked_entry = _finite(t.get("entry_price")) or 0.0
                 if (
                     repair
                     and booked_entry > 0
-                    and abs(booked_entry - buy_vwap) > max(0.01, buy_vwap * EXIT_PX_TOL_FRAC)
+                    and abs(booked_entry - buy_vwap)
+                    > max(0.01, buy_vwap * EXIT_PX_TOL_FRAC)
                 ):
                     print(
                         f"  ENTRY note {ticker}: ledger ${booked_entry:.4f} "
@@ -549,12 +567,16 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                 if not filled:
                     print(f"  SKIP {ticker}: flat + not confirmed fill (reconcile owns)")
                     continue
+                # Prefer TWS sells; do not substitute stop_price when fills exist.
                 exit_px, exit_reason = _infer_exit(
-                    t, sells, _finite(t.get("current_price")),
+                    t,
+                    sells,
+                    sell_vwap or _finite(t.get("current_price")),
+                    allow_stop_fallback=not bool(sells),
                 )
                 if exit_px <= 0:
-                    exit_px = float(t.get("stop_price") or t.get("entry_price") or 0)
-                    exit_reason = exit_reason or "BROKER_EXIT"
+                    print(f"  SKIP {ticker}: flat+filled but no usable exit px")
+                    continue
                 _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
                 closed_now.append(ticker)
                 ledger_dirty = True
@@ -567,26 +589,49 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                 )
                 continue
 
-            # Already CLOSED but flat: repair exit px from TWS sells.
-            if status == "CLOSED" and (repair or sell_vwap):
-                if not sell_vwap:
-                    continue
-                exit_px, exit_reason = _infer_exit(t, sells, sell_vwap)
-                if exit_px <= 0:
-                    continue
-                if _exit_needs_repair(t, exit_px) or (
-                    repair and str(t.get("exit_reason") or "") != exit_reason
-                ):
-                    old = t.get("tranche_1_exit")
-                    _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
-                    repaired_now.append(ticker)
-                    ledger_dirty = True
-                    row = dict(t)
-                    row["position_size"] = 0.0
-                    sync_live_book_safe(trade=row, pool_state=None)
+            # --- CLOSED repair: TWS sell wins over booked stop/Polygon ---
+            # --repair: always re-check today's CLOSED IBKR_PAPER flats.
+            # Normal runs: repair if sell VWAP disagrees with book.
+            if status != "CLOSED":
+                continue
+            if repair and entry_date and entry_date != today_et:
+                continue
+            if not sells:
+                if repair and entry_date == today_et:
                     print(
-                        f"  REPAIR {ticker}: exit {old} -> {exit_px:.4f} ({exit_reason})"
+                        f"  REPAIR skip {ticker}: no TWS sell fills "
+                        f"(keeping booked exit={_booked_exit_px(t)})"
                     )
+                continue
+            exit_px, exit_reason = _infer_exit(
+                t, sells, sell_vwap, allow_stop_fallback=False,
+            )
+            if exit_px <= 0:
+                continue
+            if not _exit_disagrees(t, exit_px, exit_reason):
+                # Still clear stale stop_hit if reason is not STOP.
+                if exit_reason != "STOP" and t.get("stop_hit_price") is not None:
+                    t["stop_hit_price"] = None
+                    t["stop_hit_date"] = None
+                    t["exit_price"] = round(exit_px, 4)
+                    ledger_dirty = True
+                    print(f"  CLEAN {ticker}: cleared stale stop_hit_price")
+                continue
+            old_px = _booked_exit_px(t)
+            old_reason = t.get("exit_reason")
+            old_pnl = float(t.get("pnl_dollars") or 0)
+            _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
+            new_pnl = float(t.get("pnl_dollars") or 0)
+            repaired_now.append(ticker)
+            ledger_dirty = True
+            row = dict(t)
+            row["position_size"] = 0.0
+            sync_live_book_safe(trade=row, pool_state=None)
+            print(
+                f"  REPAIR {ticker}: {old_px} ({old_reason}) pnl={old_pnl:+.2f} "
+                f"-> {exit_px:.4f} ({exit_reason}) pnl={new_pnl:+.2f} "
+                f"[pool delta via recalc, no double-close]"
+            )
 
         summary["marked"] = marked_now
         summary["closed"] = closed_now
