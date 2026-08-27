@@ -43,7 +43,7 @@ import subprocess
 import sys
 import time
 import traceback
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime, time as dtime, timezone
 from pathlib import Path
 
 # Windows Task Scheduler / cp1252 consoles raise UnicodeEncodeError on emoji
@@ -909,7 +909,7 @@ def cancel_realtime_bars(ib: IB, rt_bars: dict) -> None:
 def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
     """
     Fill-truth repair: any OPEN IBKR_PAPER trade with no IB position and never
-    filled → NEVER_FILLED, free pool capital, sync Supabase.
+    filled → NEVER_FILLED, free pool capital, sync Supabase immediately.
 
     Safe to call mid-session or EOD. Returns list of corrected tickers.
     """
@@ -957,7 +957,7 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
             # Filled flag but flat now → likely closed elsewhere; do not ghost-fix here.
             continue
 
-        pv = float(t.get("position_value") or 0)
+        pv = float(t.get("position_value") or t.get("position_size") or 0)
         print(
             f"  [RECONCILE] {ticker} OPEN but IB flat + never confirmed fill "
             f"→ NEVER_FILLED (free ${pv:.2f})"
@@ -970,11 +970,20 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
         t["remaining_t1"] = 0
         t["remaining_t2"] = 0
         t["remaining_t3"] = 0
+        t["shares_total"] = 0
+        t["shares_t1"] = 0
+        t["shares_t2"] = 0
+        t["shares_t3"] = 0
+        t["position_value"] = 0.0
+        t["current_price"] = None
+        t["r_multiple"] = None
+        t["dist_to_stop"] = None
+        t["dist_to_target"] = None
+        t["last_updated"] = datetime.now(timezone.utc).isoformat()
         t["skip_reason"] = (
             t.get("skip_reason")
             or "Reconcile: no IB position and entry never filled"
         )
-        t["shares_total"] = 0
         # Undo open_trade sizing if capital still looks reserved.
         if pv > 0 and pool.deployed + 1e-6 >= pv:
             pool.state["pool"] = round(pool.pool + pv, 2)
@@ -982,18 +991,7 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
             pool.state["open_positions"] = max(0, pool.open_positions - 1)
             pool.state["total_trades"] = max(0, int(pool.state["total_trades"]) - 1)
             pool.save_state()
-        corrected.append({"ticker": ticker, "position_value": pv})
-
-        try:
-            from supabase_sync import SupabaseSync
-            row = dict(t)
-            row["position_size"] = 0.0
-            row["shares_total"] = 0
-            row["status"] = "NEVER_FILLED"
-            row["pnl_dollars"] = 0.0
-            SupabaseSync().upsert_trade(row)
-        except Exception as exc:
-            print(f"  [RECONCILE] Supabase sync warn ({ticker}): {exc}")
+        corrected.append({"ticker": ticker, "position_value": pv, "row": dict(t)})
 
     if corrected:
         open_n = sum(
@@ -1007,6 +1005,20 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
             "open_trades": open_n,
         }
         store.save(data)
+        # Immediate Supabase sync — do not wait for EOD / intraday marks.
+        try:
+            from supabase_sync import sync_live_book_safe
+            for c in corrected:
+                row = dict(c["row"])
+                row["position_size"] = 0.0
+                row["shares_total"] = 0
+                row["status"] = "NEVER_FILLED"
+                row["pnl_dollars"] = 0.0
+                sync_live_book_safe(trade=row, pool_state=None)
+            sync_live_book_safe(trade=None, pool_state=pool.state)
+            print("  [RECONCILE] Supabase trade+pool synced")
+        except Exception as exc:
+            print(f"  [RECONCILE] Supabase sync warn: {exc}")
         send_telegram(
             "🔧 Q-ALPHA RECONCILE\n"
             + "\n".join(
@@ -1374,6 +1386,11 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                                 "pnl_pct": 0.0,
                             }
                             save_trade(ghost)
+                            try:
+                                from supabase_sync import sync_live_book_safe
+                                sync_live_book_safe(trade=ghost, pool_state=None)
+                            except Exception as sync_exc:
+                                print(f"  NEVER_FILLED Supabase warn: {sync_exc}")
                         except Exception as save_exc:
                             print(f"  NEVER_FILLED ledger warn: {save_exc}")
                         send_telegram(
@@ -1446,6 +1463,16 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                         decision_reason=entry_reason,
                     )
                     save_trade(trade_dict)
+                    # Mid-day Supabase: trade + pool snapshot (do not wait for EOD).
+                    try:
+                        from supabase_sync import sync_live_book_safe
+                        sync_live_book_safe(
+                            trade=trade_dict,
+                            pool_state=pool.state,
+                        )
+                        print(f"  Supabase live book synced ({ticker})")
+                    except Exception as sync_exc:
+                        print(f"  Supabase live book warn: {sync_exc}")
 
                     send_telegram(
                         f"✅ AI ENTERED {ticker}\n"

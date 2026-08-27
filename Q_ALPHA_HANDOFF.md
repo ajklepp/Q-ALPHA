@@ -104,7 +104,7 @@ Uses same bot/chat as the agent (`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` via `
 | Market closed / holiday | `🧪 Strategy Lab — market closed today, not running.` then exit |
 | After scan | `🧪 Scan complete — N candidates: {tickers}.` |
 | Each entry | `🧪 ENTERED {ticker} @ {price} (A+B pools).` |
-| EOD | `🧪 EOD: Pool A $… (…%), Pool B $… (…%), trades today: n, winner: A/B/tie. Forward R² N=…` |
+| EOD | `🧪 Lab day summary: …` after morning entry (NOT agent EOD). Real Lab settle ~16:20 ET; agent EOD = Modal `run_eod_monitor` 4:15 PM ET |
 | Fatal | `🧪 Strategy Lab ERROR: {short reason}` |
 
 Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → market-closed Telegram (verified Sunday 2026-08-23).

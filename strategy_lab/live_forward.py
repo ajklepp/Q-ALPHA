@@ -1209,10 +1209,12 @@ def run_day(
             state["eod_summary"] = {"n_candidates": 0, "message": "no candidates"}
             save_state(state)
             lab_telegram(
-                f"🧪 EOD: Pool A ${float(state['pool_A_trailing']['value_usd']):.2f} "
+                f"🧪 Lab day summary: Pool A "
+                f"${float(state['pool_A_trailing']['value_usd']):.2f} "
                 f"(0.00%), Pool B ${float(state['pool_B_target']['value_usd']):.2f} "
                 f"(0.00%), trades today: 0, winner: tie. "
-                f"open A=0 B=0. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+                f"open A=0 B=0. Forward R² N={int(state.get('forward_oos_r2_n') or 0)}. "
+                f"(Agent EOD is Modal 4:15 PM ET; Lab settle ~16:20 ET.)",
                 dry_run=dry,
             )
             return {
@@ -1357,11 +1359,12 @@ def run_day(
         a_ret_s = f"{float(a_ret):+.2f}%" if a_ret is not None else "—"
         b_ret_s = f"{float(b_ret):+.2f}%" if b_ret is not None else "—"
         lab_telegram(
-            f"🧪 EOD: Pool A ${a_end:.2f} ({a_ret_s}), "
+            f"🧪 Lab day summary: Pool A ${a_end:.2f} ({a_ret_s}), "
             f"Pool B ${b_end:.2f} ({b_ret_s}), "
             f"trades today: {n_trades}, winner: {winner_label}, "
             f"open A={n_open_a} B={n_open_b}. "
-            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}.",
+            f"Forward R² N={int(state.get('forward_oos_r2_n') or 0)}. "
+            f"(Agent EOD is Modal 4:15 PM ET; Lab settle ~16:20 ET.)",
             dry_run=dry,
         )
 

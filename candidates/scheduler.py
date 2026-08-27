@@ -26,7 +26,10 @@
 #
 # Cron times (UTC) — EDT (UTC-4, summer). Add 1 hour for EST (winter):
 #   Every 30m 9:30-4:00 PM EDT — run_intraday_monitor ("*/30 13-20 * * 1-5")
+#     → Polygon marks only (NOT TWS); upserts Supabase open P&L
 #   4:15 PM EDT — run_eod_monitor         ("15 20 * * 1-5")
+#     → Real agent EOD (brackets / pool / Telegram). Lab morning "day summary"
+#       is NOT this job; Lab settle is local ~16:20 ET (--settle).
 # =============================================================================
 from __future__ import annotations
 

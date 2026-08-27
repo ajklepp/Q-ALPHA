@@ -227,15 +227,45 @@ def _open_mark_notional(trade) -> float:
     return float(entry_notional)
 
 
-def _display_pool_equity(
+def _open_entry_notional(trade) -> float:
+    """Cost-book notional for one open (entry×shares / position_size). Never mark."""
+    entry = _safe_float(trade.get("entry_price"), 0.0)
+    shares = int(_safe_float(trade.get("shares_total"), 0.0))
+    notional = _safe_float(trade.get("position_size"), float("nan"))
+    if not math.isfinite(notional) or notional <= 0:
+        notional = _safe_float(trade.get("position_value"), float("nan"))
+    if not math.isfinite(notional) or notional <= 0:
+        notional = entry * shares if entry > 0 and shares > 0 else 0.0
+    return float(notional) if math.isfinite(notional) else 0.0
+
+
+def _display_pool_kpis(
     pool_history: list,
     open_df: pd.DataFrame,
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """
-    Live Status equity display: cash + open mark (or entry notional).
+    Live Status KPIs — display only; never mutates pool_state / snapshots.
 
-    Returns (equity, cash, deployed_book, starting).
-    Does not mutate pool_state / snapshots.
+    Formulas
+    --------
+    Pool (cost book) = cash + deployed
+      cash, deployed from latest pool_snapshots row when trustworthy.
+    P&L = (cash + Σ open mark notional) − starting_pool
+      mark notional = current_price×shares when valid, else entry notional.
+
+    Stale-snapshot guard
+    --------------------
+    Mid-day fills may not have upserted pool_snapshots yet, so Cloud can show
+    cash≈$3000 / deployed≈0 while Open Positions already lists fills. In that
+    case treating snap.pool as residual cash and adding open marks double-counts
+    (fake +29% Pool Value). When deployed≈0 but opens exist:
+      deployed := Σ open entry notionals
+      cash     := starting − deployed   (cost book; ignores unrealized)
+      Pool     := cash + deployed = starting (until realized PnL exists)
+      P&L      := cash + mark_notional − starting
+               = mark_notional − deployed  (true MTM vs cost)
+
+    Returns (pool_book, pnl_dollar, cash, deployed_book, starting).
     """
     starting = STARTING_POOL
     cash = STARTING_POOL
@@ -246,13 +276,27 @@ def _display_pool_equity(
         deployed_book = _safe_float(snap.get("deployed"), 0.0)
         starting = _safe_float(snap.get("starting_pool"), STARTING_POOL)
 
-    if open_df is not None and not open_df.empty:
-        open_value = sum(_open_mark_notional(row) for _, row in open_df.iterrows())
-    else:
-        open_value = deployed_book
+    has_opens = open_df is not None and not open_df.empty
+    opens_entry = (
+        sum(_open_entry_notional(row) for _, row in open_df.iterrows())
+        if has_opens else 0.0
+    )
+    opens_mark = (
+        sum(_open_mark_notional(row) for _, row in open_df.iterrows())
+        if has_opens else 0.0
+    )
 
-    equity = cash + open_value
-    return equity, cash, deployed_book, starting
+    # Snap undeployed but ledger shows opens → reconstruct cost book from opens.
+    snap_undeployed = deployed_book < 1.0 and has_opens and opens_entry > 0
+    if snap_undeployed:
+        deployed_book = opens_entry
+        cash = max(0.0, starting - deployed_book)
+
+    pool_book = cash + deployed_book
+    # MTM equity for P&L only — never shown as "Pool".
+    mtm_equity = cash + (opens_mark if has_opens else deployed_book)
+    pnl_dollar = mtm_equity - starting
+    return pool_book, pnl_dollar, cash, deployed_book, starting
 
 
 def _oneshot_polygon_mark(ticker: str) -> float | None:
@@ -614,10 +658,9 @@ def tab_live_status(trades: list, pool_history: list) -> None:
         watch_load_err = None
 
     open_df = _open_positions_df(df)
-    equity, cash, deployed_book, starting = _display_pool_equity(
+    pool_book, pnl_dollar, cash, deployed_book, starting = _display_pool_kpis(
         pool_history, open_df,
     )
-    pnl_dollar = equity - starting
     pnl_pct = (pnl_dollar / starting) * 100 if starting else 0.0
     open_pos = len(open_df)
     t3_count = len(open_df[open_df["status"] == "T3_TRAIL"]) if not open_df.empty else 0
@@ -631,32 +674,35 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
     with st.container(border=True):
         section_header("Session KPIs", "Pool, slots, and hit rate")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Pool = cost book (cash+deployed). P&L = MTM vs $3000 — never merge into one metric.
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
-            st.metric(
-                "Pool Value",
-                f"${equity:,.2f}",
-                f"{pnl_dollar:+.2f} ({pnl_pct:+.1f}%)",
-                delta_color="normal",
-            )
+            st.metric("Pool", f"${pool_book:,.2f}")
             st.caption(
                 f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}"
             )
         with col2:
             st.metric(
+                "P&L",
+                f"${pnl_dollar:+,.2f}",
+                f"{pnl_pct:+.1f}% vs ${starting:,.0f}",
+                delta_color="normal",
+            )
+        with col3:
+            st.metric(
                 "Open Positions",
                 f"{open_pos}/{MAX_SLOTS} slots",
                 f"{MAX_SLOTS - open_pos} available",
             )
-        with col3:
-            st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
         with col4:
+            st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
+        with col5:
             st.metric(
                 "Total Trades",
                 str(total_trades),
                 f"{winning_trades}W / {losing_trades}L",
             )
-        with col5:
+        with col6:
             st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
 
     # Regime from today's watchlist (not legacy daily_scans).

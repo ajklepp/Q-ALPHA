@@ -1,9 +1,11 @@
 """
 Q-Alpha intraday position monitor.
 
-Runs on Modal every 30 minutes during market hours.
-Fetches current prices for open positions and updates Supabase
-with live unrealized P&L for the dashboard. Does NOT trigger exits.
+Runs on Modal every 30 minutes during market hours (scheduler Cron
+``*/30 13-20 * * 1-5`` ≈ 9:30–4:00 PM ET). Marks are Polygon snapshots —
+NOT TWS. TWS is for orders/fills + reconcile_unfilled_opens only.
+Updates Supabase with live unrealized P&L for the dashboard.
+Does NOT trigger exits. Never reopens NEVER_FILLED / REJECTED_* rows.
 """
 from __future__ import annotations
 
@@ -89,10 +91,34 @@ def get_current_price_polygon(ticker: str, api_key: str) -> float:
         return 0.0
 
 
+def _supabase_status_is_terminal(sync, ticker: str, entry_date: str) -> bool:
+    """
+    True if Supabase already has NEVER_FILLED / REJECTED_* for this key.
+    Prevents stale Modal volume OPEN rows from resurrecting ghosts.
+    """
+    try:
+        result = (
+            sync.client.table("trades")
+            .select("status")
+            .eq("ticker", ticker)
+            .eq("entry_date", entry_date)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return False
+        existing = str(rows[0].get("status") or "").upper()
+        return existing in TERMINAL_NON_OPEN
+    except Exception as exc:
+        print(f"  Supabase status check warn ({ticker}): {exc}")
+        return False
+
+
 def run_intraday_monitor() -> None:
     """
-    Fetch current prices for all open positions.
-    Update Supabase with live unrealized P&L.
+    Fetch Polygon marks for open positions only; upsert unrealized P&L.
+    Skips NEVER_FILLED / REJECTED_* and will not overwrite those in Supabase.
     """
     load_dotenv_if_available()
 
@@ -106,7 +132,7 @@ def run_intraday_monitor() -> None:
         print("ERROR: POLYGON_API_KEY not set")
         return
 
-    print(f"Intraday monitor: {datetime.now().strftime('%H:%M:%S ET')}")
+    print(f"Intraday monitor (Polygon marks): {datetime.now().strftime('%H:%M:%S ET')}")
 
     trades_path = state_path("paper_trades.json")
     if not trades_path.exists():
@@ -147,9 +173,17 @@ def run_intraday_monitor() -> None:
     for trade in open_trades:
         ticker = trade["ticker"]
         status = str(trade.get("status") or "").upper()
+        entry_date = str(trade.get("entry_date") or "")
         # Belt-and-suspenders: never upsert OPEN marks for rejects.
         if status not in OPEN_STATUSES or status in TERMINAL_NON_OPEN:
             print(f"  Skip {ticker}: status={status} (not open)")
+            continue
+        # Do not resurrect a Cloud NEVER_FILLED with stale Modal OPEN marks.
+        if entry_date and _supabase_status_is_terminal(sync, ticker, entry_date):
+            print(
+                f"  Skip {ticker}: Supabase already NEVER_FILLED/REJECTED "
+                f"(will not upsert OPEN marks)"
+            )
             continue
 
         entry_price = float(trade.get("entry_price") or 0)
@@ -223,6 +257,9 @@ def run_intraday_monitor() -> None:
         }
         if trade_update["status"] not in OPEN_STATUSES:
             print(f"  Abort upsert {ticker}: status={trade_update['status']}")
+            continue
+        if trade_update["status"] in TERMINAL_NON_OPEN:
+            print(f"  Abort upsert {ticker}: terminal status")
             continue
         updates.append(trade_update)
         sync.upsert_trade(trade_update)

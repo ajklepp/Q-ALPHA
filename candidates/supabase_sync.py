@@ -471,3 +471,23 @@ def sync_to_supabase_safe(callback) -> None:
         callback(SupabaseSync())
     except Exception as exc:
         print(f"  Supabase sync skipped: {exc}")
+
+
+def sync_live_book_safe(
+    trade: dict | None = None,
+    pool_state: dict | None = None,
+) -> None:
+    """
+    Mid-day fill-truth sync: upsert trade and/or pool snapshot immediately.
+
+    Call after successful fill booking and after reconcile_unfilled_opens so
+    Cloud Cash/Deployed/opens match local pool_state without waiting for EOD.
+    Fail-soft — never raises.
+    """
+    def _run(sync: SupabaseSync) -> None:
+        if trade is not None:
+            sync.upsert_trade(trade)
+        if pool_state is not None:
+            sync.upsert_pool_snapshot(pool_state)
+
+    sync_to_supabase_safe(_run)
