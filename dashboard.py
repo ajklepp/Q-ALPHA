@@ -674,34 +674,52 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
     with st.container(border=True):
         section_header("Session KPIs", "Pool, slots, and hit rate")
-        # Pool = cost book (cash+deployed). P&L = MTM vs $3000 — never merge into one metric.
+        # All six columns: st.metric only (no captions) for matching vertical rhythm.
+        # Pool = cost book (cash+deployed). P&L value = MTM total; delta = difference.
         col1, col2, col3, col4, col5, col6 = st.columns(6)
+        mtm_total = starting + pnl_dollar
         with col1:
-            st.metric("Pool", f"${pool_book:,.2f}")
-            st.caption(
-                f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}"
+            st.metric(
+                "Pool",
+                f"${pool_book:,.2f}",
+                f"${cash:,.0f} cash · ${deployed_book:,.0f} dep",
+                delta_color="off",
             )
         with col2:
-            # Top = MTM total equity; difference in caption (delta pills truncate).
-            mtm_total = starting + pnl_dollar
-            st.metric("P&L", f"${mtm_total:,.2f}")
-            st.caption(f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)")
+            st.metric(
+                "P&L",
+                f"${mtm_total:,.2f}",
+                f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)",
+                delta_color="normal",
+            )
         with col3:
             st.metric(
                 "Open Positions",
                 f"{open_pos}/{MAX_SLOTS} slots",
                 f"{MAX_SLOTS - open_pos} available",
+                delta_color="off",
             )
         with col4:
-            st.metric("T3 Trailing", f"{t3_count} free-running", "slots released")
+            st.metric(
+                "T3 Trailing",
+                f"{t3_count} free-running",
+                "slots released",
+                delta_color="off",
+            )
         with col5:
             st.metric(
                 "Total Trades",
                 str(total_trades),
                 f"{winning_trades}W / {losing_trades}L",
+                delta_color="off",
             )
         with col6:
-            st.metric("Win Rate", f"{win_rate:.0%}", "Base rate: ~39%")
+            st.metric(
+                "Win Rate",
+                f"{win_rate:.0%}",
+                "base ~39%",
+                delta_color="off",
+            )
 
     # Regime from today's watchlist (not legacy daily_scans).
     spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
