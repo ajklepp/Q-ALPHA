@@ -674,8 +674,7 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
     with st.container(border=True):
         section_header("Session KPIs", "Pool, slots, and hit rate")
-        # All six columns: st.metric only (no captions) for matching vertical rhythm.
-        # Pool = cost book (cash+deployed). P&L value = MTM total; delta = difference.
+        # All six: st.metric + colored delta pills (no captions, no delta_color="off").
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         mtm_total = starting + pnl_dollar
         with col1:
@@ -683,7 +682,7 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "Pool",
                 f"${pool_book:,.2f}",
                 f"${cash:,.0f} cash · ${deployed_book:,.0f} dep",
-                delta_color="off",
+                delta_color="normal",
             )
         with col2:
             st.metric(
@@ -697,28 +696,28 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 "Open Positions",
                 f"{open_pos}/{MAX_SLOTS} slots",
                 f"{MAX_SLOTS - open_pos} available",
-                delta_color="off",
+                delta_color="normal",
             )
         with col4:
             st.metric(
                 "T3 Trailing",
                 f"{t3_count} free-running",
                 "slots released",
-                delta_color="off",
+                delta_color="normal",
             )
         with col5:
             st.metric(
                 "Total Trades",
                 str(total_trades),
                 f"{winning_trades}W / {losing_trades}L",
-                delta_color="off",
+                delta_color="normal",
             )
         with col6:
             st.metric(
                 "Win Rate",
                 f"{win_rate:.0%}",
-                "base ~39%",
-                delta_color="off",
+                "Base rate: ~39%",
+                delta_color="normal",
             )
 
     # Regime from today's watchlist (not legacy daily_scans).
