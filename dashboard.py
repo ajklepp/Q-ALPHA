@@ -682,12 +682,10 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                 f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}"
             )
         with col2:
-            st.metric(
-                "P&L",
-                f"${pnl_dollar:+,.2f}",
-                f"{pnl_pct:+.1f}% vs ${starting:,.0f}",
-                delta_color="normal",
-            )
+            # Top = MTM total equity; difference in caption (delta pills truncate).
+            mtm_total = starting + pnl_dollar
+            st.metric("P&L", f"${mtm_total:,.2f}")
+            st.caption(f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)")
         with col3:
             st.metric(
                 "Open Positions",
