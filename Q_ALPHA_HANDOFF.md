@@ -57,13 +57,13 @@ Windows Task Scheduler task **`QAlpha Strategy Lab`**:
 
 **Settle task** (register similarly): **`QAlpha Strategy Lab Settle`** · **Mon–Fri ~16:20 ET** ·
 `start_lab_settle_scheduled.ps1` → `live_forward.py --settle`  
-Optional backup: **`QAlpha Strategy Lab Settle Backup`** · **16:40 ET** (same script).
+**No 16:40 backup** — duplicate settle Telegram (removed Aug 2026). Register all three tasks: **`.\strategy_lab\register_lab_tasks.ps1`**
 
 **Intraday marks:** **`QAlpha Strategy Lab Mark`** · **Mon–Fri every 30m 10:00–16:00 ET** ·
 `start_lab_mark_scheduled.ps1` → `live_forward.py --mark` (quiet; force-upserts Supabase).
 
 Full cadence + schtasks examples: **`strategy_lab/DASHBOARD_FRESHNESS.md`**.  
-(Morning entry also auto-settles any overnight opens first.)
+Register all Lab tasks (no 16:40 backup): **`.\strategy_lab\register_lab_tasks.ps1`**
 
 **Unattended needs:** PC on, awake, **logged in as ajkle**, network, `.env` present.
 
@@ -124,7 +124,7 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase SIM)
 11:00    Agent session recap Telegram
 ~4:15    Modal EOD monitor (agent)
-~4:20    Strategy Lab --settle (primary EOD; optional 16:40 backup)
+~4:20    Strategy Lab --settle (primary EOD at 16:20 only)
 Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
          does NOT close; must never re-OPEN CLOSED / NEVER_FILLED
 ```
@@ -313,6 +313,8 @@ schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST
 schtasks /Query /TN "QAlpha Autonomous Agent" /V /FO LIST
 schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST
 schtasks /Query /TN "QAlpha Strategy Lab Settle" /FO LIST
+# Re-register Lab Entry + Mark + Settle (no 16:40 backup):
+.\strategy_lab\register_lab_tasks.ps1
 schtasks /Query /TN "QAlpha Readonly Mirror Sync" /FO LIST
 
 # Read-only mirror for Cursor Chat A (reference); Chat B edits Q-ALPHA

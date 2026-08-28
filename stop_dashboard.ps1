@@ -1,5 +1,5 @@
 # =============================================================================
-# Q-ALPHA — stop_dashboard.ps1
+# Q-ALPHA - stop_dashboard.ps1
 # Kill whatever is listening on the Streamlit port (default 8501).
 #
 # Usage:
@@ -12,7 +12,7 @@ param(
 
 $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if (-not $conns) {
-    Write-Host "Nothing listening on port $Port — dashboard already stopped."
+    Write-Host "Nothing listening on port $Port - dashboard already stopped."
     exit 0
 }
 
@@ -30,7 +30,8 @@ foreach ($procId in $pids) {
 Start-Sleep -Milliseconds 500
 $still = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($still) {
-    Write-Host "WARNING: port $Port still in use by PID(s): $($still.OwningProcess -join ', ')"
+    $stillPids = ($still.OwningProcess | Sort-Object -Unique) -join ", "
+    Write-Host "WARNING: port $Port still in use by PID(s): $stillPids"
     exit 1
 }
 Write-Host "Dashboard stopped. Port $Port is free."

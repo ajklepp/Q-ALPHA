@@ -3,10 +3,8 @@
 # Unattended SETTLE pass for Strategy Lab (primary EOD ~16:20 ET).
 #
 # Primary:  Mon–Fri 16:20 ET  (shortly after agent Modal EOD ~16:15)
-# Optional: Mon–Fri 16:40 ET  as backup (same script)
-#   See strategy_lab/DASHBOARD_FRESHNESS.md
-#
-#   schtasks /Create ... /ST 16:20 ... -File "...\start_lab_settle_scheduled.ps1"
+# Register all Lab tasks: .\strategy_lab\register_lab_tasks.ps1
+#   (Entry 09:35 + Mark 30m + Settle 16:20 — NO 16:40 backup)
 # =============================================================================
 $ErrorActionPreference = "Continue"
 

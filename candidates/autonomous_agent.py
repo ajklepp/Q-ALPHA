@@ -812,12 +812,63 @@ def _count_trades_today() -> int:
     )
 
 
+# Set when ledger/pool changed this session — flush in main() finally even on crash.
+_SESSION_DIRTY = False
+_OPEN_LEDGER_STATUSES = frozenset({
+    "OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC",
+})
+
+
+def _mark_session_dirty() -> None:
+    """Book needs Supabase + Modal volume push before session ends."""
+    global _SESSION_DIRTY
+    _SESSION_DIRTY = True
+
+
+def _flush_session_sync() -> None:
+    """
+    Push OPEN managed trades + pool to Supabase and Modal volume.
+    Called from main() finally so socket disconnect cannot skip Phase 5 sync.
+    """
+    global _SESSION_DIRTY
+    if not _SESSION_DIRTY:
+        return
+    try:
+        from supabase_sync import sync_live_book_safe
+
+        store = PaperTradesStore()
+        data = store.load()
+        trades = data.get("trades") or []
+        pool = PoolManager(state_path=state_path("pool_state.json"))
+        open_n = 0
+        for t in trades:
+            if t.get("approved_by") not in {"autonomous_agent", "telegram_yes"}:
+                continue
+            if str(t.get("execution_mode") or "") != "IBKR_PAPER":
+                continue
+            if str(t.get("status") or "").upper() not in _OPEN_LEDGER_STATUSES:
+                continue
+            sync_live_book_safe(trade=dict(t), pool_state=None)
+            open_n += 1
+        sync_live_book_safe(trade=None, pool_state=pool.state)
+        print(
+            f"  [FLUSH] Supabase live book synced "
+            f"({open_n} open trade(s) + pool snapshot)"
+        )
+        sync_to_modal()
+    except Exception as exc:
+        print(f"  [FLUSH] session sync warn: {exc}")
+    finally:
+        _SESSION_DIRTY = False
+
+
 def save_trade(trade_dict: dict) -> None:
     """Append trade to paper_trades.json using PaperTradesStore schema."""
     store = PaperTradesStore()
     data = store.load()
     data["trades"].append(trade_dict)
     store.save(data)
+    _mark_session_dirty()
     print(f"Trade saved: {trade_dict['ticker']}")
 
 
@@ -995,6 +1046,7 @@ def reconcile_unfilled_opens(ib: IB | None = None) -> list[dict]:
         corrected.append({"ticker": ticker, "position_value": pv, "row": dict(t)})
 
     if corrected:
+        _mark_session_dirty()
         open_n = sum(
             1 for x in trades
             if str(x.get("status") or "") in {
@@ -1421,6 +1473,7 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
 
                     position_value = shares * current_price
                     pool.open_trade(position_value)
+                    _mark_session_dirty()
 
                     atr_14 = get_atr14_ibkr(ib, ticker, current_price)
                     entry_reason = (
@@ -1472,6 +1525,11 @@ def watch_and_enter(ib: IB, candidates: list[dict], rt_bars: dict | None = None)
                             pool_state=pool.state,
                         )
                         print(f"  Supabase live book synced ({ticker})")
+                        try:
+                            sync_to_modal()
+                            print(f"  Modal volume synced ({ticker} entry)")
+                        except Exception as modal_exc:
+                            print(f"  Modal volume warn: {modal_exc}")
                     except Exception as sync_exc:
                         print(f"  Supabase live book warn: {sync_exc}")
 
@@ -1940,6 +1998,7 @@ def main() -> None:
         print("PHASE 5: SYNC TO MODAL")
         print(f"{'─' * 40}")
         sync_to_modal()
+        _SESSION_DIRTY = False  # flush already done explicitly
 
     except Exception as exc:
         msg = f"⚠️ Q-ALPHA AGENT ERROR: {exc}"
@@ -1948,6 +2007,10 @@ def main() -> None:
         traceback.print_exc()
 
     finally:
+        try:
+            _flush_session_sync()
+        except Exception as flush_exc:
+            print(f"  [FLUSH] finally warn: {flush_exc}")
         try:
             ib.disconnect()
             print("Disconnected from TWS")

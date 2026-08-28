@@ -481,20 +481,64 @@ def run_monitor() -> dict | None:
         import json
 
         def _sync_eod(sync):
+            from datetime import date
+
             trades_path = state_path("paper_trades.json")
             all_trades = []
             if trades_path.exists():
                 data = json.loads(trades_path.read_text(encoding="utf-8"))
                 all_trades = data.get("trades", [])
+
+            volume_opens = [
+                t for t in all_trades
+                if str(t.get("status") or "").upper() in OPEN_STATUSES
+                and t.get("approved_by") in MANAGED_TRADE_SOURCES
+            ]
+
             for trade in all_trades:
                 if trade.get("approved_by") not in MANAGED_TRADE_SOURCES:
                     continue
                 # Pass through NEVER_FILLED / REJECTED_* as-is so Supabase
                 # cannot stay OPEN after a local fill-truth correction.
                 sync.upsert_trade(trade)
-            pool_state = result.get("pool", {})
-            sync.upsert_pool_snapshot(pool_state)
-            open_count = result.get("summary", {}).get("open_trades", 0)
+
+            pool_state = dict(result.get("pool", {}) or {})
+            volume_open_n = len(volume_opens)
+            pool_open_n = int(pool_state.get("open_positions") or 0)
+
+            skip_pool_snapshot = False
+            if volume_open_n == 0 or pool_open_n == 0:
+                try:
+                    today = date.today().isoformat()
+                    supa = (
+                        sync.client.table("trades")
+                        .select("ticker,status,execution_mode")
+                        .eq("entry_date", today)
+                        .execute()
+                    )
+                    supa_opens = [
+                        row for row in (supa.data or [])
+                        if str(row.get("status") or "").upper() in OPEN_STATUSES
+                        and str(row.get("execution_mode") or "") == "IBKR_PAPER"
+                    ]
+                    if supa_opens and volume_open_n == 0:
+                        skip_pool_snapshot = True
+                        tickers = ", ".join(
+                            str(r.get("ticker") or "?") for r in supa_opens
+                        )
+                        print(
+                            "  EOD stale-volume guard: skip pool_snapshot upsert "
+                            f"(Modal volume 0 opens; Supabase OPEN: {tickers})"
+                        )
+                except Exception as exc:
+                    print(f"  EOD stale-volume check warn: {exc}")
+
+            if not skip_pool_snapshot:
+                if volume_open_n > 0:
+                    pool_state["open_positions"] = volume_open_n
+                sync.upsert_pool_snapshot(pool_state)
+
+            open_count = volume_open_n or result.get("summary", {}).get("open_trades", 0)
             sync.log_health(
                 "eod_monitor",
                 "OK",
