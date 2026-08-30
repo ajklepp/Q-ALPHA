@@ -1245,3 +1245,14 @@ if __name__ == "__main__":
         _print_profile(profile)
         out = save_profile_json(profile)
         print(f"\nWrote {out.relative_to(ROOT)}")
+
+
+def find_tsd_analog_days(symbol: str, **kwargs) -> dict:
+    """
+    TSD v2 analog finder — 3H swing BUY history (not gap-day analogs).
+
+    Delegates to tsd_scan_pipeline.tsd_profiler. MIN 30 analogs to trade.
+  """
+    from tsd_scan_pipeline.tsd_profiler import find_tsd_analog_days as _find_tsd
+
+    return _find_tsd(symbol, **kwargs)
