@@ -12,7 +12,7 @@
 ## Commands
 
 ```powershell
-cd C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+cd C:\Users\ajkle\Documents\Q-ALPHA
 
 # One-shot sync
 .\tools\sync_readonly_mirror.ps1

@@ -38,7 +38,7 @@ Quieter than settle: no Telegram unless a position **closes** during the mark.
 **Preferred — registers Entry + Mark + Settle, removes any 16:40 backup:**
 
 ```powershell
-cd C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+cd C:\Users\ajkle\Documents\Q-ALPHA
 .\strategy_lab\register_lab_tasks.ps1
 ```
 
@@ -46,13 +46,13 @@ cd C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
 
 ```powershell
 # Intraday marks — Mon–Fri, every 30 min from 10:00 for 6 hours
-schtasks /Create /F /TN "QAlpha Strategy Lab Mark" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\strategy_lab\start_lab_mark_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00 /RL LIMITED
+schtasks /Create /F /TN "QAlpha Strategy Lab Mark" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\Documents\Q-ALPHA\strategy_lab\start_lab_mark_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00 /RL LIMITED
 
 # Primary EOD settle ~16:20
-schtasks /Create /F /TN "QAlpha Strategy Lab Settle" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\strategy_lab\start_lab_settle_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 16:20 /RL LIMITED
+schtasks /Create /F /TN "QAlpha Strategy Lab Settle" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\Documents\Q-ALPHA\strategy_lab\start_lab_settle_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 16:20 /RL LIMITED
 
 # Morning entry 09:35
-schtasks /Create /F /TN "QAlpha Strategy Lab" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\strategy_lab\start_lab_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:35 /RL LIMITED
+schtasks /Create /F /TN "QAlpha Strategy Lab" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\Documents\Q-ALPHA\strategy_lab\start_lab_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:35 /RL LIMITED
 ```
 
 ## Verify

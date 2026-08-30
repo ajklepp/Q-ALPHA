@@ -15,7 +15,8 @@ Aaron Klepp — Ontario. Building Q-Alpha: autonomous momentum system + **Strate
 Starting SIM capital per lab pool: **$3,000** (compounds). Broker: IBKR Canada paper (agent); Polygon for lab.
 
 **Dashboard:** https://q-alpha-lshnrvza2radqpkjrkf52m.streamlit.app  
-**Repo:** `ajklepp/Q-ALPHA` · branch `main` · entry `dashboard.py`
+**Repo:** `ajklepp/Q-ALPHA` · branch `main` · entry `dashboard.py`  
+**Canonical local path:** `C:\Users\ajkle\Documents\Q-ALPHA` (not OneDrive — Aug 2026)
 
 ---
 
@@ -74,7 +75,7 @@ schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST
 
 ### B) Manual live
 ```powershell
-cd C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+cd C:\Users\ajkle\Documents\Q-ALPHA
 .\venv\Scripts\python.exe strategy_lab\live_forward.py
 ```
 
@@ -133,7 +134,7 @@ Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
 Modal cannot reach `127.0.0.1:7497`. Agents **cannot** create Windows tasks — Aaron runs once:
 
 ```powershell
-schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
+schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
 ```
 
 Verify: `schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST`  

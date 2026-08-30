@@ -4,7 +4,7 @@
 # Modal CANNOT reach TWS — this must run on the PC with TWS paper open.
 #
 # Register (Aaron runs this once — agent does NOT create the task):
-#   schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1\"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
+#   schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\ajkle\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1\"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
 #
 # ClientId 96 (not agent 5 / connector 1 / spike 97).
 # =============================================================================

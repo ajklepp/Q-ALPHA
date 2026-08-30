@@ -25,7 +25,7 @@ $ErrorActionPreference = "Continue"
 
 $MainRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if (-not (Test-Path (Join-Path $MainRoot "Q_ALPHA_HANDOFF.md"))) {
-    $MainRoot = "C:\Users\ajkle\OneDrive\Documents\Q-ALPHA"
+    $MainRoot = "C:\Users\ajkle\Documents\Q-ALPHA"
 }
 $ReadOnlyRoot = Join-Path (Split-Path -Parent $MainRoot) "Q-ALPHA-READONLY"
 

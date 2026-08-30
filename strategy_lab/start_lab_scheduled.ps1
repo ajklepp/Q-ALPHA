@@ -78,7 +78,7 @@ exit $exitCode
 #   .\strategy_lab\register_lab_tasks.ps1
 #
 # Entry only (unquoted -File path — quoted paths fail with Last Result -65536):
-#   schtasks /Create /F /TN "QAlpha Strategy Lab" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\strategy_lab\start_lab_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:35 /RL LIMITED
+#   schtasks /Create /F /TN "QAlpha Strategy Lab" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\ajkle\Documents\Q-ALPHA\strategy_lab\start_lab_scheduled.ps1" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:35 /RL LIMITED
 #
 # VERIFY:
 #   schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST

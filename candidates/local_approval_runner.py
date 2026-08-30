@@ -11,13 +11,13 @@
 # 3. Name: QAlpha Approval Runner
 # 4. Trigger: Daily at 9:25 AM
 # 5. Action: Start a program
-#    Program: C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\venv\Scripts\python.exe
+#    Program: C:\Users\ajkle\Documents\Q-ALPHA\venv\Scripts\python.exe
 #    Arguments: candidates/local_approval_runner.py
-#    Start in: C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+#    Start in: C:\Users\ajkle\Documents\Q-ALPHA
 # 6. Finish
 #
 # Manual test:
-#   cd C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+#   cd C:\Users\ajkle\Documents\Q-ALPHA
 #   venv\Scripts\python.exe candidates/local_approval_runner.py
 # =============================================================================
 from __future__ import annotations

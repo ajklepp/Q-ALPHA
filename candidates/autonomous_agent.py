@@ -10,17 +10,17 @@
 # 2. Name: QAlpha Autonomous Agent
 # 3. Trigger: Daily at 9:20 AM (weekdays)
 # 4. Action: Start a program
-#    Program:   C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\venv\Scripts\python.exe
+#    Program:   C:\Users\ajkle\Documents\Q-ALPHA\venv\Scripts\python.exe
 #    Arguments: candidates\autonomous_agent.py
-#    Start in:  C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+#    Start in:  C:\Users\ajkle\Documents\Q-ALPHA
 # 5. Environment (REQUIRED — cp1252 consoles crash on emoji otherwise):
 #    Task Scheduler has no env-var UI. Either:
 #      A) Action Program = cmd.exe
 #         Arguments =
 #           /c "set PYTHONIOENCODING=utf-8&& set PYTHONUTF8=1&&
-#               C:\Users\ajkle\OneDrive\Documents\Q-ALPHA\venv\Scripts\python.exe
+#               C:\Users\ajkle\Documents\Q-ALPHA\venv\Scripts\python.exe
 #               candidates\autonomous_agent.py"
-#         Start in = C:\Users\ajkle\OneDrive\Documents\Q-ALPHA
+#         Start in = C:\Users\ajkle\Documents\Q-ALPHA
 #      B) Or set User-level env vars PYTHONIOENCODING=utf-8 and PYTHONUTF8=1
 #         (Windows Settings → System → About → Advanced system settings →
 #          Environment Variables) so every scheduled/manual run inherits them.
