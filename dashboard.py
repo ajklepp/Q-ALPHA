@@ -240,13 +240,21 @@ def _safe_float(x, default: float = 0.0) -> float:
 
 
 def _updated_hhmm_et(updated) -> str | None:
-    """HH:MM from ISO-ish last_updated, or None if not a usable string."""
+    """HH:MM in America/New_York from ISO last_updated (UTC-safe)."""
     if not isinstance(updated, str):
         return None
     s = updated.strip()
-    if len(s) < 16:
+    if not s:
         return None
-    return s[11:16]
+    try:
+        cleaned = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(cleaned)
+        if dt.tzinfo is None:
+            dt = pytz.UTC.localize(dt)
+        et = pytz.timezone("America/New_York")
+        return dt.astimezone(et).strftime("%H:%M")
+    except (ValueError, TypeError):
+        return None
 
 
 def _open_mark_notional(trade) -> float:

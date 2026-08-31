@@ -12,6 +12,8 @@ CRITICAL:
   ``candidates/tws_intraday_sync.py`` (Task Scheduler, clientId 96).
 
 Polygon marks here are secondary/fallback for still-OPEN ledger rows only.
+IBKR_PAPER agent trades are skipped entirely — local tws_intraday_sync.py
+(clientId 96) is the sole mark source for live paper positions.
 """
 from __future__ import annotations
 
@@ -174,6 +176,9 @@ def run_intraday_monitor() -> None:
             status in OPEN_STATUSES
             and t.get("approved_by") in MANAGED_TRADE_SOURCES
         ):
+            if str(t.get("execution_mode") or "") == "IBKR_PAPER":
+                skipped_terminal.append(f"{t.get('ticker')}:IBKR_PAPER(TWS SoT)")
+                continue
             open_trades.append(t)
 
     if skipped_terminal:

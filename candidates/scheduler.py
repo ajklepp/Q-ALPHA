@@ -23,6 +23,9 @@
 # IMPORTANT: After any change to intraday_monitor.py or supabase_sync.py,
 # always re-run `modal deploy candidates/scheduler.py` so the :30 cron picks
 # up mark-only updates (stale volume must not full-upsert CLOSED → OPEN).
+# IBKR_PAPER agent marks are skipped on Modal — TWS sync (clientId 96) is SoT.
+# Mark issues on Streamlit Cloud: check candidates/logs/tws_sync_*.log
+# "Supabase verify" block before blaming dashboard code.
 #
 # STEP 4: Confirm deployment
 #   modal app list          <- should show qalpha-scheduler
@@ -31,6 +34,7 @@
 # Cron times (UTC) — EDT (UTC-4, summer). Add 1 hour for EST (winter):
 #   Every 30m 9:30-4:00 PM EDT — run_intraday_monitor ("*/30 13-20 * * 1-5")
 #     → Polygon FALLBACK marks only (NOT TWS; Modal cannot reach 127.0.0.1:7497).
+#     → Skips execution_mode=IBKR_PAPER (live paper marks = local TWS sync only).
 #     → Does NOT close trades. Must never re-OPEN CLOSED / NEVER_FILLED.
 #     → Live SoT marks + filled-flat→CLOSED: local tws_intraday_sync.py
 #       (schtasks "QAlpha Live TWS Sync", clientId 96).

@@ -127,11 +127,15 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 ~4:15    Modal EOD monitor (agent)
 ~4:20    Strategy Lab --settle (primary EOD at 16:20 only)
 Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
-         does NOT close; must never re-OPEN CLOSED / NEVER_FILLED
+         skips IBKR_PAPER (TWS sync owns live paper marks); does NOT close;
+         must never re-OPEN CLOSED / NEVER_FILLED
 ```
 
 **Live marks/closes SoT:** local `candidates/tws_intraday_sync.py` (TWS clientId **96**).
-Modal cannot reach `127.0.0.1:7497`. Agents **cannot** create Windows tasks — Aaron runs once:
+Modal cannot reach `127.0.0.1:7497`. After `intraday_monitor.py` changes, always
+`python -m modal deploy candidates/scheduler.py`. Stale marks on Streamlit Cloud:
+check `candidates/logs/tws_sync_YYYY-MM-DD.log` **Supabase verify** block (not dashboard).
+Agents **cannot** create Windows tasks — Aaron runs once:
 
 ```powershell
 schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00

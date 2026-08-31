@@ -47,6 +47,8 @@ OPEN_LEDGER = frozenset({"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"})
 FILL_CONFIRMED = frozenset({"Filled", "FILLED"})
 # Exit px must match TWS sell within this relative band or repair overwrites.
 EXIT_PX_TOL_FRAC = 0.0025  # 0.25%
+# Post-sync mark verify: Cloud current_price must match TWS within this $ band.
+MARK_PX_TOL = 0.05
 
 
 def _finite(val: Any) -> float | None:
@@ -442,23 +444,29 @@ def _rebuild_pool_counters(pool: PoolManager, trades: list[dict]) -> None:
     pool.save_state()
 
 
-def _verify_supabase_rows(
+def _verify_supabase_trades(
     trades: list[dict],
-    tickers: list[str],
-) -> None:
-    """One-line Cloud verification after force upsert (fail-soft)."""
-    want = {t.upper() for t in tickers}
+    *,
+    tickers: list[str] | None = None,
+    expected_marks: dict[tuple[str, str], float] | None = None,
+) -> list[str]:
+    """
+    One-line Cloud verification after force upsert.
+    Returns error strings when mark px disagrees with TWS by > MARK_PX_TOL.
+    """
+    want = {t.upper() for t in tickers} if tickers else None
     checks: list[tuple[str, str]] = []
     for t in trades:
         sym = str(t.get("ticker") or "").upper()
-        if sym not in want:
+        if want is not None and sym not in want:
             continue
         entry = str(t.get("entry_date") or "")[:10]
         if entry:
             checks.append((sym, entry))
     if not checks:
-        return
+        return []
 
+    errors: list[str] = []
     try:
         from supabase_sync import SupabaseSync
 
@@ -479,16 +487,32 @@ def _verify_supabase_rows(
             rows = result.data or []
             if not rows:
                 print(f"    {ticker} {entry_date}: (no row)")
+                errors.append(f"verify_missing:{ticker}")
                 continue
             r = rows[0]
+            cloud_px = _finite(r.get("current_price"))
+            key = (ticker, entry_date)
+            mark_note = ""
+            if expected_marks and key in expected_marks:
+                tws_px = float(expected_marks[key])
+                if cloud_px is None or abs(cloud_px - tws_px) > MARK_PX_TOL:
+                    msg = (
+                        f"mark_mismatch:{ticker} "
+                        f"cloud={cloud_px} tws={tws_px:.2f}"
+                    )
+                    errors.append(msg)
+                    mark_note = " *** MISMATCH ***"
             print(
                 f"    {r.get('ticker')} {r.get('entry_date')}: "
                 f"status={r.get('status')} shares={r.get('shares_total')} "
                 f"exit={r.get('exit_price')} px={r.get('current_price')} "
                 f"updated={str(r.get('last_updated') or '')[:19]}"
+                f"{mark_note}"
             )
     except Exception as exc:
         print(f"  Supabase verify warn: {exc}")
+        errors.append(f"verify_error:{exc}")
+    return errors
 
 
 def _is_managed_ibkr(t: dict) -> bool:
@@ -589,6 +613,7 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         closed_now: list[str] = []
         repaired_now: list[str] = []
         marked_now: list[str] = []
+        mark_expectations: dict[tuple[str, str], float] = {}
         ledger_dirty = False
         today_et = datetime.now(ET).strftime("%Y-%m-%d")
 
@@ -611,6 +636,7 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                 if mark is not None and status in OPEN_LEDGER:
                     _apply_mark(t, mark)
                     marked_now.append(ticker)
+                    mark_expectations[(ticker, entry_date)] = float(mark)
                     ledger_dirty = True
                     if not _sync_trade_row(t, reason="mark"):
                         summary["sync_errors"].append(f"mark:{ticker}")
@@ -754,7 +780,13 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         summary["force_closed_n"] = force_closed_n
         summary["force_closed_ok"] = force_closed_ok
 
-        _verify_supabase_rows(trades, ["GME", "STLA", "DPRO"])
+        verify_errors = _verify_supabase_trades(
+            trades,
+            tickers=["GME", "STLA", "DPRO"],
+            expected_marks=mark_expectations,
+        )
+        if verify_errors:
+            summary["sync_errors"].extend(verify_errors)
 
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "
