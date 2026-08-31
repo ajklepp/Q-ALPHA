@@ -2,6 +2,13 @@
 # Q-ALPHA - candidates/register_candidate_tasks.ps1
 # Register candidate Task Scheduler jobs (Approval Runner + Autonomous Agent + TWS Sync).
 #
+# POLICY (2026-08-31): TSD 3HR swing is the PRIMARY live IBKR track.
+# Disable new gap-agent entries after registering:
+#   schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE
+#   schtasks /Change /TN "QAlpha Approval Runner" /DISABLE   (optional)
+# QALPHA_GAP_AGENT_LIVE=0 in .env is a second gate if the task is re-enabled.
+# TWS sync stays ENABLED — marks residual gap runoff (STLA/DPRO) + TSD book.
+#
 # Aaron runs this when tasks drift or after a machine rebuild / path move.
 # Agents do NOT auto-create schtasks.
 #

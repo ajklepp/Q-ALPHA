@@ -1,7 +1,7 @@
 # TSD 3HR Swing Scanner — Design (locked)
 
 **Status:** Phase 6 complete (weekly scorecard + options study, Friday 5 PM task).  
-**Track:** LONG-ONLY 3-hour swing, parallel to gap/momentum morning agent.  
+**Track:** PRIMARY live IBKR paper track (3HR swing). Gap morning agent disabled for new entries; Strategy Lab runs gap SIM only.  
 **Workspace:** Q-ALPHA only.
 
 ---

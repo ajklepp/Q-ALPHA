@@ -94,7 +94,7 @@ SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
 # otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
-_SUPABASE_SYNC_API = "watchlist-v4"
+_SUPABASE_SYNC_API = "tsd-primary-v1"
 # Agent entry window closes at 11:00 ET — after that, no-trade = Skipped.
 ENTRY_WINDOW_CLOSE = dtime(11, 0)
 
@@ -458,22 +458,6 @@ def get_last_health(component: str, health: list) -> dict | None:
     return None
 
 
-def _next_scan_countdown() -> str:
-    """Countdown to next weekday 9:20 AM ET scan (skips Sat/Sun)."""
-    et = pytz.timezone("America/New_York")
-    now_et = datetime.now(et)
-    next_scan = now_et.replace(hour=9, minute=20, second=0, microsecond=0)
-    if now_et >= next_scan:
-        next_scan = next_scan + timedelta(days=1)
-    # Scan only runs Mon–Fri — roll weekend targets forward to Monday 9:20.
-    while next_scan.weekday() >= 5:  # 5=Sat, 6=Sun
-        next_scan = next_scan + timedelta(days=1)
-    diff = next_scan - now_et
-    hours, rem = divmod(int(diff.total_seconds()), 3600)
-    mins = rem // 60
-    return f"{hours}h {mins}m"
-
-
 def _style_pnl(val):
     if pd.isna(val):
         return ""
@@ -701,449 +685,20 @@ def _style_watchlist(df: pd.DataFrame):
 
 
 def render_header() -> None:
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-    with col1:
-        live_et = ""
-        try:
-            last_intraday = get_sync().get_last_health("intraday_monitor")
-            if last_intraday and last_intraday.get("last_run"):
-                live_et = last_intraday["last_run"][11:16]
-        except Exception:
-            pass
-        brand_block(live_et)
-    with col2:
-        st.metric("Version", f"v{SYSTEM_VERSION}")
-    with col3:
-        st.metric("Days Running", f"{DAYS_RUNNING}d")
-    with col4:
-        st.metric("Next Scan", _next_scan_countdown())
+    from dashboard_live_status import render_live_header
+    render_live_header()
 
 
 def tab_live_status(trades: list, pool_history: list) -> None:
-    df = _trades_df(trades)
-    today = _et_today()
-
-    # Watchlist is the single source of truth for what the agent is watching.
-    watch_rows: list[dict] = []
-    try:
-        watch_rows = _load_todays_watchlist(today)
-    except Exception as exc:
-        watch_load_err: str | None = str(exc)
-    else:
-        watch_load_err = None
-
-    open_df = _open_positions_df(df)
-    pool_book, pnl_dollar, cash, deployed_book, starting = _display_pool_kpis(
-        pool_history, open_df,
-    )
-    pnl_pct = (pnl_dollar / starting) * 100 if starting else 0.0
-    open_pos = len(open_df)
-    t3_count = len(open_df[open_df["status"] == "T3_TRAIL"]) if not open_df.empty else 0
-
-    closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
-    # Total Trades = closed exits only (win rate denominator); NEVER_FILLED excluded.
-    total_trades = len(closed)
-    winning_trades = len(closed[closed["pnl_dollars"] > 0]) if not closed.empty else 0
-    losing_trades = total_trades - winning_trades
-    win_rate = winning_trades / total_trades if total_trades else 0
-
-    with st.container(border=True):
-        section_header("Session KPIs", "Pool, slots, and hit rate")
-        # All six: st.metric + colored delta pills (no captions, no delta_color="off").
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        # MTM equity; with 0 opens equals cash (≈ pool when deployed=0).
-        mtm_total = cash + sum(
-            _open_mark_notional(row) for _, row in open_df.iterrows()
-        ) if open_pos else cash
-        # Short deltas only — long strings truncate to "+23...." in 6-col layout.
-        with col1:
-            st.metric(
-                "Pool",
-                f"${pool_book:,.2f}",
-                f"${cash:,.0f}/${deployed_book:,.0f}",
-                delta_color="normal",
-                help=f"Cash ${cash:,.2f} · Deployed ${deployed_book:,.2f}",
-            )
-        with col2:
-            st.metric(
-                "P&L",
-                f"${mtm_total:,.2f}",
-                f"{pnl_dollar:+.0f}",
-                delta_color="normal",
-                help=f"{pnl_dollar:+,.2f} ({pnl_pct:+.1f}%) vs ${starting:,.0f} start",
-            )
-        with col3:
-            st.metric(
-                "Open Positions",
-                f"{open_pos}/{MAX_SLOTS} slots",
-                f"{MAX_SLOTS - open_pos} available",
-                delta_color="normal",
-            )
-        with col4:
-            st.metric(
-                "T3 Trailing",
-                f"{t3_count} free-running",
-                "slots released",
-                delta_color="normal",
-            )
-        with col5:
-            st.metric(
-                "Total Trades",
-                str(total_trades),
-                f"{winning_trades}W / {losing_trades}L",
-                delta_color="normal",
-            )
-        with col6:
-            st.metric(
-                "Win Rate",
-                f"{win_rate:.0%}",
-                "Base rate: ~39%",
-                delta_color="normal",
-            )
-
-    # Regime from today's watchlist (not legacy daily_scans).
-    spy_regime = (watch_rows[0].get("regime") if watch_rows else None) or "UNKNOWN"
-    vix_regime = "NORMAL"
-    sizing_pct = "100%" if vix_regime == "NORMAL" else "50%"
-    regime_banner(spy_regime, vix_regime, sizing_pct)
-
-    with st.container(border=True):
-        section_header("Open Positions", "Live marks vs stop / 2R target")
-        if open_df.empty:
-            st.info("No open positions.")
-        else:
-            for _, trade in open_df.iterrows():
-                ticker = str(trade.get("ticker") or "")
-                entry_price = _safe_float(trade.get("entry_price"), 0.0)
-                stop_price = _safe_float(trade.get("stop_price"), 0.0)
-                target_2r = _safe_float(trade.get("target_2r"), 0.0)
-                shares = int(_safe_float(trade.get("shares_total"), 0.0))
-
-                raw_mark = _safe_float(trade.get("current_price"), float("nan"))
-                if not math.isfinite(raw_mark) or raw_mark <= 0:
-                    fetched = _oneshot_polygon_mark(ticker)
-                    if fetched is not None and fetched > 0:
-                        raw_mark = fetched
-                current_price = (
-                    raw_mark
-                    if math.isfinite(raw_mark) and raw_mark > 0
-                    else entry_price
-                )
-
-                pnl_dollars = _safe_float(trade.get("pnl_dollars"), float("nan"))
-                pnl_pct_val = _safe_float(trade.get("pnl_pct"), float("nan"))
-                r_mult = _safe_float(trade.get("r_multiple"), float("nan"))
-                dist_stop = _safe_float(trade.get("dist_to_stop"), float("nan"))
-
-                # Recompute display P&L when marks were missing/NaN but price known.
-                if (
-                    (not math.isfinite(pnl_dollars) or not math.isfinite(pnl_pct_val))
-                    and entry_price > 0
-                    and current_price > 0
-                ):
-                    pnl_per = current_price - entry_price
-                    if not math.isfinite(pnl_dollars) and shares > 0:
-                        pnl_dollars = pnl_per * shares
-                    if not math.isfinite(pnl_pct_val):
-                        pnl_pct_val = pnl_per / entry_price
-                    risk = entry_price - stop_price
-                    if not math.isfinite(r_mult) and risk > 0:
-                        r_mult = pnl_per / risk
-                    if not math.isfinite(dist_stop) and current_price > 0:
-                        dist_stop = (current_price - stop_price) / current_price
-
-                pnl_dollars = _safe_float(pnl_dollars, 0.0)
-                pnl_pct_val = _safe_float(pnl_pct_val, 0.0)
-                r_mult = _safe_float(r_mult, 0.0)
-                dist_stop = _safe_float(dist_stop, 0.0)
-
-                col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1.5, 1.5, 2])
-
-                with col1:
-                    st.metric(
-                        ticker,
-                        f"${current_price:.2f}",
-                        f"{pnl_pct_val:+.1%}",
-                    )
-
-                with col2:
-                    st.metric(
-                        "P&L",
-                        f"${pnl_dollars:+.2f}",
-                        f"{r_mult:+.2f}R",
-                    )
-
-                with col3:
-                    if (
-                        math.isfinite(stop_price)
-                        and stop_price > 0
-                        and current_price <= stop_price
-                    ):
-                        stop_delta = "HIT / through stop"
-                    else:
-                        stop_color = (
-                            "🔴" if dist_stop < 0.02
-                            else "🟡" if dist_stop < 0.05
-                            else "🟢"
-                        )
-                        stop_delta = f"{stop_color} {dist_stop:.1%} away"
-                    st.metric("Stop", f"${stop_price:.2f}", stop_delta)
-
-                with col4:
-                    to_go = (
-                        (target_2r - current_price) / current_price
-                        if current_price > 0 else 0.0
-                    )
-                    if not math.isfinite(to_go):
-                        to_go = 0.0
-                    if (
-                        math.isfinite(target_2r)
-                        and target_2r > 0
-                        and current_price >= target_2r
-                    ):
-                        target_delta = "HIT / past"
-                    else:
-                        target_delta = f"{to_go:.1%} to go"
-                    st.metric("Target", f"${target_2r:.2f}", target_delta)
-
-                with col5:
-                    price_ok = (
-                        math.isfinite(current_price)
-                        and current_price > 0
-                        and math.isfinite(stop_price)
-                        and math.isfinite(target_2r)
-                        and target_2r > stop_price
-                    )
-                    if price_ok:
-                        if current_price < stop_price:
-                            progress = 0.0
-                            bar_label = (
-                                f"below stop · ${current_price:.2f} "
-                                f"< stop ${stop_price:.2f}"
-                            )
-                        elif current_price > target_2r:
-                            progress = 1.0
-                            bar_label = (
-                                f"past target · ${current_price:.2f} "
-                                f"> target ${target_2r:.2f}"
-                            )
-                        else:
-                            progress = (
-                                (current_price - stop_price)
-                                / (target_2r - stop_price)
-                            )
-                            if not math.isfinite(progress):
-                                progress = 0.0
-                            progress = max(0.0, min(1.0, progress))
-                            bar_label = (
-                                f"Stop ${stop_price:.2f} ──── "
-                                f"${current_price:.2f} ──── "
-                                f"Target ${target_2r:.2f}"
-                            )
-                        st.progress(progress, text=bar_label)
-                    hhmm = _updated_hhmm_et(trade.get("last_updated"))
-                    if hhmm:
-                        st.caption(f"Updated: {hhmm} ET")
-                    else:
-                        st.caption("Updated: —")
-
-                st.divider()
-
-    with st.container(border=True):
-        section_header(
-            "TSD Positions (3HR swing)",
-            "Kill-stop trail book — separate $3k TSD pool",
-        )
-        st.caption(
-            "3-hour swing track (TSD). Not included in gap-agent pool KPIs above. "
-            "Marks sync via local TWS → Supabase."
-        )
-        try:
-            tsd_rows = get_sync().get_tsd_positions(status="OPEN")
-        except Exception as exc:
-            st.caption(f"TSD positions unavailable: {exc}")
-            tsd_rows = []
-
-        if not tsd_rows:
-            st.info("No open TSD positions.")
-        else:
-            for row in tsd_rows:
-                symbol = str(row.get("symbol") or "")
-                entry_price = _safe_float(row.get("entry_price"), 0.0)
-                kill_price = _safe_float(row.get("kill_price"), 0.0)
-                current_price = _safe_float(row.get("current_price"), entry_price)
-                shares = int(_safe_float(row.get("shares"), 0.0))
-                pnl_dollars = _safe_float(row.get("pnl_dollars"), 0.0)
-                pnl_pct_val = _safe_float(row.get("pnl_pct"), 0.0)
-                scan_score = _safe_float(row.get("scan_score"), float("nan"))
-
-                pnl_color = POSITIVE if pnl_dollars >= 0 else NEGATIVE
-                st.markdown(
-                    f"**{symbol}** · {shares} sh · "
-                    f"entry ${entry_price:.2f} · "
-                    f"<span style='color:{pnl_color}'>"
-                    f"P&L ${pnl_dollars:+.2f} ({pnl_pct_val:+.1%})</span>",
-                    unsafe_allow_html=True,
-                )
-
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Mark", f"${current_price:.2f}")
-                with col2:
-                    st.metric("Kill", f"${kill_price:.2f}")
-                with col3:
-                    if math.isfinite(scan_score):
-                        st.metric("Scan score", f"{scan_score:.0f}")
-                    else:
-                        st.metric("Scan score", "—")
-                with col4:
-                    notional = current_price * shares if shares > 0 else 0.0
-                    st.metric("Value", f"${notional:,.0f}")
-
-                if (
-                    math.isfinite(kill_price)
-                    and math.isfinite(current_price)
-                    and kill_price > 0
-                    and current_price > kill_price
-                ):
-                    span = current_price - kill_price
-                    room = (current_price - kill_price) / current_price
-                    st.caption(f"Kill distance: {room:.1%} above kill (${span:.2f})")
-                elif math.isfinite(kill_price) and current_price <= kill_price:
-                    st.caption("At or below kill stop")
-
-                hhmm = _updated_hhmm_et(row.get("last_updated"))
-                bar_ts = str(row.get("last_bar_time") or "")[:19]
-                if hhmm:
-                    cap = f"Updated: {hhmm} ET"
-                    if bar_ts:
-                        cap += f" · last 3H bar {bar_ts}"
-                    st.caption(cap)
-                st.divider()
-
-    with st.container(border=True):
-        section_header("Today's Watchlist", "Agent candidates for the session")
-        if watch_load_err:
-            st.caption(f"Watchlist unavailable: {watch_load_err}")
-
-        if watch_rows:
-            regime_label = watch_rows[0].get("regime") or "—"
-            et_now = datetime.now(pytz.timezone("America/New_York"))
-            trades_today = _trades_for_day(trades, today)
-            st.markdown(
-                f"**{len(watch_rows)} candidates · {_format_watchlist_day(today)} "
-                f"· {regime_label} regime**"
-            )
-
-            wl_rows = []
-            for r in watch_rows:
-                gap = r.get("gap_pct")
-                try:
-                    gap_f = float(gap) if gap is not None else 0.0
-                except (TypeError, ValueError):
-                    gap_f = 0.0
-                gap_pct_display = gap_f * 100.0 if abs(gap_f) <= 1.0 else gap_f
-                vol = r.get("pm_vol_ratio")
-                try:
-                    vol_f = float(vol) if vol is not None else 0.0
-                except (TypeError, ValueError):
-                    vol_f = 0.0
-                score = r.get("score")
-                try:
-                    score_f = float(score) if score is not None else 0.0
-                except (TypeError, ValueError):
-                    score_f = 0.0
-                ticker = str(r.get("ticker") or "").upper()
-                trade = trades_today.get(ticker)
-                fills = _trade_fill_columns(trade)
-                wl_rows.append({
-                    "Rank": int(r.get("rank") or 0),
-                    "Ticker": format_ticker_with_history(ticker),
-                    "R:R": format_profile_rr_cell(ticker),
-                    "Gap %": f"+{gap_pct_display:.1f}%",
-                    "Vol Ratio": f"{vol_f:.1f}x",
-                    "Score": f"{score_f:.0f}",
-                    "Status": _candidate_status(trade, et_now),
-                    "Entry": fills["Entry"],
-                    "Stop": fills["Stop"],
-                    "Target": fills["Target"],
-                    "P&L": fills["P&L"],
-                })
-
-            wl_df = pd.DataFrame(wl_rows)
-            st.dataframe(
-                _style_watchlist(wl_df),
-                column_config={
-                    "Rank": st.column_config.NumberColumn(
-                        "Rank", width="small", format="%d",
-                    ),
-                    "Ticker": st.column_config.TextColumn(
-                        "Ticker",
-                        help=(
-                            "Symbol + history_flag: none = reliable, "
-                            "* = limited history/sample, "
-                            "** = insufficient (informational only)."
-                        ),
-                        width="small",
-                    ),
-                    "R:R": st.column_config.TextColumn(
-                        "R:R",
-                        help=(
-                            "target / safe-max-stop; <1.5 = reward may not "
-                            "justify stop width. Shows number + ⚠️ when below "
-                            "1.5; n/a when profile is insufficient (no R:R)."
-                        ),
-                        width="small",
-                    ),
-                    "Gap %": st.column_config.TextColumn(
-                        "Gap %", help="Pre-market gap vs prior close", width="small",
-                    ),
-                    "Vol Ratio": st.column_config.TextColumn(
-                        "Vol Ratio",
-                        help="Pre-market volume vs expected baseline",
-                        width="small",
-                    ),
-                    "Score": st.column_config.TextColumn(
-                        "Score", help="Composite signal quality (0-100)", width="small",
-                    ),
-                    "Status": st.column_config.TextColumn(
-                        "Status",
-                        help="Trade lifecycle for today (watching → entered → closed)",
-                        width="medium",
-                    ),
-                    "Entry": st.column_config.TextColumn(
-                        "Entry",
-                        help="Real fill from trades table (watch_and_enter) — not a scan estimate",
-                        width="small",
-                    ),
-                    "Stop": st.column_config.TextColumn(
-                        "Stop",
-                        help="Real stop from trades table",
-                        width="small",
-                    ),
-                    "Target": st.column_config.TextColumn(
-                        "Target",
-                        help="Real 2R target from trades table",
-                        width="small",
-                    ),
-                    "P&L": st.column_config.TextColumn(
-                        "P&L",
-                        help="pnl_dollars from trades (live current_price when open)",
-                        width="medium",
-                    ),
-                },
-                hide_index=True,
-                use_container_width=True,
-                height=min(520, 56 + 38 * max(len(wl_rows), 1)),
-            )
-        else:
-            st.info(
-                "No watchlist for today yet. It appears here as soon as the "
-                "9:20 agent syncs candidates to Supabase (even with zero trades)."
-            )
+    from dashboard_live_status import render_live_status_tab
+    render_live_status_tab(trades, pool_history)
 
 
 def tab_trade_log(trades: list) -> None:
+    st.caption(
+        "Gap-agent history (legacy). TSD closed trades: weekly scorecard / TSD panel (opens)."
+    )
+
     df = _trades_df(trades)
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
     never = (
@@ -1230,6 +785,9 @@ def tab_trade_log(trades: list) -> None:
 
 
 def tab_performance(trades: list, pool_history: list) -> None:
+    st.caption(
+        "Gap-agent history (legacy). TSD closed trades: weekly scorecard / TSD panel (opens)."
+    )
     with st.container(border=True):
         section_header("Equity Curve", "Pool value over time")
         if pool_history:
@@ -1318,6 +876,9 @@ def tab_system_health(health: list) -> None:
     with st.container(border=True):
         section_header("Component Status", "Last heartbeat per job")
         components = {
+            "tws_sync": {"icon": "🔗", "name": "Live TWS Sync"},
+            "tsd_sync": {"icon": "📐", "name": "TSD Supabase Sync"},
+            "intraday_monitor": {"icon": "📡", "name": "Modal Intraday Monitor"},
             "morning_scan": {"icon": "🔍", "name": "Morning Scanner"},
             "eod_monitor": {"icon": "📊", "name": "EOD Monitor"},
             "approval_processor": {"icon": "✅", "name": "Approval Processor"},
@@ -2619,7 +2180,8 @@ def render_footer() -> None:
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         st.caption(
-            f"Auto-refreshes every 90s · "
+            "Auto-refresh ~90s · TWS marks :10/:40 · TSD trail ~60s local · "
+            "Modal skips IBKR_PAPER marks · "
             f"Last updated: {now_et.strftime('%H:%M:%S ET')}"
         )
     with col2:

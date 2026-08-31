@@ -780,9 +780,15 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         summary["force_closed_n"] = force_closed_n
         summary["force_closed_ok"] = force_closed_ok
 
+        gap_open_tickers = sorted({
+            str(t.get("ticker") or "").upper()
+            for t in trades
+            if _is_managed_ibkr(t)
+            and str(t.get("status") or "").upper() in OPEN_LEDGER
+        })
         verify_errors = _verify_supabase_trades(
             trades,
-            tickers=["GME", "STLA", "DPRO"],
+            tickers=gap_open_tickers,
             expected_marks=mark_expectations,
         )
         if verify_errors:
@@ -814,6 +820,18 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         )
         if summary["sync_errors"]:
             summary["errors"].extend(summary["sync_errors"])
+
+        try:
+            from supabase_sync import SupabaseSync
+
+            SupabaseSync().log_health(
+                "tws_sync",
+                "OK" if not summary["sync_errors"] else "WARN",
+                f"marked={marked_now} tsd={summary.get('tsd_upserted', 0)} "
+                f"errors={len(summary.get('sync_errors') or [])}",
+            )
+        except Exception:
+            pass
     finally:
         try:
             ib.disconnect()

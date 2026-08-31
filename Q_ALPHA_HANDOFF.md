@@ -20,15 +20,36 @@ Starting SIM capital per lab pool: **$3,000** (compounds). Broker: IBKR Canada p
 
 ---
 
-## TWO SYSTEMS (do not mix state)
+## THREE TRACKS (do not mix state)
 
-| | Live agent | Strategy Lab |
-|--|------------|--------------|
+| | TSD live (PRIMARY) | Gap agent (RUNOFF) | Strategy Lab (SIM) |
+|--|--------------------|--------------------|--------------------|
+| Code | `candidates/tsd_scan_pipeline/` + `tsd_trail_monitor.py` | `candidates/autonomous_agent.py` | `strategy_lab/live_forward.py` |
+| Money | IBKR paper + `tsd_pool_state.json` / `tsd_book_state.json` | IBKR paper + `pool_state.json` (residual opens only) | SIM dual pools — no IBKR |
+| Schedule | **QAlpha TSD Scheduler** (:03 after 3H bars) + **QAlpha TSD Trail Monitor** | **DISABLED** — was 9:20 ET (`QALPHA_GAP_AGENT_LIVE=0` gate) | **QAlpha Strategy Lab** · 9:35 ET |
+| Supabase | `tsd_positions`, `tsd_pool_snapshots`, `tsd_watchlist` | `trades`, `pool_snapshots` (legacy runoff) | `strategy_lab_state` |
+| Dashboard | **Live Status PRIMARY** — KPIs, opens, watch-10 | Small "Gap runoff" section if opens remain | **Strategy Lab** tab unchanged |
+
+**Disable gap new entries (Aaron, once):**
+```powershell
+schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE
+schtasks /Change /TN "QAlpha Approval Runner" /DISABLE   # optional
+```
+
+**TSD cloud schema (run once in Supabase SQL editor):** `candidates/sql/tsd_cloud.sql`  
+**Force TSD push (TWS open):** `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`
+
+---
+
+## LEGACY TWO-SYSTEM TABLE (gap agent was live — now runoff only)
+
+| | Live agent (runoff) | Strategy Lab |
+|--|---------------------|--------------|
 | Code | `candidates/autonomous_agent.py` | `strategy_lab/live_forward.py` |
 | Money | IBKR paper + `candidates/pool_state.json` | SIM dual pools in `forward_state.json` / Supabase |
-| Schedule | Task **QAlpha Autonomous Agent** · **9:20 ET** | Task **QAlpha Strategy Lab** · **9:35 ET** weekdays |
+| Schedule | Task **QAlpha Autonomous Agent** · **DISABLED** (was 9:20 ET) | Task **QAlpha Strategy Lab** · **9:35 ET** weekdays |
 | Telegram | Q-ALPHA agent messages | Prefixed **🧪 Strategy Lab** |
-| Data | Needs TWS; **IBKR paper MD usable** (probe 2026-08-24 — see IBKR section) | Polygon 1-min (15-min delayed OK) |
+| Data | Needs TWS; **IBKR paper MD usable** | Polygon 1-min (15-min delayed OK) |
 
 ---
 
@@ -112,23 +133,21 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 
 ---
 
-## AGENT DAILY SCHEDULE (unchanged spine)
+## DAILY SCHEDULE (TSD-primary, Aug 2026)
 
 ```
-9:15     Open TWS paper (port 7497) — still required for agent orders
-9:20     Task "QAlpha Autonomous Agent" → autonomous_agent.py
-9:20–9:29 Scan / profiles
-9:29     Premarket Telegram (agent)
-9:30–11:00 Entries (agent)
-9:35     Strategy Lab live_forward (parallel SIM — no IBKR)
-9:40–16:10  Live TWS sync every 30m at :10/:40 (LOCAL — marks + filled-flat→CLOSED + TSD)
-10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase SIM)
-11:00    Agent session recap Telegram
-~4:15    Modal EOD monitor (agent)
-~4:20    Strategy Lab --settle (primary EOD at 16:20 only)
-Every 30m Modal intraday monitor (agent) — Polygon FALLBACK marks only;
-         skips IBKR_PAPER (TWS sync owns live paper marks); does NOT close;
-         must never re-OPEN CLOSED / NEVER_FILLED
+Open TWS paper (port 7497) — required for TSD scans + marks
+:03 after each IBKR 3H bar close  Task "QAlpha TSD Scheduler" → tsd_scan_ibkr.py
+H:20 after 3H close               Polygon pre-filter (polygon_hunt_list.py)
+~every 60s (market hours)         Task "QAlpha TSD Trail Monitor" → kill/tranche trail
+9:35                              Strategy Lab live_forward (gap SIM — no IBKR)
+9:40–16:10                        Live TWS sync every 30m at :10/:40 (gap runoff marks + TSD → Supabase)
+10:00–16:00                       Strategy Lab --mark every 30m (Polygon → Supabase SIM)
+~4:15                             Modal EOD monitor (legacy agent book)
+~4:20                             Strategy Lab --settle
+
+DISABLED: QAlpha Autonomous Agent (9:20 gap entries) — runoff brackets only (STLA/DPRO etc.)
+Every 30m Modal intraday_monitor — Polygon FALLBACK; skips IBKR_PAPER (TWS sync owns marks)
 ```
 
 **Live marks/closes SoT:** local `candidates/tws_intraday_sync.py` (TWS clientId **96**).
@@ -145,11 +164,11 @@ Verify: `schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST`
 Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`  
 `--repair` re-reads today's CLOSED IBKR_PAPER sells; TWS fill px/reason wins over stop_price; pool rebuilt (no double-close).
 
-**TSD dashboard panel:** run `candidates/sql/tsd_positions.sql` once in Supabase SQL editor.
-Local `tsd_book_state.json` → `tsd_supabase_sync.py` (via TWS sync) → `tsd_positions` table.
-Streamlit reads `get_tsd_positions()` — separate $3k TSD pool, not gap-agent KPIs.
+**TSD dashboard (PRIMARY Live Status):** run `candidates/sql/tsd_cloud.sql` once in Supabase SQL editor.
+Local `tsd_book_state.json` → `tsd_supabase_sync.py` (via TWS sync) → `tsd_positions` + pool + watchlist.
+Streamlit Live Status reads TSD tables first; gap runoff demoted to secondary section.
 
-### Agent morning list (Phase 2 — TWS pipeline)
+### Agent morning list (Phase 2 — TWS pipeline) — RUNOFF / DISABLED for new entries
 
 - Default: `QALPHA_USE_TWS_SCAN=1` → TWS scanners (**~50 rows each**, union ≈100) → mcap lanes → score full shortlist → **watch top 10** / **trade top 3**.
   - **TRADE** mcap ≥ $150M (orders; no $5 floor; pool affordability applies)
@@ -165,9 +184,9 @@ Streamlit reads `get_tsd_positions()` — separate $3k TSD pool, not gap-agent K
 ## DASHBOARD TABS
 
 ```
-📊 Live Status      — agent pool, watchlist, regime (VIX/sizing; SPY$/SMA50 removed from banner)
-📋 Trade Log
-📈 Performance
+📊 Live Status      — **TSD-primary**: pool KPIs, TSD opens, watch-10; gap runoff section if legacy opens
+📋 Trade Log        — gap-agent history (legacy caption); TSD closed → weekly scorecard (v1)
+📈 Performance      — gap-agent equity (legacy caption)
 🔧 System Health
 📓 Daily Reviews
 🔬 Ticker Profiles  — Supabase `ticker_profiles` (anon); local JSON fallback; Refresh gated if no POLYGON on Cloud
@@ -192,7 +211,7 @@ Local: `.\start_dashboard.ps1` (detached). Cloud auto-deploys on push to `main`;
 | Modal `qalpha-scheduler` | Intraday + EOD monitors |
 | Polygon $79 | Lab bars, scans, news (15-min delayed “live”) |
 | Telegram `@MyQalphaBot` | Alerts |
-| Windows Task Scheduler | Agent 9:20 + Lab 9:35 |
+| Windows Task Scheduler | TSD scan + trail + TWS sync + Lab 9:35 (gap agent DISABLED) |
 
 ### Env (never commit `.env`)
 `POLYGON_API_KEY`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY` / `SUPABASE_PUBLISHABLE_KEY`, `TELEGRAM_*`, `OPENROUTER_API_KEY`, …

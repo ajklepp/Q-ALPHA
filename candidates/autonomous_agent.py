@@ -1812,6 +1812,16 @@ def main() -> None:
         send_telegram("💤 Q-ALPHA: Market closed today.")
         return
 
+    live_flag = os.environ.get("QALPHA_GAP_AGENT_LIVE", "0").strip().lower()
+    if live_flag in ("0", "false", "no", "off", ""):
+        msg = (
+            "Gap agent DISABLED (TSD-primary mode). "
+            "Strategy Lab still runs SIM. Re-enable: QALPHA_GAP_AGENT_LIVE=1"
+        )
+        print(msg)
+        send_telegram(f"⏸️ Q-ALPHA: {msg}")
+        return
+
     ib = IB()
     try:
         ib.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID)

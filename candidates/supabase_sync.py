@@ -85,6 +85,12 @@ TSD_POSITION_FIELDS = (
     "status",
     "last_bar_time",
     "scan_score",
+    "peak_high",
+    "kill_pct",
+    "trail_pct",
+    "trading_day",
+    "t4_only",
+    "tranche_summary",
     "last_updated",
 )
 
@@ -243,6 +249,83 @@ class SupabaseSync:
                 )
                 pruned += 1
         return pruned
+
+    def upsert_tsd_pool_snapshot(self, state: dict) -> None:
+        """Save TSD pool snapshot (separate from gap pool_snapshots)."""
+        snapshot = {
+            "snapshot_date": str(state.get("snapshot_date") or date.today().isoformat()),
+            "pool": float(state.get("pool") or 0),
+            "deployed": float(state.get("deployed") or 0),
+            "open_positions": int(state.get("open_positions") or 0),
+            "open_names": int(state.get("open_names") or 0),
+            "starting_pool": float(state.get("starting_pool") or 3000.0),
+            "last_updated": state.get("last_updated") or datetime.now(timezone.utc).isoformat(),
+        }
+        self.client.table("tsd_pool_snapshots").upsert(
+            snapshot, on_conflict="snapshot_date"
+        ).execute()
+
+    def get_latest_tsd_pool(self) -> dict | None:
+        """Most recent TSD pool snapshot."""
+        result = (
+            self.client.table("tsd_pool_snapshots")
+            .select("*")
+            .order("snapshot_date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+
+    def get_tsd_pool_history(self) -> list:
+        result = (
+            self.client.table("tsd_pool_snapshots")
+            .select("*")
+            .order("snapshot_date")
+            .execute()
+        )
+        return result.data or []
+
+    def replace_tsd_watchlist(self, rows: list[dict]) -> None:
+        """Replace current TSD watch-10 (delete stale symbols, upsert rows)."""
+        symbols = {str(r.get("symbol") or "").upper() for r in rows if r.get("symbol")}
+        existing = self.client.table("tsd_watchlist").select("symbol").execute()
+        for row in existing.data or []:
+            sym = str(row.get("symbol") or "").upper()
+            if sym and sym not in symbols:
+                self.client.table("tsd_watchlist").delete().eq("symbol", sym).execute()
+        if not rows:
+            return
+        clean = []
+        for r in rows:
+            clean.append({
+                "symbol": str(r.get("symbol") or "").upper(),
+                "rank": r.get("rank"),
+                "scan_score": r.get("scan_score"),
+                "trend_strength": r.get("trend_strength"),
+                "mfi": r.get("mfi"),
+                "buy_signal": r.get("buy_signal"),
+                "profiler_pass": r.get("profiler_pass"),
+                "in_book": r.get("in_book"),
+                "trade_pick": r.get("trade_pick"),
+                "status_label": r.get("status_label"),
+                "entry_price": r.get("entry_price"),
+                "kill_price": r.get("kill_price"),
+                "scan_at": r.get("scan_at"),
+                "updated_at": r.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+            })
+        self.client.table("tsd_watchlist").upsert(
+            clean, on_conflict="symbol"
+        ).execute()
+
+    def get_tsd_watchlist(self) -> list:
+        result = (
+            self.client.table("tsd_watchlist")
+            .select("*")
+            .order("rank")
+            .execute()
+        )
+        return result.data or []
 
     def upsert_pool_snapshot(self, pool_state: dict) -> None:
         """Save daily pool snapshot."""

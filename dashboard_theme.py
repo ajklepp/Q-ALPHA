@@ -468,7 +468,7 @@ def section_header(title: str, subtitle: str = "") -> None:
     )
 
 
-def brand_block(live_et: str = "") -> None:
+def brand_block(live_et: str = "", subtitle: str = "") -> None:
     """Top-left brand mark + optional live pill."""
     pill = ""
     if live_et:
@@ -476,10 +476,11 @@ def brand_block(live_et: str = "") -> None:
             f'<div class="qa-live-pill">Live data · '
             f"{escape(live_et)} ET · every 30m RTH</div>"
         )
+    sub = subtitle or "Quantitative momentum · paper console"
     _md_html(
         '<div class="qa-brand">'
         '<div class="qa-brand-mark">Q-<span>ALPHA</span></div>'
-        '<div class="qa-brand-sub">Quantitative momentum · paper console</div>'
+        f'<div class="qa-brand-sub">{escape(sub)}</div>'
         f"{pill}</div>"
     )
 
