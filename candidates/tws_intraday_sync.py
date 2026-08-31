@@ -49,6 +49,8 @@ FILL_CONFIRMED = frozenset({"Filled", "FILLED"})
 EXIT_PX_TOL_FRAC = 0.0025  # 0.25%
 # Post-sync mark verify: Cloud current_price must match TWS within this $ band.
 MARK_PX_TOL = 0.05
+# Per-symbol snapshot mark; abort if IB stalls (prevents hung sync after gap marks).
+TWS_MARK_TIMEOUT_SEC = 8.0
 
 
 def _finite(val: Any) -> float | None:
@@ -92,48 +94,54 @@ def _ib_position_map(ib) -> dict[str, float]:
     return out
 
 
-def _tws_mark_price(ib, symbol: str) -> float | None:
-    """Snapshot last/close for an open long; fail-soft."""
+def _tws_mark_price(ib, symbol: str, *, timeout_sec: float = TWS_MARK_TIMEOUT_SEC) -> float | None:
+    """Snapshot last/close for an open long; fail-soft with per-symbol timeout."""
     from ib_insync import Stock
 
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return None
+
+    print(f"  TWS mark {symbol} ...")
+    contract = None
     try:
         contract = Stock(symbol, "SMART", "USD")
         q = ib.qualifyContracts(contract)
         if not q:
+            print(f"  TWS mark {symbol} fail: qualifyContracts empty")
             return None
         contract = q[0]
         ticker = ib.reqMktData(contract, "", True, False)
-        ib.sleep(1.5)
-        for raw in (
-            getattr(ticker, "last", None),
-            getattr(ticker, "close", None),
-            getattr(ticker, "bid", None),
-            getattr(ticker, "ask", None),
-        ):
-            px = _finite(raw)
-            if px is not None and px > 0:
-                try:
-                    ib.cancelMktData(contract)
-                except Exception:
-                    pass
-                return px
-        try:
-            mp = ticker.marketPrice()
-            px = _finite(mp)
-            if px is not None and px > 0:
-                try:
-                    ib.cancelMktData(contract)
-                except Exception:
-                    pass
-                return px
-        except Exception:
-            pass
-        try:
-            ib.cancelMktData(contract)
-        except Exception:
-            pass
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            ib.sleep(0.25)
+            for raw in (
+                getattr(ticker, "last", None),
+                getattr(ticker, "close", None),
+                getattr(ticker, "bid", None),
+                getattr(ticker, "ask", None),
+            ):
+                px = _finite(raw)
+                if px is not None and px > 0:
+                    print(f"  TWS mark {symbol} OK ${px:.4f}")
+                    return px
+            try:
+                mp = ticker.marketPrice()
+                px = _finite(mp)
+                if px is not None and px > 0:
+                    print(f"  TWS mark {symbol} OK ${px:.4f} (mkt)")
+                    return px
+            except Exception:
+                pass
+        print(f"  TWS mark {symbol} timeout ({timeout_sec:.0f}s)")
     except Exception as exc:
-        print(f"  mark {symbol} fail: {exc}")
+        print(f"  TWS mark {symbol} fail: {exc}")
+    finally:
+        if contract is not None:
+            try:
+                ib.cancelMktData(contract)
+            except Exception:
+                pass
     return None
 
 
@@ -593,6 +601,21 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         pos_map = _ib_position_map(ib)
         print(f"  TWS positions: {pos_map or '(flat)'}")
 
+        # --- TSD sync first (clean MD subscriptions before gap-agent marks) ---
+        try:
+            from tsd_supabase_sync import sync_tsd_positions_to_supabase
+
+            print("\n  --- TSD book → Supabase (before gap marks) ---")
+            tsd_summary = sync_tsd_positions_to_supabase(
+                ib, mark_fn=_tws_mark_price,
+            )
+            summary["tsd_upserted"] = tsd_summary.get("upserted", 0)
+            if tsd_summary.get("verify_errors"):
+                summary["sync_errors"].extend(tsd_summary["verify_errors"])
+        except Exception as exc:
+            print(f"  TSD sync warn: {exc}")
+            summary["sync_errors"].append(f"tsd_sync:{exc}")
+
         store = PaperTradesStore()
         data = store.load()
         trades = data.get("trades") or []
@@ -793,20 +816,6 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         )
         if verify_errors:
             summary["sync_errors"].extend(verify_errors)
-
-        # TSD 3HR swing book → Supabase (separate from gap-agent trades).
-        try:
-            from tsd_supabase_sync import sync_tsd_positions_to_supabase
-
-            tsd_summary = sync_tsd_positions_to_supabase(
-                ib, mark_fn=_tws_mark_price,
-            )
-            summary["tsd_upserted"] = tsd_summary.get("upserted", 0)
-            if tsd_summary.get("verify_errors"):
-                summary["sync_errors"].extend(tsd_summary["verify_errors"])
-        except Exception as exc:
-            print(f"  TSD sync warn: {exc}")
-            summary["sync_errors"].append(f"tsd_sync:{exc}")
 
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "

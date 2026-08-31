@@ -34,6 +34,7 @@ MARK_PX_TOL = 0.05
 TSD_TABLE_MISSING_MSG = (
     "*** TSD: run candidates/sql/tsd_cloud.sql in Supabase SQL editor ***"
 )
+TWS_MARK_TIMEOUT_SEC = 8.0
 
 WATCHLIST_CACHE = (
     CANDIDATES / "tsd_scan_pipeline" / "results" / "last_watchlist.json"
@@ -130,12 +131,28 @@ def apply_tws_marks(
     rows: list[dict[str, Any]],
     ib,
     mark_fn: Callable,
+    *,
+    timeout_sec: float = TWS_MARK_TIMEOUT_SEC,
 ) -> None:
-    """Refresh current_price / PnL from TWS snapshot marks."""
+    """Refresh current_price / PnL from TWS snapshot marks; book last_close fallback."""
     for row in rows:
         symbol = str(row.get("symbol") or "").upper()
-        mark = mark_fn(ib, symbol)
+        if not symbol:
+            continue
+        book_px = _finite(row.get("current_price"))
+        print(f"  TSD TWS mark {symbol} ...")
+        try:
+            mark = mark_fn(ib, symbol, timeout_sec=timeout_sec)
+        except TypeError:
+            # Legacy mark_fn(ib, symbol) without timeout kwarg.
+            mark = mark_fn(ib, symbol)
         if mark is None or mark <= 0:
+            if book_px is not None and book_px > 0:
+                print(
+                    f"  TSD mark {symbol} fallback book last_close=${book_px:.4f}"
+                )
+            else:
+                print(f"  TSD mark {symbol} no TWS px and no book fallback")
             continue
         entry = _finite(row.get("entry_price")) or 0.0
         shares = int(row.get("shares") or 0)
