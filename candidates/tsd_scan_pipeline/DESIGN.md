@@ -1,6 +1,6 @@
 # TSD 3HR Swing Scanner — Design (locked)
 
-**Status:** Phase 5 complete (scheduler + scorecard + Windows tasks).  
+**Status:** Phase 6 complete (weekly scorecard + options study, Friday 5 PM task).  
 **Track:** LONG-ONLY 3-hour swing, parallel to gap/momentum morning agent.  
 **Workspace:** Q-ALPHA only.
 
@@ -40,7 +40,7 @@ Pacing: **~2.5s/symbol** for historical pulls.
 |--------|------|
 | `scheduler.py` | ET slot dispatcher (:20 Polygon, :03 TWS, trail fallback) |
 | `tsd_scorecard.py` | Weekly 5-trading-day rollup |
-| `register_tsd_tasks.ps1` | Windows tasks: Scheduler (5m) + Trail (daily 04:00) |
+| `register_tsd_tasks.ps1` | Windows tasks: Scheduler (5m) + Trail (daily 04:00) + Weekly Reports (Fri 17:00) |
 | `results/results.md` | Pipeline results log |
 
 **Register (Aaron, once):**
@@ -67,8 +67,29 @@ Pacing: **~2.5s/symbol** for historical pulls.
 | `tsd_pool_state.json` | Deployable pool ($3000 default) |
 | `results/tsd_scheduler_state.json` | Last-run slot keys |
 
+## Phase 6 — Weekly reports (Friday 5 PM ET)
+
+| Module | Role |
+|--------|------|
+| `tsd_scorecard.py` | 5-day scan/trail/book rollup → `results/scorecard_*.md` |
+| `tsd_options_study.py` | Tier outcome study + options overlay counterfactual → `results/options_study_*.md` |
+| `start_tsd_weekly_reports_scheduled.ps1` | Runs both with `--write` |
+| `register_tsd_tasks.ps1` | Task **QAlpha TSD Weekly Reports** · Fri 17:00 |
+
+**Manual:**
+```powershell
+.\candidates\start_tsd_weekly_reports_scheduled.ps1
+py -3 candidates\tsd_scan_pipeline\tsd_options_study.py --days 5 --write
+```
+
+Study cohorts: top-100 by score, signals, watch-10, trade-3, filled. Options overlay
+uses Polygon same-day call/put volume (best-effort; does not affect live scoring).
+
+---
+
 ## Not mixed with
 
 - Strategy Lab SIM book
 - Morning gap agent
 - EXP-0012 / BracketPosition experiments
+
