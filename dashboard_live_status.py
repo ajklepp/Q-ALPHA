@@ -12,7 +12,7 @@ import pandas as pd
 import pytz
 import streamlit as st
 
-from dashboard_theme import MUTED, NEGATIVE, POSITIVE, regime_banner, section_header
+from dashboard_theme import MUTED, NEGATIVE, POSITIVE, ACCENT, BG, BORDER, TEXT, regime_banner, section_header
 
 TSD_STARTING_POOL = 3000.0
 TSD_MAX_FULL_SLOTS = 10
@@ -71,6 +71,22 @@ def _next_tsd_scan_countdown() -> str:
     hours, rem = divmod(int(diff.total_seconds()), 3600)
     mins = rem // 60
     return f"{hours}h {mins}m"
+
+
+def tsd_closed_stats(closed_legs: list[dict]) -> dict[str, Any]:
+    """Win/loss counts for TSD closed legs."""
+    total = len(closed_legs)
+    winners = sum(
+        1 for r in closed_legs if _safe_float(r.get("pnl_dollars"), 0.0) > 0
+    )
+    losers = total - winners
+    win_rate = winners / total if total else None
+    return {
+        "total": total,
+        "winners": winners,
+        "losers": losers,
+        "win_rate": win_rate,
+    }
 
 
 def _render_gap_open_card(
@@ -231,11 +247,13 @@ def render_live_status_tab(
 
     tsd_err: str | None = None
     tsd_rows: list[dict] = []
+    tsd_closed: list[dict] = []
     tsd_pool: dict = {}
     tsd_watch: list[dict] = []
     try:
         sync = get_sync()
         tsd_rows = sync.get_tsd_positions(status="OPEN")
+        tsd_closed = sync.get_tsd_closed_legs()
         tsd_pool = sync.get_latest_tsd_pool() or {}
         tsd_watch = sync.get_tsd_watchlist()
     except Exception as exc:
@@ -260,30 +278,42 @@ def render_live_status_tab(
     )
     mtm_total = cash + mtm_notional
     pnl_dollar = mtm_total - starting
-    pnl_pct = (pnl_dollar / starting) * 100 if starting else 0.0
+    closed_stats = tsd_closed_stats(tsd_closed)
 
     with st.container(border=True):
         section_header("Session KPIs (TSD)", "3HR swing pool — separate from gap runoff")
-        st.caption(
-            f"TSD pool ${starting:,.0f} start · gap-agent residual book excluded from KPIs"
-        )
+        cap = f"TSD pool ${starting:,.0f} start · gap-agent residual book excluded from KPIs"
+        if not gap_open_df.empty:
+            gap_syms = ", ".join(
+                sorted(str(t) for t in gap_open_df.get("ticker", pd.Series(dtype=str)))
+            )
+            cap += f" · Gap runoff: {len(gap_open_df)} open ({gap_syms})"
+        st.caption(cap)
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             st.metric("Pool", f"${cash + deployed:,.2f}", f"${cash:,.0f}/${deployed:,.0f}")
         with col2:
             st.metric("MTM P&L", f"${mtm_total:,.2f}", f"{pnl_dollar:+.0f}")
         with col3:
+            st.metric("Total Trades", str(closed_stats["total"]), "closed legs")
+        with col4:
+            if closed_stats["total"]:
+                wr = closed_stats["win_rate"] or 0.0
+                st.metric(
+                    "Win Rate",
+                    f"{wr:.0%}",
+                    f"{closed_stats['winners']}W / {closed_stats['losers']}L",
+                )
+            else:
+                st.metric("Win Rate", "—", "0 closed legs")
+        with col5:
             st.metric(
                 "Full slots",
                 f"{full_slots}/{TSD_MAX_FULL_SLOTS}",
                 f"{TSD_MAX_FULL_SLOTS - full_slots} free",
             )
-        with col4:
-            st.metric("Open names", str(open_names), "legs in book")
-        with col5:
-            st.metric("Next TSD scan", _next_tsd_scan_countdown(), ":03 after 3H close")
         with col6:
-            st.metric("Gap runoff", str(len(gap_open_df)), "legacy opens")
+            st.metric("Open names", str(open_names), "legs in book")
 
     spy_regime = "UNKNOWN"
     if tsd_watch:
@@ -380,3 +410,129 @@ def render_live_header(
         st.metric("Days Running", f"{days_running}d")
     with col4:
         st.metric("Next Scan", _next_tsd_scan_countdown())
+
+
+def render_tsd_trade_log(
+    get_sync: Callable[..., Any],
+    style_pnl_fn: Callable,
+) -> None:
+    """TSD closed legs table for Trade Log tab."""
+    closed: list[dict] = []
+    err: str | None = None
+    try:
+        closed = get_sync().get_tsd_closed_legs()
+    except Exception as exc:
+        err = str(exc)
+
+    with st.container(border=True):
+        section_header("TSD Trade Log", "Closed 3HR swing legs")
+        if err:
+            st.caption(f"TSD closed legs unavailable: {err}")
+        elif not closed:
+            st.info("No closed TSD legs yet.")
+        else:
+            log = pd.DataFrame(closed)
+            log["Date"] = log["entry_date"]
+            log["Ticker"] = log["symbol"]
+            log["Entry"] = log["entry_price"]
+            log["Exit"] = log["exit_price"]
+            log["P&L$"] = log["pnl_dollars"]
+            log["P&L%"] = log["pnl_pct"]
+            log["Reason"] = log["exit_reason"]
+            cols = ["Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%", "Reason"]
+            show = log[[c for c in cols if c in log.columns]]
+            styled = show.style.map(style_pnl_fn, subset=["P&L$", "P&L%"])
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+
+
+def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
+    """TSD Performance section for Performance tab."""
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    closed: list[dict] = []
+    pool_history: list[dict] = []
+    err: str | None = None
+    try:
+        sync = get_sync()
+        closed = sync.get_tsd_closed_legs()
+        pool_history = sync.get_tsd_pool_history()
+    except Exception as exc:
+        err = str(exc)
+
+    with st.container(border=True):
+        section_header("TSD Performance", "3HR swing book — closed legs + pool history")
+        if err:
+            st.caption(f"TSD performance unavailable: {err}")
+            return
+
+        stats = tsd_closed_stats(closed)
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Closed legs", stats["total"])
+        s2.metric("Winners", stats["winners"])
+        s3.metric("Losers", stats["losers"])
+        if stats["total"]:
+            s4.metric("Win Rate", f"{(stats['win_rate'] or 0):.0%}")
+        else:
+            s4.metric("Win Rate", "—")
+
+    with st.container(border=True):
+        section_header("TSD Equity Curve", "Pool cash + deployed over time")
+        if pool_history:
+            hist_df = pd.DataFrame(pool_history)
+            dates = pd.to_datetime(hist_df["snapshot_date"])
+            equity = hist_df["pool"].astype(float) + hist_df["deployed"].astype(float)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=equity,
+                mode="lines",
+                name="TSD MTM",
+                line=dict(color=ACCENT, width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(45, 212, 191, 0.12)",
+            ))
+            fig.add_hline(
+                y=TSD_STARTING_POOL,
+                line_dash="dash",
+                line_color=MUTED,
+                annotation_text=f"Starting ${TSD_STARTING_POOL:,.0f}",
+            )
+            fig.update_layout(
+                plot_bgcolor=BG,
+                paper_bgcolor=BG,
+                font=dict(color=TEXT, family="Sora"),
+                yaxis=dict(gridcolor=BORDER),
+                xaxis=dict(gridcolor=BORDER),
+                height=400,
+                margin=dict(l=40, r=20, t=30, b=40),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No TSD pool history yet.")
+
+    with st.container(border=True):
+        section_header("TSD P&L Per Trade", "Closed legs only")
+        if closed:
+            plot_df = pd.DataFrame(closed)
+            plot_df["label"] = (
+                plot_df["entry_date"].astype(str) + " " + plot_df["symbol"].astype(str)
+            )
+            fig2 = px.bar(
+                plot_df,
+                x="label",
+                y="pnl_dollars",
+                color="pnl_dollars",
+                color_continuous_scale=[NEGATIVE, POSITIVE],
+            )
+            fig2.update_layout(
+                template="plotly_dark",
+                height=400,
+                showlegend=False,
+                plot_bgcolor=BG,
+                paper_bgcolor=BG,
+                font=dict(color=TEXT, family="Sora"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No closed TSD legs for P&L chart.")

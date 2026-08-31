@@ -127,6 +127,70 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def flatten_closed_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten CLOSED legs from TSD book into tsd_closed_legs row dicts."""
+    rows: list[dict[str, Any]] = []
+    for pos in book.get("positions") or []:
+        symbol = str(pos.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        for leg in pos.get("legs") or []:
+            if str(leg.get("status") or "").upper() != "CLOSED":
+                continue
+            exits = leg.get("exits") or []
+            if not exits:
+                continue
+            trail = leg.get("trail") or {}
+            leg_time = str(leg.get("time") or trail.get("opened_at") or "")
+            entry_date = leg_time[:10] if leg_time else ""
+            entry_price = _finite(trail.get("entry_price")) or _finite(leg.get("price"))
+            leg_shares = int(leg.get("shares") or 0)
+            scan_score = _finite(leg.get("scan_score"))
+
+            exit_shares = 0
+            exit_notional = 0.0
+            pnl_dollars = 0.0
+            closed_at = ""
+            exit_reason = ""
+            for ex in exits:
+                sh = int(ex.get("shares") or 0)
+                px = _finite(ex.get("exit_price"))
+                if sh <= 0 or px is None:
+                    continue
+                exit_shares += sh
+                exit_notional += px * sh
+                if entry_price:
+                    pnl_dollars += (px - entry_price) * sh
+                ex_time = str(ex.get("time") or "")
+                if ex_time >= closed_at:
+                    closed_at = ex_time
+                    exit_reason = str(ex.get("reason") or exit_reason)
+
+            if exit_shares <= 0 or entry_price is None or entry_price <= 0:
+                continue
+            exit_price = round(exit_notional / exit_shares, 4)
+            cost_basis = entry_price * exit_shares
+            pnl_pct = round(pnl_dollars / cost_basis, 4) if cost_basis > 0 else 0.0
+
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "leg_opened_at": leg_time or f"{entry_date}T00:00:00",
+                    "entry_date": entry_date,
+                    "entry_price": entry_price,
+                    "shares": leg_shares or exit_shares,
+                    "exit_price": exit_price,
+                    "exit_reason": exit_reason or "CLOSED",
+                    "pnl_dollars": round(pnl_dollars, 2),
+                    "pnl_pct": pnl_pct,
+                    "closed_at": closed_at or datetime.now(ET).isoformat(),
+                    "scan_score": scan_score,
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+    return rows
+
+
 def apply_tws_marks(
     rows: list[dict[str, Any]],
     ib,
@@ -282,6 +346,7 @@ def sync_tsd_positions_to_supabase(
 
     summary: dict[str, Any] = {
         "upserted": 0,
+        "closed_upserted": 0,
         "pruned": 0,
         "pool_synced": False,
         "watchlist_synced": 0,
@@ -290,6 +355,7 @@ def sync_tsd_positions_to_supabase(
 
     book = load_state()
     rows = flatten_open_legs(book)
+    closed_rows = flatten_closed_legs(book)
     if ib is not None and mark_fn is not None and rows:
         apply_tws_marks(rows, ib, mark_fn)
 
@@ -322,6 +388,21 @@ def sync_tsd_positions_to_supabase(
             msg = f"tsd_upsert:{row.get('symbol')}:{exc}"
             summary["verify_errors"].append(msg)
             print(f"  *** TSD SYNC FAILED {row.get('symbol')}: {exc} ***")
+
+    for row in closed_rows:
+        try:
+            sync.upsert_tsd_closed_leg(row)
+            summary["closed_upserted"] += 1
+            print(
+                f"  TSD closed {row['symbol']} "
+                f"exit={row.get('exit_price')} "
+                f"pnl=${row.get('pnl_dollars'):+.2f} "
+                f"reason={row.get('exit_reason')}"
+            )
+        except Exception as exc:
+            msg = f"tsd_closed_upsert:{row.get('symbol')}:{exc}"
+            summary["verify_errors"].append(msg)
+            print(f"  *** TSD CLOSED SYNC FAILED {row.get('symbol')}: {exc} ***")
 
     try:
         summary["pruned"] = sync.prune_stale_tsd_positions(open_keys)
@@ -356,7 +437,8 @@ def sync_tsd_positions_to_supabase(
         sync.log_health(
             "tsd_sync",
             "OK" if not summary["verify_errors"] else "WARN",
-            f"upserted={summary['upserted']} pruned={summary['pruned']} "
+            f"upserted={summary['upserted']} closed={summary['closed_upserted']} "
+            f"pruned={summary['pruned']} "
             f"errors={len(summary['verify_errors'])}",
         )
     except Exception:
@@ -426,6 +508,7 @@ def main() -> int:
     summary = sync_tsd_positions_to_supabase()
     print(
         f"TSD sync done upserted={summary.get('upserted')} "
+        f"closed={summary.get('closed_upserted')} "
         f"pruned={summary.get('pruned')} "
         f"pool={summary.get('pool_synced')} "
         f"errors={summary.get('verify_errors') or 'none'}"

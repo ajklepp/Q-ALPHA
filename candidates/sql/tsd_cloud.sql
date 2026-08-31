@@ -82,15 +82,38 @@ CREATE TABLE IF NOT EXISTS tsd_watchlist (
 CREATE INDEX IF NOT EXISTS tsd_watchlist_rank_idx ON tsd_watchlist (rank);
 
 -- ---------------------------------------------------------------------------
+-- tsd_closed_legs — completed TSD legs (one row per leg_opened_at)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tsd_closed_legs (
+    symbol          TEXT NOT NULL,
+    leg_opened_at   TEXT NOT NULL,
+    entry_date      TEXT,
+    entry_price     NUMERIC,
+    shares          INTEGER,
+    exit_price      NUMERIC,
+    exit_reason     TEXT,
+    pnl_dollars     NUMERIC,
+    pnl_pct         NUMERIC,
+    closed_at       TIMESTAMPTZ,
+    scan_score      NUMERIC,
+    last_updated    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (symbol, leg_opened_at)
+);
+
+CREATE INDEX IF NOT EXISTS tsd_closed_legs_closed_at_idx ON tsd_closed_legs (closed_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- RLS: anon SELECT for Streamlit Cloud (service role writes from local sync)
 -- ---------------------------------------------------------------------------
 ALTER TABLE tsd_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_pool_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_watchlist ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tsd_closed_legs ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT ON TABLE public.tsd_positions TO anon;
 GRANT SELECT ON TABLE public.tsd_pool_snapshots TO anon;
 GRANT SELECT ON TABLE public.tsd_watchlist TO anon;
+GRANT SELECT ON TABLE public.tsd_closed_legs TO anon;
 
 DROP POLICY IF EXISTS tsd_positions_anon_select ON public.tsd_positions;
 CREATE POLICY tsd_positions_anon_select ON public.tsd_positions
@@ -102,6 +125,10 @@ CREATE POLICY tsd_pool_snapshots_anon_select ON public.tsd_pool_snapshots
 
 DROP POLICY IF EXISTS tsd_watchlist_anon_select ON public.tsd_watchlist;
 CREATE POLICY tsd_watchlist_anon_select ON public.tsd_watchlist
+    FOR SELECT TO anon USING (true);
+
+DROP POLICY IF EXISTS tsd_closed_legs_anon_select ON public.tsd_closed_legs;
+CREATE POLICY tsd_closed_legs_anon_select ON public.tsd_closed_legs
     FOR SELECT TO anon USING (true);
 
 NOTIFY pgrst, 'reload schema';

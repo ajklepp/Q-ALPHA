@@ -94,7 +94,7 @@ SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
 # otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
-_SUPABASE_SYNC_API = "tsd-primary-v1"
+_SUPABASE_SYNC_API = "tsd-primary-v2"
 # Agent entry window closes at 11:00 ET — after that, no-trade = Skipped.
 ENTRY_WINDOW_CLOSE = dtime(11, 0)
 
@@ -702,8 +702,12 @@ def tab_live_status(trades: list, pool_history: list) -> None:
 
 
 def tab_trade_log(trades: list) -> None:
+    from dashboard_live_status import render_tsd_trade_log
+
+    render_tsd_trade_log(get_sync, _style_pnl)
+
     st.caption(
-        "Gap-agent history (legacy). TSD closed trades: weekly scorecard / TSD panel (opens)."
+        "Gap-agent history (legacy). TSD closed legs shown above."
     )
 
     df = _trades_df(trades)
@@ -714,7 +718,7 @@ def tab_trade_log(trades: list) -> None:
     )
 
     with st.container(border=True):
-        section_header("Closed Trades", "Full exit log")
+        section_header("Gap Closed Trades", "Legacy agent exit log")
         if closed.empty:
             st.info("No closed trades yet.")
         else:
@@ -792,11 +796,15 @@ def tab_trade_log(trades: list) -> None:
 
 
 def tab_performance(trades: list, pool_history: list) -> None:
+    from dashboard_live_status import render_tsd_performance
+
+    render_tsd_performance(get_sync)
+
     st.caption(
-        "Gap-agent history (legacy). TSD closed trades: weekly scorecard / TSD panel (opens)."
+        "Gap-agent performance (legacy). TSD metrics shown above."
     )
     with st.container(border=True):
-        section_header("Equity Curve", "Pool value over time")
+        section_header("Gap Equity Curve", "Legacy agent pool value over time")
         if pool_history:
             hist_df = pd.DataFrame(pool_history)
             dates = pd.to_datetime(hist_df["snapshot_date"])
@@ -839,7 +847,7 @@ def tab_performance(trades: list, pool_history: list) -> None:
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
 
     with st.container(border=True):
-        section_header("P&L Per Trade")
+        section_header("Gap P&L Per Trade", "Legacy agent closed trades")
         if not closed.empty:
             closed_plot = closed.copy()
             closed_plot["label"] = closed_plot["entry_date"] + " " + closed_plot["ticker"]
@@ -863,7 +871,7 @@ def tab_performance(trades: list, pool_history: list) -> None:
             st.info("No closed trades for P&L chart.")
 
     with st.container(border=True):
-        section_header("Monthly Returns")
+        section_header("Gap Monthly Returns", "Legacy agent")
         if not closed.empty:
             monthly = closed.copy()
             monthly["month"] = pd.to_datetime(monthly["entry_date"]).dt.to_period("M").astype(str)

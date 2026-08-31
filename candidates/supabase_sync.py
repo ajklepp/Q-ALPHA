@@ -94,6 +94,21 @@ TSD_POSITION_FIELDS = (
     "last_updated",
 )
 
+TSD_CLOSED_LEG_FIELDS = (
+    "symbol",
+    "leg_opened_at",
+    "entry_date",
+    "entry_price",
+    "shares",
+    "exit_price",
+    "exit_reason",
+    "pnl_dollars",
+    "pnl_pct",
+    "closed_at",
+    "scan_score",
+    "last_updated",
+)
+
 # Columns written to the watchlist table. Keep in sync with
 # candidates/sql/watchlist_schema.sql. Only these keys are sent so a missing
 # optional column never triggers PGRST204 (same discipline as TRADE_FIELDS).
@@ -326,6 +341,34 @@ class SupabaseSync:
             .execute()
         )
         return result.data or []
+
+    def upsert_tsd_closed_leg(self, row: dict) -> None:
+        """Insert or update one completed TSD leg (tsd_closed_legs table)."""
+        record = {field: row.get(field) for field in TSD_CLOSED_LEG_FIELDS}
+        record["symbol"] = str(row.get("symbol") or "").upper()
+        record["leg_opened_at"] = str(row.get("leg_opened_at") or "")
+        record["last_updated"] = (
+            row.get("last_updated") or datetime.now(timezone.utc).isoformat()
+        )
+        self.client.table("tsd_closed_legs").upsert(
+            record, on_conflict="symbol,leg_opened_at"
+        ).execute()
+
+    def get_tsd_closed_legs(self) -> list:
+        """All closed TSD legs, newest first."""
+        try:
+            result = (
+                self.client.table("tsd_closed_legs")
+                .select("*")
+                .order("closed_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            err = str(exc)
+            if "PGRST205" in err or "tsd_closed_legs" in err:
+                return []
+            raise
 
     def upsert_pool_snapshot(self, pool_state: dict) -> None:
         """Save daily pool snapshot."""
