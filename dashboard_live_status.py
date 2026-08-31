@@ -4,7 +4,9 @@ TSD-primary Live Status tab — imported by dashboard.py (lazy import avoids cyc
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import datetime, timedelta, time as dtime
+from typing import Any
 
 import pandas as pd
 import pytz
@@ -71,7 +73,10 @@ def _next_tsd_scan_countdown() -> str:
     return f"{hours}h {mins}m"
 
 
-def _render_gap_open_card(trade, d) -> None:
+def _render_gap_open_card(
+    trade,
+    oneshot_polygon_mark_fn: Callable[[str], float | None],
+) -> None:
     """Gap-agent runoff position card (stop / 2R style)."""
     ticker = str(trade.get("ticker") or "")
     entry_price = _safe_float(trade.get("entry_price"), 0.0)
@@ -81,7 +86,7 @@ def _render_gap_open_card(trade, d) -> None:
 
     raw_mark = _safe_float(trade.get("current_price"), float("nan"))
     if not math.isfinite(raw_mark) or raw_mark <= 0:
-        fetched = d._oneshot_polygon_mark(ticker)
+        fetched = oneshot_polygon_mark_fn(ticker)
         if fetched is not None and fetched > 0:
             raw_mark = fetched
     current_price = (
@@ -212,19 +217,24 @@ def _render_tsd_open_card(row: dict) -> None:
     st.divider()
 
 
-def render_live_status_tab(trades: list, pool_history: list) -> None:
+def render_live_status_tab(
+    trades: list,
+    pool_history: list,
+    get_sync: Callable[..., Any],
+    trades_df_fn: Callable[[list], pd.DataFrame],
+    open_positions_df_fn: Callable[[pd.DataFrame], pd.DataFrame],
+    oneshot_polygon_mark_fn: Callable[[str], float | None],
+) -> None:
     """TSD-primary Live Status (gap runoff demoted)."""
-    import dashboard as d
-
-    df = d._trades_df(trades)
-    gap_open_df = d._open_positions_df(df)
+    df = trades_df_fn(trades)
+    gap_open_df = open_positions_df_fn(df)
 
     tsd_err: str | None = None
     tsd_rows: list[dict] = []
     tsd_pool: dict = {}
     tsd_watch: list[dict] = []
     try:
-        sync = d.get_sync()
+        sync = get_sync()
         tsd_rows = sync.get_tsd_positions(status="OPEN")
         tsd_pool = sync.get_latest_tsd_pool() or {}
         tsd_watch = sync.get_tsd_watchlist()
@@ -301,7 +311,7 @@ def render_live_status_tab(trades: list, pool_history: list) -> None:
             )
             st.caption("Residual gap-agent brackets; not in TSD pool KPIs.")
             for _, trade in gap_open_df.iterrows():
-                _render_gap_open_card(trade, d)
+                _render_gap_open_card(trade, oneshot_polygon_mark_fn)
 
     with st.container(border=True):
         section_header("TSD Watchlist", "Watch-10 from last TSD scan")
@@ -338,15 +348,18 @@ def render_live_status_tab(trades: list, pool_history: list) -> None:
     )
 
 
-def render_live_header() -> None:
+def render_live_header(
+    get_sync: Callable[..., Any],
+    system_version: str,
+    days_running: int,
+) -> None:
     """TSD-primary header row."""
-    import dashboard as d
     from dashboard_theme import brand_block
 
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     live_et = ""
     try:
-        sync = d.get_sync()
+        sync = get_sync()
         for component in ("tws_sync", "tsd_sync", "intraday_monitor"):
             row = sync.get_last_health(component)
             if row and row.get("last_run"):
@@ -362,8 +375,8 @@ def render_live_header() -> None:
     with col1:
         brand_block(live_et, subtitle="TSD 3HR Swing · Live Paper")
     with col2:
-        st.metric("Version", f"v{d.SYSTEM_VERSION}")
+        st.metric("Version", f"v{system_version}")
     with col3:
-        st.metric("Days Running", f"{d.DAYS_RUNNING}d")
+        st.metric("Days Running", f"{days_running}d")
     with col4:
         st.metric("Next Scan", _next_tsd_scan_countdown())

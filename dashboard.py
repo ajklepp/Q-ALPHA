@@ -686,12 +686,19 @@ def _style_watchlist(df: pd.DataFrame):
 
 def render_header() -> None:
     from dashboard_live_status import render_live_header
-    render_live_header()
+    render_live_header(get_sync, SYSTEM_VERSION, DAYS_RUNNING)
 
 
 def tab_live_status(trades: list, pool_history: list) -> None:
     from dashboard_live_status import render_live_status_tab
-    render_live_status_tab(trades, pool_history)
+    render_live_status_tab(
+        trades,
+        pool_history,
+        get_sync,
+        _trades_df,
+        _open_positions_df,
+        _oneshot_polygon_mark,
+    )
 
 
 def tab_trade_log(trades: list) -> None:
