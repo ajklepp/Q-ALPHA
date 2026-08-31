@@ -291,8 +291,12 @@ def run_intraday_monitor() -> None:
         if trade_update["status"] in TERMINAL_NON_OPEN:
             print(f"  Abort upsert {ticker}: terminal status")
             continue
+        # Race guard: re-check Cloud before upsert (TWS may have CLOSED since loop start).
+        if entry_date and _supabase_status_is_terminal(sync, ticker, entry_date):
+            print(f"  Abort upsert {ticker}: Supabase terminal on re-check")
+            continue
         updates.append(trade_update)
-        sync.upsert_trade(trade_update)
+        sync.upsert_trade_marks_only(trade_update)
 
     if volume_healed:
         try:

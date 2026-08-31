@@ -142,14 +142,60 @@ def _load_todays_watchlist(scan_date: str | None = None) -> list[dict]:
 def _safe_load() -> tuple[list, list, list]:
     try:
         sync = get_sync()
+        trades = _merge_local_closed_over_supabase(sync.get_all_trades())
         return (
-            sync.get_all_trades(),
+            trades,
             sync.get_pool_history(),
             sync.get_system_health(),
         )
     except Exception as exc:
         st.error(f"Could not connect to Supabase: {exc}")
         return [], [], []
+
+
+def _merge_local_closed_over_supabase(trades: list) -> list:
+    """
+    When local paper_trades.json says CLOSED but Supabase still OPEN, prefer
+    local (TWS sync SoT). Helps local dashboard; cloud relies on sync fix.
+    """
+    local_path = ROOT / "candidates" / "paper_trades.json"
+    if not local_path.exists():
+        return trades
+    try:
+        payload = json.loads(local_path.read_text(encoding="utf-8"))
+        local_by_key = {
+            (str(t.get("ticker") or "").upper(), str(t.get("entry_date") or "")): t
+            for t in (payload.get("trades") or [])
+        }
+    except Exception:
+        return trades
+
+    merged: list[dict] = []
+    for row in trades:
+        key = (
+            str(row.get("ticker") or "").upper(),
+            str(row.get("entry_date") or ""),
+        )
+        local = local_by_key.get(key)
+        if not local:
+            merged.append(row)
+            continue
+        local_status = str(local.get("status") or "").upper()
+        cloud_status = str(row.get("status") or "").upper()
+        if local_status == "CLOSED" and cloud_status in OPEN_STATUSES | {"OPEN", "PENDING"}:
+            patch = {
+                k: local[k]
+                for k in (
+                    "status", "shares_total", "exit_reason", "exit_price",
+                    "pnl_dollars", "pnl_pct", "current_price", "stop_hit_price",
+                    "tranche_1_exit", "last_updated",
+                )
+                if local.get(k) is not None
+            }
+            merged.append({**row, **patch})
+        else:
+            merged.append(row)
+    return merged
 
 
 def _trades_df(trades: list) -> pd.DataFrame:
@@ -500,31 +546,45 @@ def _candidate_status(trade: dict | None, now_et: datetime) -> str:
         return "— Skipped"
 
     status = str(trade.get("status") or "").upper()
+    shares = 0
+    try:
+        shares = int(trade.get("shares_total") or trade.get("shares") or 0)
+    except (TypeError, ValueError):
+        shares = 0
+
     if status in {"NEVER_FILLED", "REJECTED_INELIGIBLE", "REJECTED_NO_FILL"}:
         return "🚫 Never filled"
+
+    # Stale Supabase OPEN rows with zero shares (flat) — treat as closed.
+    if status in OPEN_STATUSES and shares <= 0:
+        status = "CLOSED"
+
     if status in OPEN_STATUSES or status in {"OPEN", "PENDING"}:
         return "🟢 In Trade"
 
-    exit_reason = str(trade.get("exit_reason") or "").upper()
-    pnl = float(trade.get("pnl_dollars") or 0)
-    try:
-        r_mult = float(trade["r_multiple"]) if trade.get("r_multiple") is not None else None
-    except (TypeError, ValueError):
-        r_mult = None
+    if status == "CLOSED":
+        exit_reason = str(trade.get("exit_reason") or "").upper()
+        pnl = float(trade.get("pnl_dollars") or 0)
+        try:
+            r_mult = float(trade["r_multiple"]) if trade.get("r_multiple") is not None else None
+        except (TypeError, ValueError):
+            r_mult = None
 
-    is_stop = "STOP" in exit_reason
-    is_target = "TARGET" in exit_reason
-    if r_mult is None:
-        if is_stop:
-            r_mult = -1.0
-        elif is_target:
-            r_mult = 2.0
-        else:
-            r_mult = 1.0 if pnl > 0 else (-1.0 if pnl < 0 else 0.0)
+        is_stop = "STOP" in exit_reason
+        is_target = "TARGET" in exit_reason
+        if r_mult is None:
+            if is_stop:
+                r_mult = -1.0
+            elif is_target:
+                r_mult = 2.0
+            else:
+                r_mult = 1.0 if pnl > 0 else (-1.0 if pnl < 0 else 0.0)
 
-    if is_stop or (not is_target and pnl < 0):
-        return f"🔴 Stopped {r_mult:.0f}r"
-    return f"✅ Closed {r_mult:+.0f}r"
+        if is_stop or (not is_target and pnl < 0):
+            return f"🔴 Stopped {r_mult:.0f}r"
+        return f"✅ Closed {r_mult:+.0f}r"
+
+    return "—"
 
 
 def _trade_fill_columns(trade: dict | None) -> dict[str, str]:

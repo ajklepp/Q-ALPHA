@@ -448,6 +448,33 @@ def _is_managed_ibkr(t: dict) -> bool:
     return str(t.get("execution_mode") or "") == "IBKR_PAPER"
 
 
+def _sync_trade_row(trade: dict, *, reason: str, retries: int = 2) -> bool:
+    """
+    Upsert one trade to Supabase with retry. Never skip CLOSED transitions
+    silently — callers log failures in summary['sync_errors'].
+    """
+    from supabase_sync import sync_live_book_safe
+
+    row = dict(trade)
+    st = str(row.get("status") or "").upper()
+    if st in {"CLOSED", "NEVER_FILLED"}:
+        row["position_size"] = 0.0
+        row["shares_total"] = int(row.get("shares_total") or 0)
+
+    ticker = str(row.get("ticker") or "?")
+    for attempt in range(1, retries + 1):
+        ok = sync_live_book_safe(trade=row, pool_state=None, label=f"{reason}:{ticker}")
+        if ok:
+            return True
+        if attempt < retries:
+            time.sleep(0.5)
+    print(
+        f"  *** SYNC FAILED {ticker} ({reason}) "
+        f"status={st} after {retries} attempts ***"
+    )
+    return False
+
+
 def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
     """
     Connect TWS → mark opens still long → CLOSE filled-then-flat →
@@ -463,6 +490,7 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         "repaired": [],
         "reconciled": [],
         "errors": [],
+        "sync_errors": [],
         "repair": repair,
     }
 
@@ -496,8 +524,6 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         data = store.load()
         trades = data.get("trades") or []
         pool = PoolManager(state_path=state_path("pool_state.json"))
-
-        from supabase_sync import sync_live_book_safe
 
         # --- 1) NEVER_FILLED ghosts (unfilled + flat) via existing reconcile ---
         try:
@@ -537,7 +563,8 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                     _apply_mark(t, mark)
                     marked_now.append(ticker)
                     ledger_dirty = True
-                    sync_live_book_safe(trade=dict(t), pool_state=None)
+                    if not _sync_trade_row(t, reason="mark"):
+                        summary["sync_errors"].append(f"mark:{ticker}")
                     print(
                         f"  MARK {ticker} TWS@{mark:.2f} "
                         f"pnl=${float(t.get('pnl_dollars') or 0):+.2f}"
@@ -580,9 +607,12 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                 _set_closed_fields(t, exit_price=exit_px, exit_reason=exit_reason)
                 closed_now.append(ticker)
                 ledger_dirty = True
-                row = dict(t)
-                row["position_size"] = 0.0
-                sync_live_book_safe(trade=row, pool_state=None)
+                print(
+                    f"  >>> LIVE CLOSED {ticker} @ ${exit_px:.2f} ({exit_reason}) "
+                    f"— pushing to Supabase"
+                )
+                if not _sync_trade_row(t, reason="flat_to_closed"):
+                    summary["sync_errors"].append(f"closed:{ticker}")
                 _send_telegram(
                     f"LIVE CLOSED {ticker} @ ${exit_px:.2f} ({exit_reason})\n"
                     f"P&L ${float(t.get('pnl_dollars') or 0):+.2f}"
@@ -624,9 +654,9 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
             new_pnl = float(t.get("pnl_dollars") or 0)
             repaired_now.append(ticker)
             ledger_dirty = True
-            row = dict(t)
-            row["position_size"] = 0.0
-            sync_live_book_safe(trade=row, pool_state=None)
+            print(f"  >>> REPAIR CLOSED {ticker} — pushing to Supabase")
+            if not _sync_trade_row(t, reason="repair_closed"):
+                summary["sync_errors"].append(f"repair:{ticker}")
             print(
                 f"  REPAIR {ticker}: {old_px} ({old_reason}) pnl={old_pnl:+.2f} "
                 f"-> {exit_px:.4f} ({exit_reason}) pnl={new_pnl:+.2f} "
@@ -651,24 +681,32 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         store.save(data)
 
         # Force-upsert every managed trade + pool so Cloud cannot lag.
+        from supabase_sync import sync_live_book_safe
+
         for t in trades:
             if not _is_managed_ibkr(t):
                 continue
-            row = dict(t)
-            if str(row.get("status") or "").upper() in {"CLOSED", "NEVER_FILLED"}:
-                row["position_size"] = 0.0
-                row["shares_total"] = int(row.get("shares_total") or 0)
-            sync_live_book_safe(trade=row, pool_state=None)
-        sync_live_book_safe(trade=None, pool_state=pool.state)
+            reason = "force_upsert"
+            st = str(t.get("status") or "").upper()
+            if st == "CLOSED":
+                reason = "force_closed"
+            if not _sync_trade_row(t, reason=reason):
+                summary["sync_errors"].append(f"{reason}:{t.get('ticker')}")
+
+        if not sync_live_book_safe(trade=None, pool_state=pool.state, label="pool"):
+            summary["sync_errors"].append("pool_snapshot")
 
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "
             f"repaired={repaired_now} reconciled={summary['reconciled']} "
+            f"sync_errors={summary['sync_errors'] or 'none'} "
             f"pool=${pool.pool:.2f} deployed=${pool.deployed:.2f} "
             f"open_slots={pool.open_positions} "
             f"total_trades={pool.state.get('total_trades')} "
             f"dirty={ledger_dirty}"
         )
+        if summary["sync_errors"]:
+            summary["errors"].extend(summary["sync_errors"])
     finally:
         try:
             ib.disconnect()
@@ -689,6 +727,8 @@ def main() -> int:
     if args.repair:
         print("  --repair: re-price CLOSED from TWS sell fills + full sync")
     result = run_tws_intraday_sync(repair=bool(args.repair))
+    if result.get("sync_errors"):
+        return 1
     if result.get("errors") and not (
         result.get("marked") or result.get("closed") or result.get("repaired")
     ):

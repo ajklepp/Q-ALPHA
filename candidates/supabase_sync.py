@@ -140,6 +140,40 @@ class SupabaseSync:
             record, on_conflict="ticker,entry_date"
         ).execute()
 
+    def upsert_trade_marks_only(self, trade: dict) -> None:
+        """
+        Update unrealized P&L fields only — never touch status/shares.
+
+        Used by Modal intraday_monitor so stale volume rows cannot re-OPEN
+        a trade that local TWS sync already marked CLOSED in Supabase.
+        Only applies when the Cloud row is still in an open ledger status.
+        """
+        ticker = str(trade.get("ticker") or "")
+        entry_date = str(trade.get("entry_date") or "")
+        if not ticker or not entry_date:
+            return
+
+        open_statuses = (
+            "OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC",
+        )
+        patch = {
+            "current_price": trade.get("current_price"),
+            "pnl_dollars": trade.get("pnl_dollars"),
+            "pnl_pct": trade.get("pnl_pct"),
+            "r_multiple": trade.get("r_multiple"),
+            "dist_to_stop": trade.get("dist_to_stop"),
+            "dist_to_target": trade.get("dist_to_target"),
+            "last_updated": trade.get("last_updated") or datetime.now().isoformat(),
+        }
+        (
+            self.client.table("trades")
+            .update(patch)
+            .eq("ticker", ticker)
+            .eq("entry_date", entry_date)
+            .in_("status", list(open_statuses))
+            .execute()
+        )
+
     def upsert_pool_snapshot(self, pool_state: dict) -> None:
         """Save daily pool snapshot."""
         snapshot = {
@@ -465,29 +499,58 @@ def list_ticker_profile_tickers_anon() -> list[str]:
         return []
 
 
-def sync_to_supabase_safe(callback) -> None:
+def sync_to_supabase_safe(callback) -> bool:
     """Run a sync callback; never raise if Supabase is unavailable."""
     try:
         callback(SupabaseSync())
+        return True
     except Exception as exc:
         print(f"  Supabase sync skipped: {exc}")
+        return False
 
 
 def sync_live_book_safe(
     trade: dict | None = None,
     pool_state: dict | None = None,
-) -> None:
+    *,
+    label: str = "",
+) -> bool:
     """
     Mid-day fill-truth sync: upsert trade and/or pool snapshot immediately.
 
     Call after successful fill booking and after reconcile_unfilled_opens so
     Cloud Cash/Deployed/opens match local pool_state without waiting for EOD.
-    Fail-soft — never raises.
+    Fail-soft — never raises. Returns True when all requested upserts succeed.
     """
+    tag = label
+    if not tag and trade is not None:
+        tag = (
+            f"{trade.get('ticker')} entry={trade.get('entry_date')} "
+            f"status={trade.get('status')}"
+        )
+    if not tag and pool_state is not None:
+        tag = "pool_snapshot"
+
     def _run(sync: SupabaseSync) -> None:
         if trade is not None:
             sync.upsert_trade(trade)
+            st = str(trade.get("status") or "").upper()
+            if st == "CLOSED":
+                print(
+                    f"  >>> Supabase CLOSED {trade.get('ticker')} "
+                    f"exit={trade.get('exit_price')} "
+                    f"pnl=${float(trade.get('pnl_dollars') or 0):+.2f}"
+                )
+            else:
+                print(
+                    f"  Supabase upsert {trade.get('ticker')} "
+                    f"status={trade.get('status')}"
+                )
         if pool_state is not None:
             sync.upsert_pool_snapshot(pool_state)
+            print("  Supabase pool snapshot upserted")
 
-    sync_to_supabase_safe(_run)
+    ok = sync_to_supabase_safe(_run)
+    if not ok:
+        print(f"  *** Supabase SYNC FAILED [{tag}] ***")
+    return ok
