@@ -788,6 +788,20 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         if verify_errors:
             summary["sync_errors"].extend(verify_errors)
 
+        # TSD 3HR swing book → Supabase (separate from gap-agent trades).
+        try:
+            from tsd_supabase_sync import sync_tsd_positions_to_supabase
+
+            tsd_summary = sync_tsd_positions_to_supabase(
+                ib, mark_fn=_tws_mark_price,
+            )
+            summary["tsd_upserted"] = tsd_summary.get("upserted", 0)
+            if tsd_summary.get("verify_errors"):
+                summary["sync_errors"].extend(tsd_summary["verify_errors"])
+        except Exception as exc:
+            print(f"  TSD sync warn: {exc}")
+            summary["sync_errors"].append(f"tsd_sync:{exc}")
+
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "
             f"repaired={repaired_now} reconciled={summary['reconciled']} "

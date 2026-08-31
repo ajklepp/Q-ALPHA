@@ -94,7 +94,7 @@ SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
 # otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
-_SUPABASE_SYNC_API = "watchlist-v3"
+_SUPABASE_SYNC_API = "watchlist-v4"
 # Agent entry window closes at 11:00 ET — after that, no-trade = Skipped.
 ENTRY_WINDOW_CLOSE = dtime(11, 0)
 
@@ -947,6 +947,78 @@ def tab_live_status(trades: list, pool_history: list) -> None:
                     else:
                         st.caption("Updated: —")
 
+                st.divider()
+
+    with st.container(border=True):
+        section_header(
+            "TSD Positions (3HR swing)",
+            "Kill-stop trail book — separate $3k TSD pool",
+        )
+        st.caption(
+            "3-hour swing track (TSD). Not included in gap-agent pool KPIs above. "
+            "Marks sync via local TWS → Supabase."
+        )
+        try:
+            tsd_rows = get_sync().get_tsd_positions(status="OPEN")
+        except Exception as exc:
+            st.caption(f"TSD positions unavailable: {exc}")
+            tsd_rows = []
+
+        if not tsd_rows:
+            st.info("No open TSD positions.")
+        else:
+            for row in tsd_rows:
+                symbol = str(row.get("symbol") or "")
+                entry_price = _safe_float(row.get("entry_price"), 0.0)
+                kill_price = _safe_float(row.get("kill_price"), 0.0)
+                current_price = _safe_float(row.get("current_price"), entry_price)
+                shares = int(_safe_float(row.get("shares"), 0.0))
+                pnl_dollars = _safe_float(row.get("pnl_dollars"), 0.0)
+                pnl_pct_val = _safe_float(row.get("pnl_pct"), 0.0)
+                scan_score = _safe_float(row.get("scan_score"), float("nan"))
+
+                pnl_color = POSITIVE if pnl_dollars >= 0 else NEGATIVE
+                st.markdown(
+                    f"**{symbol}** · {shares} sh · "
+                    f"entry ${entry_price:.2f} · "
+                    f"<span style='color:{pnl_color}'>"
+                    f"P&L ${pnl_dollars:+.2f} ({pnl_pct_val:+.1%})</span>",
+                    unsafe_allow_html=True,
+                )
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Mark", f"${current_price:.2f}")
+                with col2:
+                    st.metric("Kill", f"${kill_price:.2f}")
+                with col3:
+                    if math.isfinite(scan_score):
+                        st.metric("Scan score", f"{scan_score:.0f}")
+                    else:
+                        st.metric("Scan score", "—")
+                with col4:
+                    notional = current_price * shares if shares > 0 else 0.0
+                    st.metric("Value", f"${notional:,.0f}")
+
+                if (
+                    math.isfinite(kill_price)
+                    and math.isfinite(current_price)
+                    and kill_price > 0
+                    and current_price > kill_price
+                ):
+                    span = current_price - kill_price
+                    room = (current_price - kill_price) / current_price
+                    st.caption(f"Kill distance: {room:.1%} above kill (${span:.2f})")
+                elif math.isfinite(kill_price) and current_price <= kill_price:
+                    st.caption("At or below kill stop")
+
+                hhmm = _updated_hhmm_et(row.get("last_updated"))
+                bar_ts = str(row.get("last_bar_time") or "")[:19]
+                if hhmm:
+                    cap = f"Updated: {hhmm} ET"
+                    if bar_ts:
+                        cap += f" · last 3H bar {bar_ts}"
+                    st.caption(cap)
                 st.divider()
 
     with st.container(border=True):

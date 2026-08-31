@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +69,22 @@ TRADE_FIELDS = (
     "r_multiple",
     "dist_to_stop",
     "dist_to_target",
+    "last_updated",
+)
+
+TSD_POSITION_FIELDS = (
+    "symbol",
+    "entry_date",
+    "leg_opened_at",
+    "entry_price",
+    "shares",
+    "kill_price",
+    "current_price",
+    "pnl_dollars",
+    "pnl_pct",
+    "status",
+    "last_bar_time",
+    "scan_score",
     "last_updated",
 )
 
@@ -173,6 +189,60 @@ class SupabaseSync:
             .in_("status", list(open_statuses))
             .execute()
         )
+
+    def upsert_tsd_position(self, row: dict) -> None:
+        """Insert or update one TSD open leg (tsd_positions table)."""
+        record = {field: row.get(field) for field in TSD_POSITION_FIELDS}
+        record["symbol"] = str(row.get("symbol") or "").upper()
+        record["entry_date"] = str(row.get("entry_date") or "")[:10]
+        record["leg_opened_at"] = str(row.get("leg_opened_at") or "")
+        record["status"] = str(row.get("status") or "OPEN").upper()
+        record["last_updated"] = (
+            row.get("last_updated") or datetime.now(timezone.utc).isoformat()
+        )
+        self.client.table("tsd_positions").upsert(
+            record, on_conflict="symbol,leg_opened_at"
+        ).execute()
+
+    def get_tsd_positions(self, *, status: str = "OPEN") -> list:
+        """Fetch TSD positions for dashboard (default: open legs only)."""
+        q = self.client.table("tsd_positions").select("*")
+        if status:
+            q = q.eq("status", status.upper())
+        result = q.order("symbol").execute()
+        return result.data or []
+
+    def prune_stale_tsd_positions(
+        self,
+        open_keys: list[tuple[str, str]],
+    ) -> int:
+        """
+        Remove OPEN rows no longer in local book (flat / closed legs).
+        open_keys: list of (symbol, leg_opened_at).
+        """
+        result = (
+            self.client.table("tsd_positions")
+            .select("symbol,leg_opened_at")
+            .eq("status", "OPEN")
+            .execute()
+        )
+        keep = {(str(s).upper(), str(l)) for s, l in open_keys}
+        pruned = 0
+        for row in result.data or []:
+            key = (
+                str(row.get("symbol") or "").upper(),
+                str(row.get("leg_opened_at") or ""),
+            )
+            if key not in keep:
+                (
+                    self.client.table("tsd_positions")
+                    .delete()
+                    .eq("symbol", key[0])
+                    .eq("leg_opened_at", key[1])
+                    .execute()
+                )
+                pruned += 1
+        return pruned
 
     def upsert_pool_snapshot(self, pool_state: dict) -> None:
         """Save daily pool snapshot."""

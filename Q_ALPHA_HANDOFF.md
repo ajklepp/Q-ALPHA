@@ -121,7 +121,7 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 9:29     Premarket Telegram (agent)
 9:30–11:00 Entries (agent)
 9:35     Strategy Lab live_forward (parallel SIM — no IBKR)
-10:00–16:00  Live TWS sync every 30m (LOCAL — marks + filled-flat→CLOSED)
+9:40–16:10  Live TWS sync every 30m at :10/:40 (LOCAL — marks + filled-flat→CLOSED + TSD)
 10:00–16:00  Strategy Lab --mark every 30m (Polygon marks → Supabase SIM)
 11:00    Agent session recap Telegram
 ~4:15    Modal EOD monitor (agent)
@@ -138,12 +138,16 @@ check `candidates/logs/tws_sync_YYYY-MM-DD.log` **Supabase verify** block (not d
 Agents **cannot** create Windows tasks — Aaron runs once:
 
 ```powershell
-schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 10:00 /RI 30 /DU 06:00
+schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Users\ajkle\Documents\Q-ALPHA\candidates\start_tws_intraday_scheduled.ps1`"" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:40 /RI 30 /DU 06:30
 ```
 
 Verify: `schtasks /Query /TN "QAlpha Live TWS Sync" /FO LIST`  
 Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`  
 `--repair` re-reads today's CLOSED IBKR_PAPER sells; TWS fill px/reason wins over stop_price; pool rebuilt (no double-close).
+
+**TSD dashboard panel:** run `candidates/sql/tsd_positions.sql` once in Supabase SQL editor.
+Local `tsd_book_state.json` → `tsd_supabase_sync.py` (via TWS sync) → `tsd_positions` table.
+Streamlit reads `get_tsd_positions()` — separate $3k TSD pool, not gap-agent KPIs.
 
 ### Agent morning list (Phase 2 — TWS pipeline)
 
