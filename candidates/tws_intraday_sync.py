@@ -442,6 +442,55 @@ def _rebuild_pool_counters(pool: PoolManager, trades: list[dict]) -> None:
     pool.save_state()
 
 
+def _verify_supabase_rows(
+    trades: list[dict],
+    tickers: list[str],
+) -> None:
+    """One-line Cloud verification after force upsert (fail-soft)."""
+    want = {t.upper() for t in tickers}
+    checks: list[tuple[str, str]] = []
+    for t in trades:
+        sym = str(t.get("ticker") or "").upper()
+        if sym not in want:
+            continue
+        entry = str(t.get("entry_date") or "")[:10]
+        if entry:
+            checks.append((sym, entry))
+    if not checks:
+        return
+
+    try:
+        from supabase_sync import SupabaseSync
+
+        sync = SupabaseSync()
+        print("\n  Supabase verify:")
+        for ticker, entry_date in checks:
+            result = (
+                sync.client.table("trades")
+                .select(
+                    "ticker,entry_date,status,shares_total,exit_price,"
+                    "current_price,last_updated"
+                )
+                .eq("ticker", ticker)
+                .eq("entry_date", entry_date)
+                .limit(1)
+                .execute()
+            )
+            rows = result.data or []
+            if not rows:
+                print(f"    {ticker} {entry_date}: (no row)")
+                continue
+            r = rows[0]
+            print(
+                f"    {r.get('ticker')} {r.get('entry_date')}: "
+                f"status={r.get('status')} shares={r.get('shares_total')} "
+                f"exit={r.get('exit_price')} px={r.get('current_price')} "
+                f"updated={str(r.get('last_updated') or '')[:19]}"
+            )
+    except Exception as exc:
+        print(f"  Supabase verify warn: {exc}")
+
+
 def _is_managed_ibkr(t: dict) -> bool:
     if t.get("approved_by") not in MANAGED_SOURCES:
         return False
@@ -683,6 +732,8 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         # Force-upsert every managed trade + pool so Cloud cannot lag.
         from supabase_sync import sync_live_book_safe
 
+        force_closed_n = 0
+        force_closed_ok = 0
         for t in trades:
             if not _is_managed_ibkr(t):
                 continue
@@ -690,15 +741,25 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
             st = str(t.get("status") or "").upper()
             if st == "CLOSED":
                 reason = "force_closed"
-            if not _sync_trade_row(t, reason=reason):
+                force_closed_n += 1
+            if _sync_trade_row(t, reason=reason):
+                if reason == "force_closed":
+                    force_closed_ok += 1
+            else:
                 summary["sync_errors"].append(f"{reason}:{t.get('ticker')}")
 
         if not sync_live_book_safe(trade=None, pool_state=pool.state, label="pool"):
             summary["sync_errors"].append("pool_snapshot")
 
+        summary["force_closed_n"] = force_closed_n
+        summary["force_closed_ok"] = force_closed_ok
+
+        _verify_supabase_rows(trades, ["GME", "STLA", "DPRO"])
+
         print(
             f"\nDONE marked={marked_now} closed={closed_now} "
             f"repaired={repaired_now} reconciled={summary['reconciled']} "
+            f"force_closed={force_closed_ok}/{force_closed_n} "
             f"sync_errors={summary['sync_errors'] or 'none'} "
             f"pool=${pool.pool:.2f} deployed=${pool.deployed:.2f} "
             f"open_slots={pool.open_positions} "

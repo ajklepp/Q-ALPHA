@@ -94,7 +94,7 @@ SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
 # otherwise keep a pre-redeploy class instance (no get_watchlist) forever.
-_SUPABASE_SYNC_API = "watchlist-v2"
+_SUPABASE_SYNC_API = "watchlist-v3"
 # Agent entry window closes at 11:00 ET — after that, no-trade = Skipped.
 ENTRY_WINDOW_CLOSE = dtime(11, 0)
 

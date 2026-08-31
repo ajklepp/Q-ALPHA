@@ -20,6 +20,10 @@
 # STEP 3: Deploy the scheduler
 #   modal deploy candidates/scheduler.py
 #
+# IMPORTANT: After any change to intraday_monitor.py or supabase_sync.py,
+# always re-run `modal deploy candidates/scheduler.py` so the :30 cron picks
+# up mark-only updates (stale volume must not full-upsert CLOSED → OPEN).
+#
 # STEP 4: Confirm deployment
 #   modal app list          <- should show qalpha-scheduler
 #   modal app logs qalpha-scheduler
