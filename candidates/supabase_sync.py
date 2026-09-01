@@ -93,6 +93,15 @@ TSD_POSITION_FIELDS = (
     "tranche_summary",
     "structure_stop",
     "rth_armed",
+    "structure_stop_reason",
+    "breakeven_locked",
+    "tranche_json",
+    "t1_trigger_price",
+    "next_trail_stop",
+    "launch_score",
+    "phase",
+    "pre_catalyst",
+    "mfe_r",
     "last_updated",
 )
 
@@ -104,11 +113,67 @@ TSD_CLOSED_LEG_FIELDS = (
     "shares",
     "exit_price",
     "exit_reason",
+    "exit_layer",
     "pnl_dollars",
     "pnl_pct",
     "closed_at",
     "scan_score",
+    "launch_score",
+    "phase",
     "last_updated",
+)
+
+TSD_WATCHLIST_FIELDS = (
+    "symbol",
+    "rank",
+    "scan_score",
+    "trend_strength",
+    "mfi",
+    "buy_signal",
+    "profiler_pass",
+    "in_book",
+    "trade_pick",
+    "status_label",
+    "entry_price",
+    "kill_price",
+    "launch_score",
+    "phase",
+    "wt_gap",
+    "early_bull",
+    "analog_count",
+    "analog_win_rate",
+    "pre_catalyst",
+    "tags",
+    "scan_at",
+    "updated_at",
+)
+
+TSD_WATCH_QUEUE_FIELDS = (
+    "symbol",
+    "status",
+    "signal_lane",
+    "launch_score",
+    "launch_score_display",
+    "phase",
+    "scan_score",
+    "wt_gap",
+    "cross_level",
+    "early_bull",
+    "buy_signal",
+    "pre_catalyst",
+    "analog_count",
+    "analog_win_rate",
+    "gates",
+    "quality_gates",
+    "tags",
+    "size_mult",
+    "news_summary",
+    "catalyst_tier",
+    "sentiment_score",
+    "regime",
+    "skip_reason",
+    "added_at",
+    "updated_at",
 )
 
 # Columns written to the watchlist table. Keep in sync with
@@ -276,6 +341,9 @@ class SupabaseSync:
             "open_positions": int(state.get("open_positions") or 0),
             "open_names": int(state.get("open_names") or 0),
             "starting_pool": float(state.get("starting_pool") or 3000.0),
+            "spy_regime": state.get("spy_regime"),
+            "vix_regime": state.get("vix_regime") or "NORMAL",
+            "sizing_pct": state.get("sizing_pct") or "100%",
             "last_updated": state.get("last_updated") or datetime.now(timezone.utc).isoformat(),
         }
         self.client.table("tsd_pool_snapshots").upsert(
@@ -315,22 +383,12 @@ class SupabaseSync:
             return
         clean = []
         for r in rows:
-            clean.append({
-                "symbol": str(r.get("symbol") or "").upper(),
-                "rank": r.get("rank"),
-                "scan_score": r.get("scan_score"),
-                "trend_strength": r.get("trend_strength"),
-                "mfi": r.get("mfi"),
-                "buy_signal": r.get("buy_signal"),
-                "profiler_pass": r.get("profiler_pass"),
-                "in_book": r.get("in_book"),
-                "trade_pick": r.get("trade_pick"),
-                "status_label": r.get("status_label"),
-                "entry_price": r.get("entry_price"),
-                "kill_price": r.get("kill_price"),
-                "scan_at": r.get("scan_at"),
-                "updated_at": r.get("updated_at") or datetime.now(timezone.utc).isoformat(),
-            })
+            item = {field: r.get(field) for field in TSD_WATCHLIST_FIELDS}
+            item["symbol"] = str(r.get("symbol") or "").upper()
+            item["updated_at"] = (
+                r.get("updated_at") or datetime.now(timezone.utc).isoformat()
+            )
+            clean.append(item)
         self.client.table("tsd_watchlist").upsert(
             clean, on_conflict="symbol"
         ).execute()
@@ -343,6 +401,46 @@ class SupabaseSync:
             .execute()
         )
         return result.data or []
+
+    def replace_tsd_watch_queue(self, rows: list[dict]) -> None:
+        """Replace-all UTS v2 entry pipeline queue."""
+        symbols = {str(r.get("symbol") or "").upper() for r in rows if r.get("symbol")}
+        try:
+            existing = self.client.table("tsd_watch_queue").select("symbol").execute()
+            for row in existing.data or []:
+                sym = str(row.get("symbol") or "").upper()
+                if sym and sym not in symbols:
+                    self.client.table("tsd_watch_queue").delete().eq("symbol", sym).execute()
+        except Exception:
+            pass
+        if not rows:
+            return
+        clean = []
+        for r in rows:
+            item = {field: r.get(field) for field in TSD_WATCH_QUEUE_FIELDS}
+            item["symbol"] = str(r.get("symbol") or "").upper()
+            item["updated_at"] = (
+                r.get("updated_at") or datetime.now(timezone.utc).isoformat()
+            )
+            clean.append(item)
+        self.client.table("tsd_watch_queue").upsert(
+            clean, on_conflict="symbol"
+        ).execute()
+
+    def get_tsd_watch_queue(self) -> list:
+        try:
+            result = (
+                self.client.table("tsd_watch_queue")
+                .select("*")
+                .order("added_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            err = str(exc)
+            if "PGRST205" in err or "tsd_watch_queue" in err:
+                return []
+            raise
 
     def upsert_tsd_closed_leg(self, row: dict) -> None:
         """Insert or update one completed TSD leg (tsd_closed_legs table)."""

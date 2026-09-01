@@ -19,8 +19,11 @@ from typing import Any, Callable
 import pytz
 
 CANDIDATES = Path(__file__).resolve().parent
+ROOT = CANDIDATES.parent
 if str(CANDIDATES) not in sys.path:
     sys.path.insert(0, str(CANDIDATES))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     full_slots_used,
@@ -28,6 +31,8 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     open_symbols,
 )
 from tsd_scan_pipeline.tsd_pool import load_pool  # noqa: E402
+
+from dashboard_tsd_helpers import map_exit_layer, mfe_in_r, next_trail_stop  # noqa: E402
 
 ET = pytz.timezone("America/New_York")
 MARK_PX_TOL = 0.05
@@ -39,6 +44,13 @@ TWS_MARK_TIMEOUT_SEC = 8.0
 WATCHLIST_CACHE = (
     CANDIDATES / "tsd_scan_pipeline" / "results" / "last_watchlist.json"
 )
+
+try:
+    from state_paths import state_path
+
+    WATCH_QUEUE_PATH = state_path("tsd_watch_queue.json")
+except Exception:
+    WATCH_QUEUE_PATH = CANDIDATES / "tsd_watch_queue.json"
 
 
 def _finite(val: Any) -> float | None:
@@ -65,6 +77,30 @@ def _tranche_summary(trail: dict[str, Any]) -> str:
         else:
             parts.append(f"{tid} open")
     return " / ".join(parts) if parts else "—"
+
+
+def _serialize_tranches(trail: dict[str, Any]) -> list[dict[str, Any]]:
+    """Dashboard-friendly tranche rows from trail doc."""
+    out: list[dict[str, Any]] = []
+    for t in (trail or {}).get("tranches") or []:
+        if not isinstance(t, dict):
+            continue
+        armed = bool(t.get("trailing")) and not t.get("closed")
+        stop = None
+        if armed:
+            rh = _finite(t.get("run_high"))
+            tp = _finite(t.get("trail_pct"))
+            if rh and tp:
+                stop = round(rh * (1.0 - tp), 4)
+        out.append({
+            "id": t.get("id"),
+            "shares": t.get("shares"),
+            "trigger_price": _finite(t.get("trigger_price")),
+            "armed": armed,
+            "trail_stop": stop,
+            "closed": bool(t.get("closed")),
+        })
+    return out
 
 
 def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
@@ -101,6 +137,18 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                 pnl_dollars = round((current_price - entry_price) * shares, 2)
                 pnl_pct = round((current_price - entry_price) / entry_price, 4)
 
+            tranche_rows = _serialize_tranches(trail)
+            raw_tranches = trail.get("tranches") or []
+            t1_trigger = (
+                _finite(raw_tranches[0].get("trigger_price"))
+                if raw_tranches else None
+            )
+            nxt_trail = next_trail_stop(raw_tranches)
+            peak = _finite(trail.get("peak_high"))
+            mfe_r_val = None
+            if entry_price and kill_price and peak:
+                mfe_r_val = mfe_in_r(entry_price, peak, kill_price)
+
             rows.append(
                 {
                     "symbol": symbol,
@@ -115,7 +163,7 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "status": "OPEN",
                     "last_bar_time": trail.get("last_bar_time"),
                     "scan_score": scan_score,
-                    "peak_high": _finite(trail.get("peak_high")),
+                    "peak_high": peak,
                     "kill_pct": _finite(trail.get("kill_pct")),
                     "trail_pct": _finite(trail.get("trail_pct")),
                     "trading_day": int(trail.get("trading_day") or 0) or None,
@@ -123,6 +171,15 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "tranche_summary": _tranche_summary(trail),
                     "structure_stop": _finite(leg.get("structure_stop")),
                     "rth_armed": bool(leg.get("rth_armed")),
+                    "structure_stop_reason": leg.get("structure_stop_reason"),
+                    "breakeven_locked": bool(leg.get("breakeven_locked")),
+                    "tranche_json": tranche_rows,
+                    "t1_trigger_price": t1_trigger,
+                    "next_trail_stop": nxt_trail,
+                    "launch_score": _finite(leg.get("launch_score")),
+                    "phase": leg.get("phase"),
+                    "pre_catalyst": bool(leg.get("pre_catalyst")),
+                    "mfe_r": mfe_r_val,
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                 }
             )
@@ -173,6 +230,7 @@ def flatten_closed_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
             exit_price = round(exit_notional / exit_shares, 4)
             cost_basis = entry_price * exit_shares
             pnl_pct = round(pnl_dollars / cost_basis, 4) if cost_basis > 0 else 0.0
+            layer = map_exit_layer(exit_reason)
 
             rows.append(
                 {
@@ -183,10 +241,13 @@ def flatten_closed_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "shares": leg_shares or exit_shares,
                     "exit_price": exit_price,
                     "exit_reason": exit_reason or "CLOSED",
+                    "exit_layer": layer,
                     "pnl_dollars": round(pnl_dollars, 2),
                     "pnl_pct": pnl_pct,
                     "closed_at": closed_at or datetime.now(ET).isoformat(),
                     "scan_score": scan_score,
+                    "launch_score": _finite(leg.get("launch_score")),
+                    "phase": leg.get("phase"),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                 }
             )
@@ -245,6 +306,14 @@ def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
     cash = float(pool_doc.get("pool") or 0.0)
     deployed = float(pool_doc.get("deployed") or 0.0)
     starting = float(pool_doc.get("starting_pool") or 3000.0)
+    spy_regime = "UNKNOWN"
+    try:
+        from tsd_scan_pipeline.tsd_entry_gates import fetch_regime_bull
+
+        bull, label, _ = fetch_regime_bull()
+        spy_regime = str(label) if label else ("BULL" if bull else "BEAR")
+    except Exception:
+        pass
     return {
         "snapshot_date": datetime.now(ET).strftime("%Y-%m-%d"),
         "pool": round(cash, 2),
@@ -252,6 +321,9 @@ def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
         "open_positions": full_slots_used(book),
         "open_names": len(open_symbols(book)),
         "starting_pool": starting,
+        "spy_regime": spy_regime,
+        "vix_regime": "NORMAL",
+        "sizing_pct": "100%",
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -299,6 +371,7 @@ def sync_tsd_watchlist_to_supabase(
         if not sym:
             continue
         prof = w.get("profiler") or {}
+        tsd_prof = w.get("tsd_profile") or prof.get("profile") or {}
         in_book = sym in opens
         trade_pick = sym in trades
         if in_book:
@@ -309,6 +382,12 @@ def sync_tsd_watchlist_to_supabase(
             status_label = "Profiler OK"
         else:
             status_label = "Watching"
+        tags = w.get("tags") or []
+        close_px = _finite(w.get("close"))
+        kill_pct = _finite((w.get("tsd_profile") or tsd_prof).get("kill_pct"))
+        kill_price = _finite(w.get("kill_price"))
+        if kill_price is None and close_px and kill_pct:
+            kill_price = round(close_px * (1.0 - kill_pct), 4)
         rows.append(
             {
                 "symbol": sym,
@@ -321,8 +400,16 @@ def sync_tsd_watchlist_to_supabase(
                 "in_book": in_book,
                 "trade_pick": trade_pick,
                 "status_label": status_label,
-                "entry_price": _finite(w.get("close")),
-                "kill_price": _finite(w.get("kill_price")),
+                "entry_price": close_px,
+                "kill_price": kill_price,
+                "launch_score": _finite(w.get("launch_score")),
+                "phase": w.get("phase"),
+                "wt_gap": _finite(w.get("wt_gap")),
+                "early_bull": bool(w.get("early_bull")),
+                "analog_count": tsd_prof.get("analog_count"),
+                "analog_win_rate": _finite(tsd_prof.get("analog_win_rate")),
+                "pre_catalyst": bool(w.get("pre_catalyst")),
+                "tags": tags if tags else None,
                 "scan_at": scan_at,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -332,6 +419,64 @@ def sync_tsd_watchlist_to_supabase(
     sync = SupabaseSync()
     sync.replace_tsd_watchlist(rows)
     print(f"  TSD watchlist upserted {len(rows)} rows")
+    return len(rows)
+
+
+def sync_tsd_watch_queue_from_file() -> int:
+    """Sync local tsd_watch_queue.json to Supabase entry pipeline table."""
+    if not WATCH_QUEUE_PATH.exists():
+        return 0
+    try:
+        payload = json.loads(WATCH_QUEUE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    queue_rows = payload.get("queue") or []
+    if not queue_rows:
+        return 0
+    from supabase_sync import SupabaseSync
+
+    rows: list[dict[str, Any]] = []
+    for q in queue_rows:
+        sym = str(q.get("symbol") or "").upper()
+        if not sym:
+            continue
+        gates = q.get("gates")
+        if isinstance(gates, dict):
+            q_gates = {**gates, **(q.get("quality_gates") or {})}
+        else:
+            q_gates = q.get("quality_gates") or gates
+        rows.append({
+            "symbol": sym,
+            "status": str(q.get("status") or "WATCHING").upper(),
+            "signal_lane": q.get("signal_lane"),
+            "launch_score": _finite(q.get("launch_score")),
+            "launch_score_display": _finite(
+                q.get("launch_score_display") or q.get("entry_score")
+            ),
+            "phase": q.get("phase"),
+            "scan_score": _finite(q.get("scan_score")),
+            "wt_gap": _finite(q.get("wt_gap")),
+            "cross_level": _finite(q.get("cross_level") or q.get("close")),
+            "early_bull": bool(q.get("early_bull")),
+            "buy_signal": bool(q.get("buy_signal")),
+            "pre_catalyst": bool(q.get("pre_catalyst")),
+            "analog_count": q.get("analog_count"),
+            "analog_win_rate": _finite(q.get("analog_win_rate")),
+            "gates": gates,
+            "quality_gates": q.get("quality_gates"),
+            "tags": q.get("tags"),
+            "size_mult": _finite(q.get("size_mult")) or 1.0,
+            "news_summary": q.get("news_summary"),
+            "catalyst_tier": int(q.get("catalyst_tier") or 0),
+            "sentiment_score": _finite(q.get("sentiment_score")),
+            "regime": q.get("regime"),
+            "skip_reason": q.get("skip_reason"),
+            "added_at": q.get("added_at") or q.get("scan_at"),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    sync = SupabaseSync()
+    sync.replace_tsd_watch_queue(rows)
+    print(f"  TSD watch queue upserted {len(rows)} rows")
     return len(rows)
 
 
@@ -352,6 +497,7 @@ def sync_tsd_positions_to_supabase(
         "pruned": 0,
         "pool_synced": False,
         "watchlist_synced": 0,
+        "watch_queue_synced": 0,
         "verify_errors": [],
     }
 
@@ -431,6 +577,11 @@ def sync_tsd_positions_to_supabase(
         )
     except Exception as exc:
         summary["verify_errors"].append(f"tsd_watchlist:{exc}")
+
+    try:
+        summary["watch_queue_synced"] = sync_tsd_watch_queue_from_file()
+    except Exception as exc:
+        summary["verify_errors"].append(f"tsd_watch_queue:{exc}")
 
     verify_errors = _verify_tsd_supabase_rows(rows)
     summary["verify_errors"].extend(verify_errors)

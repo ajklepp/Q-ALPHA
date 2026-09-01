@@ -38,6 +38,15 @@ ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS t4_only         BOOLEAN DEFAU
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS tranche_summary TEXT;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS structure_stop NUMERIC;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS rth_armed         BOOLEAN DEFAULT FALSE;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS structure_stop_reason TEXT;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS breakeven_locked    BOOLEAN DEFAULT FALSE;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS tranche_json        JSONB;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS t1_trigger_price   NUMERIC;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS next_trail_stop     NUMERIC;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS launch_score        NUMERIC;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS phase               TEXT;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS pre_catalyst        BOOLEAN DEFAULT FALSE;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS mfe_r               NUMERIC;
 
 ALTER TABLE tsd_positions DROP CONSTRAINT IF EXISTS tsd_positions_symbol_leg_opened_at_key;
 ALTER TABLE tsd_positions ADD CONSTRAINT tsd_positions_symbol_leg_opened_at_key
@@ -60,6 +69,9 @@ CREATE TABLE IF NOT EXISTS tsd_pool_snapshots (
 );
 
 ALTER TABLE tsd_pool_snapshots ADD COLUMN IF NOT EXISTS open_names INTEGER DEFAULT 0;
+ALTER TABLE tsd_pool_snapshots ADD COLUMN IF NOT EXISTS spy_regime  TEXT;
+ALTER TABLE tsd_pool_snapshots ADD COLUMN IF NOT EXISTS vix_regime  TEXT DEFAULT 'NORMAL';
+ALTER TABLE tsd_pool_snapshots ADD COLUMN IF NOT EXISTS sizing_pct  TEXT DEFAULT '100%';
 
 -- ---------------------------------------------------------------------------
 -- tsd_watchlist — current TSD watch-10 (replace-all each scan)
@@ -81,7 +93,49 @@ CREATE TABLE IF NOT EXISTS tsd_watchlist (
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS launch_score      NUMERIC;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS phase             TEXT;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS wt_gap            NUMERIC;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS early_bull        BOOLEAN DEFAULT FALSE;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS analog_count      INTEGER;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS analog_win_rate   NUMERIC;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS pre_catalyst      BOOLEAN DEFAULT FALSE;
+ALTER TABLE tsd_watchlist ADD COLUMN IF NOT EXISTS tags              JSONB;
+
 CREATE INDEX IF NOT EXISTS tsd_watchlist_rank_idx ON tsd_watchlist (rank);
+
+-- ---------------------------------------------------------------------------
+-- tsd_watch_queue — UTS v2 entry pipeline (WATCHING / CONFIRMED / SKIPPED)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tsd_watch_queue (
+    symbol              TEXT PRIMARY KEY,
+    status              TEXT NOT NULL DEFAULT 'WATCHING',
+    signal_lane         TEXT,
+    launch_score        NUMERIC,
+    launch_score_display NUMERIC,
+    phase               TEXT,
+    scan_score          NUMERIC,
+    wt_gap              NUMERIC,
+    cross_level         NUMERIC,
+    early_bull          BOOLEAN DEFAULT FALSE,
+    buy_signal          BOOLEAN DEFAULT FALSE,
+    pre_catalyst        BOOLEAN DEFAULT FALSE,
+    analog_count        INTEGER,
+    analog_win_rate     NUMERIC,
+    gates               JSONB,
+    quality_gates       JSONB,
+    tags                JSONB,
+    size_mult           NUMERIC DEFAULT 1.0,
+    news_summary        TEXT,
+    catalyst_tier       INTEGER DEFAULT 0,
+    sentiment_score     NUMERIC,
+    regime              TEXT,
+    skip_reason         TEXT,
+    added_at            TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS tsd_watch_queue_status_idx ON tsd_watch_queue (status);
 
 -- ---------------------------------------------------------------------------
 -- tsd_closed_legs — completed TSD legs (one row per leg_opened_at)
@@ -102,6 +156,10 @@ CREATE TABLE IF NOT EXISTS tsd_closed_legs (
     PRIMARY KEY (symbol, leg_opened_at)
 );
 
+ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS launch_score   NUMERIC;
+ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS phase          TEXT;
+ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS exit_layer     TEXT;
+
 CREATE INDEX IF NOT EXISTS tsd_closed_legs_closed_at_idx ON tsd_closed_legs (closed_at DESC);
 
 -- ---------------------------------------------------------------------------
@@ -111,11 +169,13 @@ ALTER TABLE tsd_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_pool_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_watchlist ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_closed_legs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tsd_watch_queue ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT ON TABLE public.tsd_positions TO anon;
 GRANT SELECT ON TABLE public.tsd_pool_snapshots TO anon;
 GRANT SELECT ON TABLE public.tsd_watchlist TO anon;
 GRANT SELECT ON TABLE public.tsd_closed_legs TO anon;
+GRANT SELECT ON TABLE public.tsd_watch_queue TO anon;
 
 DROP POLICY IF EXISTS tsd_positions_anon_select ON public.tsd_positions;
 CREATE POLICY tsd_positions_anon_select ON public.tsd_positions
@@ -131,6 +191,10 @@ CREATE POLICY tsd_watchlist_anon_select ON public.tsd_watchlist
 
 DROP POLICY IF EXISTS tsd_closed_legs_anon_select ON public.tsd_closed_legs;
 CREATE POLICY tsd_closed_legs_anon_select ON public.tsd_closed_legs
+    FOR SELECT TO anon USING (true);
+
+DROP POLICY IF EXISTS tsd_watch_queue_anon_select ON public.tsd_watch_queue;
+CREATE POLICY tsd_watch_queue_anon_select ON public.tsd_watch_queue
     FOR SELECT TO anon USING (true);
 
 NOTIFY pgrst, 'reload schema';
