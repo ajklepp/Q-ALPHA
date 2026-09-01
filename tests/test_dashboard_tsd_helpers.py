@@ -1,7 +1,10 @@
 """Unit tests for UTS v2 dashboard helpers."""
 from __future__ import annotations
 
+import math
 import unittest
+
+import pandas as pd
 
 from dashboard_tsd_helpers import (
     build_tranche_table_rows,
@@ -111,6 +114,23 @@ class TestDashboardHelpers(unittest.TestCase):
             "2026-09-01T14:30:00-04:00",
         )
         self.assertIn("d", h)
+
+
+class TestStylePnl(unittest.TestCase):
+    def test_style_pnl_accepts_formatted_strings(self):
+        from dashboard import _style_pnl
+
+        pos = _style_pnl("+5.2%")
+        neg = _style_pnl("-3.1%")
+        self.assertIn("font-weight", pos)
+        self.assertIn("font-weight", neg)
+        self.assertNotEqual(pos, neg)
+
+    def test_style_pnl_accepts_numeric(self):
+        from dashboard import _style_pnl
+
+        self.assertIn("font-weight", _style_pnl(0.052))
+        self.assertEqual(_style_pnl(float("nan")), "")
 
 
 if __name__ == "__main__":

@@ -461,7 +461,17 @@ def get_last_health(component: str, health: list) -> dict | None:
 def _style_pnl(val):
     if pd.isna(val):
         return ""
-    color = POSITIVE if val >= 0 else NEGATIVE
+    try:
+        if isinstance(val, str):
+            s = val.strip().replace("%", "").replace("$", "").replace(",", "")
+            if s in ("—", "-", ""):
+                return ""
+            num = float(s)
+        else:
+            num = float(val)
+    except (TypeError, ValueError):
+        return ""
+    color = POSITIVE if num >= 0 else NEGATIVE
     return f"color: {color}; font-weight: 600"
 
 
