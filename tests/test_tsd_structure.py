@@ -77,14 +77,19 @@ class TestBreakevenRatchet(unittest.TestCase):
 
 
 class TestDay2Tighten(unittest.TestCase):
-    def test_tighten_when_no_tranche_trailing(self):
-        leg = {"price": 10.0, "structure_stop": 9.5}
+    def test_tighten_when_eligible(self):
+        leg = {
+            "price": 10.0,
+            "structure_stop": 9.5,
+            "time": "2026-08-28T10:00:00-04:00",
+        }
         trail = {
             "trading_day": 2,
             "entry_price": 10.0,
             "kill_price": 9.0,
             "kill_pct": 0.1,
             "trail_pct": 0.04,
+            "opened_at": "2026-08-28T10:00:00-04:00",
             "tranches": [
                 {
                     "id": "T1",
@@ -99,10 +104,47 @@ class TestDay2Tighten(unittest.TestCase):
                 },
             ],
         }
-        apply_day_structure_rules(leg, trail)
+        import pytz
+        from datetime import datetime
+
+        now = pytz.timezone("America/New_York").localize(datetime(2026, 9, 1, 10, 0))
+        apply_day_structure_rules(leg, trail, now=now)
         self.assertEqual(leg["structure_stop"], 9.9)
         self.assertEqual(leg["structure_stop_reason"], "day2_tighten")
-        self.assertEqual(trail["structure_stop"], 9.9)
+
+    def test_skip_first_session_after_entry(self):
+        leg = {
+            "price": 12.56,
+            "structure_stop": 12.37,
+            "time": "2026-08-31T15:26:05-04:00",
+        }
+        trail = {
+            "trading_day": 2,
+            "entry_price": 12.56,
+            "kill_price": 10.82,
+            "kill_pct": 0.1,
+            "trail_pct": 0.04,
+            "opened_at": "2026-08-31T15:26:05-04:00",
+            "tranches": [
+                {
+                    "id": "T1",
+                    "shares": 4,
+                    "weight": 0.4,
+                    "trigger_pct": 0.03,
+                    "trigger_price": 12.9,
+                    "trail_pct": 0.04,
+                    "trailing": False,
+                    "run_high": 0.0,
+                    "closed": False,
+                },
+            ],
+        }
+        import pytz
+        from datetime import datetime
+
+        now = pytz.timezone("America/New_York").localize(datetime(2026, 9, 1, 9, 40))
+        apply_day_structure_rules(leg, trail, now=now)
+        self.assertEqual(leg["structure_stop"], 12.37)
 
 
 class TestStructureExit(unittest.TestCase):

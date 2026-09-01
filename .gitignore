@@ -8,6 +8,9 @@ secrets.json
 .streamlit/secrets.toml
 candidates/pool_state.json
 candidates/paper_trades.json
+candidates/tsd_watch_queue.json
+candidates/tsd_book_state.json
+candidates/tsd_pool_state.json
 candidates/pending_approvals.json
 data/*.csv
 data/*.parquet

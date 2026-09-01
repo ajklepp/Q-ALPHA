@@ -218,10 +218,13 @@ def maybe_ratchet_breakeven(
 def apply_day_structure_rules(
     leg: dict[str, Any],
     trail_doc: dict[str, Any],
+    *,
+    now: datetime | None = None,
 ) -> None:
     """Day-2 tighten when no tranche is trailing yet."""
-    day = int(trail_doc.get("trading_day") or 1)
-    if day < 2:
+    from tsd_scan_pipeline.tsd_entry_gates import leg_eligible_for_day2_tighten
+
+    if not leg_eligible_for_day2_tighten(leg, trail_doc, now=now):
         return
     if any_tranche_trailing(trail_doc):
         return

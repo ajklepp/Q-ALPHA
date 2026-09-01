@@ -2,7 +2,7 @@
 Q-ALPHA TSD pipeline — PASS 2 IBKR live scan.
 
 Loads hunt list -> TWS 3H bars -> TSD BUY -> rank -> watch 10 / trade 3.
-Default dry-run; use --live for paper entries (blocked until Phase 4 unless override).
+Default dry-run; use --live to admit profiler-pass picks to the watch queue (no direct entries).
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_scan_ibkr.py
@@ -31,14 +31,12 @@ if str(CANDIDATES_DIR) not in sys.path:
 
 from tsd_scan_pipeline.build_3h_bars import bar_count_for_lookback, bars_from_ibkr
 from tsd_scan_pipeline.tsd_capacity import (
-    can_enter,
     load_state,
     open_symbols,
-    record_entry,
     reset_scan_counter,
-    save_state,
 )
-from tsd_scan_pipeline.tsd_entry import place_tsd_entry
+from tsd_scan_pipeline.tsd_entry_gates import occupied_symbols
+from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue
 from tsd_scan_pipeline.tsd_profiler import profile_watchlist
 from tsd_scan_pipeline.tsd_signals import SCAN_SCORE_MIN, enrich_tsd, last_bar_summary
 from tws_scan_pipeline.pipeline import fetch_polygon_mcap  # noqa: E402
@@ -344,57 +342,6 @@ def update_watchlist_cache(watch: list[dict[str, Any]]) -> None:
     )
 
 
-def execute_live_entries(
-    ib: IB,
-    trade_candidates: list[dict[str, Any]],
-    book_state: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Apply capacity gates and place session-aware BUY orders with kill stops."""
-    results: list[dict[str, Any]] = []
-    for cand in trade_candidates:
-        sym = cand["symbol"]
-        has_open = sym in open_symbols(book_state)
-        # Add-on only when already long on this ticker AND fresh BUY fired again
-        is_addon = has_open
-        ok, reason = can_enter(book_state, sym, is_addon=is_addon)
-        if not ok:
-            entry_kind = "SKIP"
-            results.append({"symbol": sym, "status": "SKIPPED", "reason": reason, "kind": entry_kind})
-            print(f"  {entry_kind} {sym}: {reason} (open={has_open}, addon={is_addon})")
-            continue
-
-        entry_kind = "ADDON" if reason == "addon" else "NEW"
-        print(f"  {entry_kind} {sym}: capacity_ok reason={reason}")
-
-        kill_pct = cand.get("kill_pct")
-        fill = place_tsd_entry(ib, sym, entry_price=cand.get("close"), kill_pct=kill_pct)
-        if fill.get("status") != "FILLED":
-            results.append({**fill, "kind": entry_kind})
-            print(f"  ENTRY FAIL {sym} ({entry_kind}): {fill.get('reason')}")
-            continue
-
-        record_entry(
-            book_state,
-            sym,
-            entry_price=float(fill["fill_price"]),
-            shares=int(fill["shares"]),
-            scan_score=float(cand.get("scan_score") or 0),
-            is_addon=is_addon,
-            order_id=fill.get("order_id"),
-            kill_order_id=fill.get("kill_order_id"),
-            kill_pct=fill.get("kill_pct"),
-            tsd_profile=cand.get("tsd_profile"),
-            session_at_entry=fill.get("session"),
-        )
-        results.append({**fill, "kind": entry_kind})
-        print(
-            f"  ENTRY FILLED {sym} ({entry_kind}): {fill['shares']} @ {fill['fill_price']:.2f} "
-            f"session={fill.get('session')} kill={fill.get('kill_pct'):.1%} "
-            f"kill_oid={fill.get('kill_order_id')}"
-        )
-    return results
-
-
 def run_scan(
     *,
     symbols: list[str] | None,
@@ -419,7 +366,8 @@ def run_scan(
     book_state = load_state()
     reset_scan_counter(book_state)
     book_opens = open_symbols(book_state)
-    merged_opens = _union_symbols(open_positions or [], book_opens)
+    cross_book = sorted(occupied_symbols())
+    merged_opens = _union_symbols(open_positions or [], cross_book)
 
     try:
         ib.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID, timeout=12)
@@ -443,7 +391,9 @@ def run_scan(
         print("WARN: POLYGON_API_KEY missing - mcap gate degraded")
 
     print(f"Hunt list: {len(hunt)} symbols  sources={hunt_meta.get('sources')}")
-    print(f"Open book: {book_opens}")
+    print(f"Open book (TSD): {book_opens}")
+    if cross_book != book_opens:
+        print(f"Cross-book occupied: {cross_book}")
     print(f"Filters: BUY cross | score>={SCAN_SCORE_MIN} | trend>0 | mcap>=${MCAP_MIN/1e6:.0f}M")
     if not skip_profiler:
         print("Profiler: watch-10 gate, MIN 30 TSD analogs required")
@@ -475,11 +425,12 @@ def run_scan(
     watch = profile_watchlist(watch_candidates, ib, polygon_key, skip=skip_profiler)
     trade = [w for w in watch if w.get("profiler_pass")][:TRADE_TOP_N]
 
-    entry_results: list[dict[str, Any]] = []
+    queue_results: list[dict[str, Any]] = []
     if live and trade:
-        print("\n--- LIVE ENTRIES (top 3 profiler-pass, capacity-gated) ---")
-        entry_results = execute_live_entries(ib, trade, book_state)
-        save_state(book_state)
+        print("\n--- WATCH QUEUE (top 3 profiler-pass, gate-filtered — no direct entries) ---")
+        queue_results = add_to_watch_queue(
+            trade, scan_at=now_et.isoformat(), polygon_key=polygon_key,
+        )
 
     update_near_cross_cache(rows)
     update_watchlist_cache(watch)
@@ -505,7 +456,7 @@ def run_scan(
         "signal_candidates": signal_candidates,
         "watch_top_10": watch,
         "trade_top_3": trade,
-        "entry_results": entry_results,
+        "queue_results": queue_results,
         "book_state": book_state,
         "all_rows": rows,
     }
@@ -527,7 +478,7 @@ def run_scan(
     else:
         print("\nWATCH top 10: (none - no fresh BUY passed filters on last 3H bar)")
     if trade and not live:
-        print("\nTRADE top 3 (dry-run - use --live for paper entries):")
+        print("\nTRADE top 3 (dry-run - use --live to add to watch queue):")
         for r in trade:
             print(f"  {r['symbol']:<6} score={r.get('scan_score')} kill={r.get('kill_pct', 'n/a')}")
     print("=" * 64)
@@ -546,7 +497,11 @@ def main() -> int:
     parser.add_argument("--use-scanners", action="store_true", help="Union TWS scanners (~150)")
     parser.add_argument("--max-symbols", type=int, default=None, help="Cap hunt list size")
     parser.add_argument("--open", type=str, default="", help="Comma-separated extra open positions")
-    parser.add_argument("--live", action="store_true", help="Place paper entries (TWS required)")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Admit trade picks to tsd_watch_queue.json (TWS required; no direct entries)",
+    )
     parser.add_argument(
         "--enforce-profiler",
         action="store_true",
