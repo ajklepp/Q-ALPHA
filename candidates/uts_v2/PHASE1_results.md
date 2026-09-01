@@ -53,10 +53,9 @@ py -3 -m unittest discover -s tests -p "test_tsd_structure.py" -v
 | Direct scan entries | Disabled |
 | Queue-only live mode | Enabled |
 
-## Next (Phase 2)
+## Next (Phase 2) — SHIPPED
 
-- `research_gate.py`: Polygon news + catalyst AI + `entry_score` 0–100
-- Reject queue admission if `entry_score` &lt; 65 (A) / &lt; 70 (B)
+See `candidates/uts_v2/PHASE2_results.md`. **`quality_history_gate.py`** — profiler analog depth/win rate + liquidity floors. News/sentiment are **context tags only**, never entry vetoes.
 
 ## Reply for Chat A
 

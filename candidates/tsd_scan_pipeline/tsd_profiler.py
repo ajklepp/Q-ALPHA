@@ -45,6 +45,21 @@ HOLD_DAYS_PRIMARY = 5
 FALLBACK_KILL_PCT = 0.07
 
 
+def _analog_outcome_label(
+    mfe_pct: float | None,
+    mae_pct: float | None,
+    kill_pct: float,
+) -> str:
+    """WIN if MFE >= 2× kill before MAE breaches kill; else LOSS or FLAT."""
+    if mfe_pct is None or mae_pct is None:
+        return "UNKNOWN"
+    if mfe_pct >= 2.0 * kill_pct and mae_pct < kill_pct:
+        return "WIN"
+    if mae_pct >= kill_pct:
+        return "LOSS"
+    return "FLAT"
+
+
 def _percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -348,11 +363,27 @@ def build_tsd_profile(
     kill_pct = mae["p75"] if mae["p75"] > 0 else FALLBACK_KILL_PCT
     target_pct = mfe["p50"]
 
+    wins = losses = flats = 0
+    for m in measured:
+        label = _analog_outcome_label(m["mfe_pct"], m["mae_pct"], kill_pct)
+        if label == "WIN":
+            wins += 1
+        elif label == "LOSS":
+            losses += 1
+        else:
+            flats += 1
+    decisive = wins + losses
+    analog_win_rate = round(100.0 * wins / decisive, 1) if decisive else None
+
     return {
         "symbol": sym,
         "status": "OK",
         "analog_count": len(analogs),
         "measured_count": len(measured),
+        "analog_wins": wins,
+        "analog_losses": losses,
+        "analog_flats": flats,
+        "analog_win_rate": analog_win_rate,
         "hold_days": HOLD_DAYS_PRIMARY,
         "lookback_days": analog_doc.get("lookback_days"),
         "lookback_extended": analog_doc.get("lookback_extended", False),

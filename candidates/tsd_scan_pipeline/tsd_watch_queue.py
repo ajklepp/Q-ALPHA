@@ -27,6 +27,7 @@ from tsd_scan_pipeline.tsd_entry_gates import (
     fetch_regime_bull,
     infer_signal_lane,
 )
+from tsd_scan_pipeline.quality_history_gate import enrich_queue_row
 from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
 
 ET = pytz.timezone("America/New_York")
@@ -66,8 +67,8 @@ def add_to_watch_queue(
     """
     Admit profiler-pass scan picks to the watch queue (no IBKR orders).
 
-    Applies LAUNCH gates: launch_score>=50, scan_score<=55, buy/early_bull,
-    not EXTENSION, wt_gap>=3, regime BULL, cross-book dedup.
+    Applies LAUNCH gates then Phase 2 quality_history_gate (analog depth/win rate,
+    liquidity floors). News fetched AFTER pass — context tags only, never vetoes.
     PM/extended queue admission OK — executor handles session (Phase 3).
     """
     state = load_queue()
@@ -95,26 +96,52 @@ def add_to_watch_queue(
             print(f"  QUEUE SKIP {sym}: {reasons} phase={enriched.get('phase')}")
             continue
 
+        qh_row, qh_pass, qh_gates, qh_reasons = enrich_queue_row(
+            {**enriched, **cand, "symbol": sym},
+            polygon_key=polygon_key,
+            fetch_news=True,
+        )
+        if not qh_pass:
+            results.append({
+                "symbol": sym,
+                "status": "SKIPPED",
+                "reason": ";".join(qh_reasons) or "quality_gate_fail",
+                "gates": {**gates, **qh_gates},
+                "phase": enriched.get("phase"),
+            })
+            print(f"  QUEUE SKIP {sym}: {qh_reasons} (quality/history)")
+            continue
+
         row = {
             "symbol": sym,
-            "signal_lane": infer_signal_lane(enriched),
-            "entry_score": float(enriched.get("launch_score") or 0),
-            "launch_score": float(enriched.get("launch_score") or 0),
-            "phase": enriched.get("phase"),
-            "signal_bar_red": bool(enriched.get("signal_bar_red")),
-            "early_bull": bool(enriched.get("early_bull")),
-            "buy_signal": bool(enriched.get("buy_signal")),
-            "cross_level": round(float(enriched.get("close") or 0), 4),
-            "scan_score": float(enriched.get("scan_score") or 0),
-            "wt_gap": float(enriched.get("wt_gap") or 0),
+            "signal_lane": infer_signal_lane(qh_row),
+            "entry_score": float(qh_row.get("launch_score_display") or qh_row.get("launch_score") or 0),
+            "launch_score": float(qh_row.get("launch_score") or 0),
+            "launch_score_display": float(qh_row.get("launch_score_display") or qh_row.get("launch_score") or 0),
+            "phase": qh_row.get("phase"),
+            "signal_bar_red": bool(qh_row.get("signal_bar_red")),
+            "early_bull": bool(qh_row.get("early_bull")),
+            "buy_signal": bool(qh_row.get("buy_signal")),
+            "cross_level": round(float(qh_row.get("close") or 0), 4),
+            "scan_score": float(qh_row.get("scan_score") or 0),
+            "wt_gap": float(qh_row.get("wt_gap") or 0),
             "added_at": when,
             "status": "WATCHING",
-            "gates": gates,
+            "gates": {**gates, "quality": qh_gates},
+            "quality_gates": qh_gates,
             "regime": regime_label,
-            "kill_pct": enriched.get("kill_pct"),
-            "close": enriched.get("close"),
-            "tsd_profile": enriched.get("tsd_profile"),
+            "kill_pct": qh_row.get("kill_pct") or cand.get("kill_pct"),
+            "close": qh_row.get("close"),
+            "tsd_profile": qh_row.get("tsd_profile") or cand.get("tsd_profile"),
             "scan_at": when,
+            "analog_count": qh_row.get("analog_count"),
+            "analog_win_rate": qh_row.get("analog_win_rate"),
+            "tags": qh_row.get("tags") or [],
+            "size_mult": qh_row.get("size_mult", 1.0),
+            "pre_catalyst": bool(qh_row.get("pre_catalyst", True)),
+            "news_summary": qh_row.get("news_summary") or "",
+            "catalyst_tier": int(qh_row.get("catalyst_tier") or 0),
+            "sentiment_score": float(qh_row.get("sentiment_score") or 0),
         }
 
         idx = _queue_index(state, sym)
@@ -139,6 +166,8 @@ def add_to_watch_queue(
             f"  QUEUE {action} {sym} lane={row['signal_lane']} "
             f"phase={row['phase']} launch={row['launch_score']:.0f} "
             f"scan={row['scan_score']:.1f} wt_gap={row['wt_gap']:.1f} "
+            f"analogs={row.get('analog_count')} wr={row.get('analog_win_rate')}% "
+            f"pre_cat={row.get('pre_catalyst')} tags={row.get('tags')} "
             f"cross={row['cross_level']}"
         )
 
