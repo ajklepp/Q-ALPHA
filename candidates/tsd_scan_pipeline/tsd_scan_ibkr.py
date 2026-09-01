@@ -384,6 +384,7 @@ def execute_live_entries(
             kill_order_id=fill.get("kill_order_id"),
             kill_pct=fill.get("kill_pct"),
             tsd_profile=cand.get("tsd_profile"),
+            session_at_entry=fill.get("session"),
         )
         results.append({**fill, "kind": entry_kind})
         print(

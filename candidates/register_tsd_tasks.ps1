@@ -33,7 +33,8 @@ $results = @{}
 schtasks /Create /F /TN "QAlpha TSD Scheduler" /TR $trSched /SC WEEKLY /D MON,TUE,WED,THU,FRI,SAT,SUN /ST 00:00 /RI 5 /DU 24:00 /RL LIMITED
 $results["QAlpha TSD Scheduler"] = ($LASTEXITCODE -eq 0)
 
-# Trail monitor loop — restart daily at 04:00 ET, run 24h (TWS must be open)
+# Trail monitor loop — restart daily at 04:00 ET (TWS must be open)
+# RTH: 30s software trail + structure; extended/overnight: 5m kill backstop only
 schtasks /Create /F /TN "QAlpha TSD Trail Monitor" /TR $trTrail /SC DAILY /ST 04:00 /RL LIMITED
 $results["QAlpha TSD Trail Monitor"] = ($LASTEXITCODE -eq 0)
 

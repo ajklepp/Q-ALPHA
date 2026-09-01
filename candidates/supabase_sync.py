@@ -91,6 +91,8 @@ TSD_POSITION_FIELDS = (
     "trading_day",
     "t4_only",
     "tranche_summary",
+    "structure_stop",
+    "rth_armed",
     "last_updated",
 )
 

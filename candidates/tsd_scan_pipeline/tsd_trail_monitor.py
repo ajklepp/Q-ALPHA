@@ -1,13 +1,12 @@
 """
 Q-ALPHA TSD pipeline — Phase 4 software trail monitor.
 
-Polls IBKR for open TSD positions, runs strategy_a 4-tranche trail logic,
-places session-aware SELL orders, cancels emergency kill stops once software
-trail is active.
+3-layer stop pyramid:
+  L1 broker kill (always on) | L2 RTH structure stop | L3 T1–T4 software trail
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --once
-  py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --loop --interval 60
+  py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --loop --adaptive
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --dry-run --once
 """
 from __future__ import annotations
@@ -34,7 +33,16 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     record_leg_exit,
     save_state,
 )
-from tsd_scan_pipeline.tsd_exit import cancel_order_safe, place_tsd_exit  # noqa: E402
+from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
+from tsd_scan_pipeline.tsd_exit import place_tsd_exit, sync_kill_quantity  # noqa: E402
+from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
+    apply_day_structure_rules,
+    bootstrap_rth_structure,
+    maybe_ratchet_breakeven,
+    poll_interval_sec,
+    should_day3_force_exit,
+    structure_stop_breached,
+)
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
     at_time_cap,
     evaluate_trail_tick,
@@ -100,6 +108,163 @@ def _ensure_trail_on_leg(leg: dict[str, Any], symbol: str) -> dict[str, Any]:
     return leg
 
 
+def _exit_all_remaining(
+    ib: IB,
+    pos: dict[str, Any],
+    leg_index: int,
+    leg: dict[str, Any],
+    sym: str,
+    *,
+    reason: str,
+    quote: dict[str, float],
+    dry_run: bool,
+) -> list[dict[str, Any]]:
+    """Software exit for all remaining shares (structure / day-3)."""
+    trail = leg.get("trail") or {}
+    rem = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
+    if rem <= 0:
+        return []
+
+    px = float(quote.get("close") or quote.get("last") or leg.get("price") or 0)
+    print(f"  {sym} STRUCTURE EXIT {rem}sh @ ~{px:.2f} reason={reason}")
+
+    results: list[dict[str, Any]] = []
+    if dry_run:
+        fill = {"status": "DRY_RUN", "fill_price": px, "shares": rem}
+    else:
+        fill = place_tsd_exit(ib, sym, rem, ref_price=px, reason=reason)
+
+    record_leg_exit(
+        pos,
+        leg_index=leg_index,
+        shares=rem,
+        exit_price=float(fill.get("fill_price") or px),
+        reason=reason,
+        tranche_id="STRUCTURE",
+        order_id=fill.get("order_id"),
+    )
+    leg["status"] = "CLOSED"
+    trail["kill_stop_cancelled"] = False
+    leg["trail"] = trail
+    pos["legs"][leg_index] = leg
+    if not dry_run:
+        sync_kill_quantity(ib, leg, sym, dry_run=False)
+    results.append({"symbol": sym, "leg": leg_index, "reason": reason, "fill": fill})
+    return results
+
+
+def _process_leg(
+    ib: IB,
+    pos: dict[str, Any],
+    leg_index: int,
+    leg: dict[str, Any],
+    sym: str,
+    quote: dict[str, float],
+    *,
+    dry_run: bool,
+    when: str,
+) -> list[dict[str, Any]]:
+    """RTH monitoring for one open leg."""
+    results: list[dict[str, Any]] = []
+
+    leg = _ensure_trail_on_leg(leg, sym)
+    trail = maybe_roll_trading_day(dict(leg["trail"]))
+
+    if not leg.get("rth_armed"):
+        boot = bootstrap_rth_structure(ib, leg, sym, dry_run=dry_run)
+        leg = boot["leg"]
+        trail = leg.get("trail") or trail
+        if not boot.get("armed"):
+            leg["trail"] = trail
+            pos["legs"][leg_index] = leg
+            results.append({
+                "symbol": sym,
+                "leg": leg_index,
+                "status": "BOOTSTRAP_PENDING",
+                "reason": boot.get("reason"),
+            })
+            return results
+
+    apply_day_structure_rules(leg, trail)
+
+    if should_day3_force_exit(trail):
+        results.extend(
+            _exit_all_remaining(
+                ib, pos, leg_index, leg, sym,
+                reason="day3_thesis_fail",
+                quote=quote,
+                dry_run=dry_run,
+            )
+        )
+        return results
+
+    structure_stop = leg.get("structure_stop") or trail.get("structure_stop")
+    if structure_stop_breached(quote["low"], structure_stop):
+        results.extend(
+            _exit_all_remaining(
+                ib, pos, leg_index, leg, sym,
+                reason="structure_stop",
+                quote=quote,
+                dry_run=dry_run,
+            )
+        )
+        return results
+
+    maybe_ratchet_breakeven(leg, trail, quote_high=quote["high"])
+    trail = leg.get("trail") or trail
+
+    force_cap = at_time_cap(trail)
+    trail, exits = evaluate_trail_tick(
+        trail,
+        high=quote["high"],
+        low=quote["low"],
+        close=quote["close"],
+        when=when,
+        force_time_cap=force_cap,
+    )
+    leg["trail"] = trail
+
+    for ex in exits:
+        print(
+            f"  {sym} EXIT {ex['tranche_id']}: {ex['shares']}sh "
+            f"@ {ex['exit_price']:.2f} reason={ex['reason']}"
+        )
+        if dry_run:
+            fill = {"status": "DRY_RUN", **ex}
+        else:
+            fill = place_tsd_exit(
+                ib,
+                sym,
+                int(ex["shares"]),
+                ref_price=float(ex["exit_price"]),
+                reason=str(ex["reason"]),
+            )
+        record_leg_exit(
+            pos,
+            leg_index=leg_index,
+            shares=int(ex["shares"]),
+            exit_price=float(fill.get("fill_price") or ex["exit_price"]),
+            reason=str(ex["reason"]),
+            tranche_id=str(ex["tranche_id"]),
+            order_id=fill.get("order_id"),
+        )
+        results.append({"symbol": sym, "leg": leg_index, **ex, "fill": fill})
+
+    if not dry_run:
+        sync_kill_quantity(ib, leg, sym, dry_run=False)
+
+    if remaining_shares(trail) <= 0:
+        leg["status"] = "CLOSED"
+        if not dry_run:
+            sync_kill_quantity(ib, leg, sym, dry_run=False)
+    if is_t4_only(trail):
+        pos["t4_only"] = True
+        print(f"  {sym}: T4-only runner — slot freed")
+
+    pos["legs"][leg_index] = leg
+    return results
+
+
 def _process_position(
     ib: IB,
     pos: dict[str, Any],
@@ -109,6 +274,18 @@ def _process_position(
     """Evaluate trail for all open legs on one symbol."""
     sym = str(pos["symbol"]).upper()
     results: list[dict[str, Any]] = []
+    session = classify_session()
+
+    if session != "RTH":
+        print(f"  {sym}: session={session} — kill backstop only (no software trail)")
+        for i, leg in enumerate(list(pos.get("legs") or [])):
+            if leg.get("status") == "CLOSED":
+                continue
+            if not dry_run:
+                sync_kill_quantity(ib, leg, sym, dry_run=False)
+            pos["legs"][i] = leg
+        return results
+
     quote = _fetch_quote(ib, sym)
     if quote is None:
         results.append({"symbol": sym, "status": "SKIP", "reason": "no_quote"})
@@ -121,59 +298,10 @@ def _process_position(
         if leg.get("status") == "CLOSED":
             continue
         pos_closed = False
-        leg = _ensure_trail_on_leg(leg, sym)
-        trail = maybe_roll_trading_day(dict(leg["trail"]))
-        force_cap = at_time_cap(trail)
-        trail, exits = evaluate_trail_tick(
-            trail,
-            high=quote["high"],
-            low=quote["low"],
-            close=quote["close"],
-            when=when,
-            force_time_cap=force_cap,
+        leg_results = _process_leg(
+            ib, pos, i, leg, sym, quote, dry_run=dry_run, when=when,
         )
-
-        # Cancel emergency kill stop once software trail is managing the leg
-        if not trail.get("kill_stop_cancelled") and not dry_run:
-            if cancel_order_safe(ib, leg.get("kill_order_id")):
-                trail["kill_stop_cancelled"] = True
-                print(f"  {sym} leg[{i}]: cancelled emergency kill oid={leg.get('kill_order_id')}")
-
-        leg["trail"] = trail
-
-        for ex in exits:
-            print(
-                f"  {sym} EXIT {ex['tranche_id']}: {ex['shares']}sh "
-                f"@ {ex['exit_price']:.2f} reason={ex['reason']}"
-            )
-            fill: dict[str, Any]
-            if dry_run:
-                fill = {"status": "DRY_RUN", **ex}
-            else:
-                fill = place_tsd_exit(
-                    ib,
-                    sym,
-                    int(ex["shares"]),
-                    ref_price=float(ex["exit_price"]),
-                    reason=str(ex["reason"]),
-                )
-            record_leg_exit(
-                pos,
-                leg_index=i,
-                shares=int(ex["shares"]),
-                exit_price=float(fill.get("fill_price") or ex["exit_price"]),
-                reason=str(ex["reason"]),
-                tranche_id=str(ex["tranche_id"]),
-                order_id=fill.get("order_id"),
-            )
-            results.append({"symbol": sym, "leg": i, **ex, "fill": fill})
-
-        if remaining_shares(trail) <= 0:
-            leg["status"] = "CLOSED"
-        if is_t4_only(trail):
-            pos["t4_only"] = True
-            print(f"  {sym}: T4-only runner — slot freed")
-        pos["legs"][i] = leg
+        results.extend(leg_results)
 
     if pos_closed or all(l.get("status") == "CLOSED" for l in pos.get("legs") or []):
         pos["status"] = "CLOSED"
@@ -189,10 +317,11 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     ib = IB()
     now = datetime.now(ET)
     mode = "DRY_RUN" if dry_run else "LIVE"
+    session = classify_session(now)
 
     print("=" * 64)
     print(f"Q-ALPHA TSD TRAIL MONITOR - {mode}")
-    print(f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} clientId={TWS_CLIENT_ID}")
+    print(f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} clientId={TWS_CLIENT_ID}")
     print("=" * 64)
 
     state = load_state()
@@ -228,6 +357,7 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     payload = {
         "mode": mode,
+        "session": session,
         "checked_at": now.isoformat(),
         "open_count": len(opens),
         "actions": actions,
@@ -256,12 +386,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="TSD 4-tranche software trail monitor")
     parser.add_argument("--once", action="store_true", help="Single pass (default)")
     parser.add_argument("--loop", action="store_true", help="Loop until interrupted")
-    parser.add_argument("--interval", type=int, default=60, help="Loop seconds (default 60)")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=60,
+        help="Loop seconds when --adaptive not set (default 60)",
+    )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="RTH 30s / extended 300s poll (recommended)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only — no orders")
     args = parser.parse_args()
 
     if args.loop:
-        print(f"Loop mode: interval={args.interval}s  Ctrl+C to stop")
+        print("Loop mode: Ctrl+C to stop")
         while True:
             try:
                 from tsd_scan_pipeline.scheduler import heartbeat_trail_loop
@@ -270,7 +410,9 @@ def main() -> int:
             except Exception:
                 pass
             run_monitor(dry_run=args.dry_run)
-            time.sleep(max(5, args.interval))
+            wait = poll_interval_sec() if args.adaptive else max(5, args.interval)
+            print(f"  sleeping {wait}s (session={classify_session()})")
+            time.sleep(wait)
     else:
         run_monitor(dry_run=args.dry_run)
     return 0

@@ -169,6 +169,9 @@ def init_trail_state(
     doc["kill_stop_cancelled"] = False
     doc["opened_at"] = datetime.now(ET).isoformat()
     doc["last_session_date"] = datetime.now(ET).date().isoformat()
+    doc["structure_stop"] = None
+    doc["rth_armed"] = False
+    doc["breakeven_locked"] = False
     return doc
 
 
@@ -182,6 +185,12 @@ def is_t4_only(trail_doc: dict[str, Any]) -> bool:
     state = sim_state_from_dict(trail_doc)
     open_tranches = [t for t in state.tranches if not t.closed]
     return len(open_tranches) == 1 and open_tranches[0].id == "T4"
+
+
+def any_tranche_trailing(trail_doc: dict[str, Any]) -> bool:
+    """True if any open tranche is in trailing mode."""
+    state = sim_state_from_dict(trail_doc)
+    return any(t.trailing and not t.closed for t in state.tranches)
 
 
 def evaluate_trail_tick(
@@ -230,6 +239,9 @@ def evaluate_trail_tick(
     updated["levels_source"] = trail_doc.get("levels_source")
     updated["opened_at"] = trail_doc.get("opened_at")
     updated["last_session_date"] = trail_doc.get("last_session_date")
+    updated["structure_stop"] = trail_doc.get("structure_stop")
+    updated["rth_armed"] = trail_doc.get("rth_armed", False)
+    updated["breakeven_locked"] = trail_doc.get("breakeven_locked", False)
     return updated, exits
 
 

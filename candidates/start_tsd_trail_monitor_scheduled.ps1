@@ -41,8 +41,8 @@ $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Add-Content -LiteralPath $LogFile -Value ""
 Add-Content -LiteralPath $LogFile -Value "======== TSD TRAIL MONITOR START $stamp ========"
 
-# 60s loop for up to 24h (Task Scheduler /DU handles stop)
-& $Python $Runner --loop --interval 60 *>> $LogFile
+# 60s loop with adaptive RTH 30s / extended 5m polling (TWS must be open)
+& $Python $Runner --loop --adaptive *>> $LogFile
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 

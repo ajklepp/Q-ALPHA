@@ -185,6 +185,7 @@ def _render_tsd_open_card(row: dict) -> None:
     symbol = str(row.get("symbol") or "")
     entry_price = _safe_float(row.get("entry_price"), 0.0)
     kill_price = _safe_float(row.get("kill_price"), 0.0)
+    structure_stop = _safe_float(row.get("structure_stop"), float("nan"))
     peak_high = _safe_float(row.get("peak_high"), float("nan"))
     current_price = _safe_float(row.get("current_price"), entry_price)
     shares = int(_safe_float(row.get("shares"), 0.0))
@@ -199,16 +200,24 @@ def _render_tsd_open_card(row: dict) -> None:
     with col2:
         st.metric("P&L", f"${pnl_dollars:+.2f}", f"{shares} sh")
     with col3:
-        if kill_price > 0 and current_price <= kill_price:
+        if math.isfinite(kill_price) and kill_price > 0 and current_price <= kill_price:
             kill_delta = "AT / below kill"
+        elif math.isfinite(structure_stop) and structure_stop > 0 and current_price <= structure_stop:
+            kill_delta = "AT / below structure"
         elif kill_price > 0 and current_price > 0:
             room = (current_price - kill_price) / current_price
-            kill_delta = f"🟢 {room:.1%} above kill"
+            kill_delta = f"🟢 kill {room:.1%} above"
         else:
             kill_delta = "—"
         st.metric("Kill", f"${kill_price:.2f}", kill_delta)
     with col4:
-        if math.isfinite(scan_score):
+        if math.isfinite(structure_stop) and structure_stop > 0:
+            if current_price <= structure_stop:
+                struct_delta = "BREACHED"
+            else:
+                struct_delta = f"{(current_price - structure_stop) / current_price:.1%} above"
+            st.metric("Structure", f"${structure_stop:.2f}", struct_delta)
+        elif math.isfinite(scan_score):
             st.metric("Score", f"{scan_score:.0f}", tranche_summary[:24])
         else:
             st.metric("Tranches", "—", tranche_summary[:24])

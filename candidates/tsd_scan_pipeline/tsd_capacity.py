@@ -19,6 +19,8 @@ from typing import Any
 import pytz
 
 from state_paths import state_path
+from tsd_scan_pipeline.tsd_entry import SessionKind, classify_session
+from tsd_scan_pipeline.tsd_structure import init_leg_session_fields
 
 ET = pytz.timezone("America/New_York")
 
@@ -135,6 +137,7 @@ def record_entry(
     kill_order_id: int | None = None,
     kill_pct: float | None = None,
     tsd_profile: dict[str, Any] | None = None,
+    session_at_entry: SessionKind | str | None = None,
 ) -> dict[str, Any]:
     """Book a filled entry into TSD state."""
     from tsd_scan_pipeline.tsd_trail import init_trail_state
@@ -142,6 +145,7 @@ def record_entry(
     sym = symbol.upper()
     pos = _position(state, sym)
     now = datetime.now(ET).isoformat()
+    session = session_at_entry or classify_session()
     trail = init_trail_state(entry_price, shares, tsd_profile)
     leg = {
         "time": now,
@@ -155,6 +159,7 @@ def record_entry(
         "status": "OPEN",
         "trail": trail,
         "exits": [],
+        **init_leg_session_fields(session),  # type: ignore[arg-type]
     }
     if pos is None:
         state.setdefault("positions", []).append(

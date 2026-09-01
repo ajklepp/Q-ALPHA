@@ -36,6 +36,8 @@ ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS trail_pct       NUMERIC;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS trading_day     INTEGER;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS t4_only         BOOLEAN DEFAULT FALSE;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS tranche_summary TEXT;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS structure_stop NUMERIC;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS rth_armed         BOOLEAN DEFAULT FALSE;
 
 ALTER TABLE tsd_positions DROP CONSTRAINT IF EXISTS tsd_positions_symbol_leg_opened_at_key;
 ALTER TABLE tsd_positions ADD CONSTRAINT tsd_positions_symbol_leg_opened_at_key

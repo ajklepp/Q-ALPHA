@@ -121,6 +121,8 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "trading_day": int(trail.get("trading_day") or 0) or None,
                     "t4_only": t4_only,
                     "tranche_summary": _tranche_summary(trail),
+                    "structure_stop": _finite(leg.get("structure_stop")),
+                    "rth_armed": bool(leg.get("rth_armed")),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                 }
             )
