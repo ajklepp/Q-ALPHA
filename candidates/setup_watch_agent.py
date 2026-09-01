@@ -221,6 +221,14 @@ def _synthetic_quote_for_dry_run(row: dict[str, Any]) -> SessionQuote:
     )
 
 
+def _is_launch_row(row: dict[str, Any]) -> bool:
+    """LAUNCH lane B rows may confirm/enter outside RTH (kill backstop)."""
+    return row.get("phase") == "LAUNCH" or (
+        str(row.get("signal_lane", "")).upper() == "B"
+        and float(row.get("launch_score") or 0) >= 50
+    )
+
+
 def process_watching_row(
     ib: IB | None,
     row: dict[str, Any],
@@ -234,10 +242,11 @@ def process_watching_row(
     sym = str(row["symbol"]).upper()
     now_et = now or datetime.now(ET)
 
+    is_launch = _is_launch_row(row)
     passed, gates, reasons = evaluate_entry_gates(
         queue_row_as_candidate(row),
         regime_bull=regime_bull,
-        require_rth_window=not dry_run,
+        require_rth_window=not dry_run and not is_launch,
         now=now_et,
     )
     if not passed:
@@ -308,9 +317,16 @@ def run_pass(*, dry_run: bool = False) -> dict[str, Any]:
     if not watching:
         return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
 
+    launch_rows = [r for r in watching if _is_launch_row(r)]
     if not is_entry_window(now) and not dry_run:
-        print("Outside entry window (09:35-14:00 ET) — skip confirmation")
-        return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
+        if not launch_rows:
+            print("Outside entry window (09:35-14:00 ET) — skip confirmation")
+            return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
+        watching = launch_rows
+        print(
+            f"Extended/PM — LAUNCH-only pass: "
+            f"{[r['symbol'] for r in watching]}"
+        )
 
     ib: IB | None = None
     if not dry_run:
@@ -358,14 +374,15 @@ def main() -> int:
         print("Loop mode: Ctrl+C to stop")
         while True:
             now = datetime.now(ET)
-            if classify_session(now) != "RTH":
-                wait = 300
-                print(f"  non-RTH — sleeping {wait}s")
+            session = classify_session(now)
+            in_rth = session == "RTH" and now.time() <= dtime(14, 0)
+            if not in_rth:
+                # PM/extended: still poll LAUNCH rows (kill backstop on entry)
+                run_pass(dry_run=args.dry_run)
+                wait = 60 if session in ("PRE", "POST") else 300
+                print(f"  session={session} — sleeping {wait}s")
                 time.sleep(wait)
                 continue
-            if now.time() > dtime(14, 0):
-                print("Past 14:00 ET entry window — exiting loop")
-                break
             run_pass(dry_run=args.dry_run)
             time.sleep(POLL_SEC)
     else:

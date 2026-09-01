@@ -35,6 +35,9 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
 )
 from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
 from tsd_scan_pipeline.tsd_exit import place_tsd_exit, sync_kill_quantity  # noqa: E402
+from tsd_scan_pipeline.tsd_base_break import check_base_break
+from tsd_scan_pipeline.tsd_scan_ibkr import fetch_3h_bars
+from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
     apply_day_structure_rules,
     bootstrap_rth_structure,
@@ -197,6 +200,28 @@ def _process_leg(
             )
         )
         return results
+
+    try:
+        raw_bars = fetch_3h_bars(ib, sym)
+        bars_df = bars_from_ibkr(raw_bars)
+        bars_list = bars_df.reset_index().rename(columns={"index": "time"}).to_dict("records")
+        broke, base_info = check_base_break(bars_list, quote["close"])
+        if broke:
+            print(
+                f"  {sym} base_break_down close={quote['close']:.2f} "
+                f"base_low={base_info.get('base_low') if base_info else '?'}"
+            )
+            results.extend(
+                _exit_all_remaining(
+                    ib, pos, leg_index, leg, sym,
+                    reason="base_break_down",
+                    quote=quote,
+                    dry_run=dry_run,
+                )
+            )
+            return results
+    except Exception as exc:
+        print(f"  {sym} base_break check skipped: {exc}")
 
     structure_stop = leg.get("structure_stop") or trail.get("structure_stop")
     if structure_stop_breached(quote["low"], structure_stop):

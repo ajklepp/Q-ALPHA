@@ -155,9 +155,14 @@ def last_bar_summary(df: pd.DataFrame) -> dict:
     if df.empty:
         return {}
     row = df.iloc[-1]
+    o = float(row["open"]) if "open" in row and pd.notna(row.get("open")) else float(row["close"])
+    c = float(row["close"])
     return {
         "time": str(row.name) if row.name is not None else None,
-        "close": float(row["close"]),
+        "open": o,
+        "high": float(row["high"]) if pd.notna(row.get("high")) else c,
+        "low": float(row["low"]) if pd.notna(row.get("low")) else c,
+        "close": c,
         "wt1": float(row["wt1"]) if pd.notna(row.get("wt1")) else None,
         "wt2": float(row["wt2"]) if pd.notna(row.get("wt2")) else None,
         "trend_strength": float(row["trend_strength"]) if pd.notna(row.get("trend_strength")) else None,
@@ -166,6 +171,7 @@ def last_bar_summary(df: pd.DataFrame) -> dict:
         "buy_signal": bool(row.get("buy_signal", False)),
         "early_bull": bool(row.get("early_bull", False)),
         "near_cross": bool(row.get("near_cross", False)),
+        "signal_bar_red": c < o,
     }
 
 

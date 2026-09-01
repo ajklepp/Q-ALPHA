@@ -38,7 +38,12 @@ from tsd_scan_pipeline.tsd_capacity import (
 from tsd_scan_pipeline.tsd_entry_gates import occupied_symbols
 from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue
 from tsd_scan_pipeline.tsd_profiler import profile_watchlist
-from tsd_scan_pipeline.tsd_signals import SCAN_SCORE_MIN, enrich_tsd, last_bar_summary
+from tsd_scan_pipeline.tsd_launch_score import (
+    LAUNCH_SCAN_MAX,
+    enrich_launch_fields,
+    is_launch_candidate,
+)
+from tsd_scan_pipeline.tsd_signals import enrich_tsd, last_bar_summary
 from tws_scan_pipeline.pipeline import fetch_polygon_mcap  # noqa: E402
 from universe_filter import passes_instrument_safety  # noqa: E402
 
@@ -265,6 +270,7 @@ def evaluate_symbol(
     enriched = enrich_tsd(df)
     summary = last_bar_summary(enriched)
     row.update(summary)
+    row.update(enrich_launch_fields(row))
 
     wt1 = summary.get("wt1")
     wt2 = summary.get("wt2")
@@ -272,16 +278,20 @@ def evaluate_symbol(
         row["wt_gap"] = abs(wt1 - wt2)
         row["near_cross"] = abs(wt1 - wt2) < NEAR_CROSS_THRESHOLD
 
-    if not summary.get("buy_signal"):
-        row["reject_reason"] = "no_fresh_buy"
+    if not (summary.get("buy_signal") or summary.get("early_bull")):
+        row["reject_reason"] = "no_trigger"
+        return row
+
+    if row.get("phase") == "EXTENSION":
+        row["reject_reason"] = "extension_phase"
         return row
 
     score = summary.get("scan_score") or 0
     trend = summary.get("trend_strength") or -999
-    if score < SCAN_SCORE_MIN:
-        row["reject_reason"] = f"scan_score<{SCAN_SCORE_MIN}"
+    if score > LAUNCH_SCAN_MAX and not is_launch_candidate(row):
+        row["reject_reason"] = f"scan_score>{LAUNCH_SCAN_MAX}"
         return row
-    if trend <= 0:
+    if trend <= 0 and not summary.get("early_bull"):
         row["reject_reason"] = "trend_strength<=0"
         return row
 
@@ -305,7 +315,10 @@ def evaluate_symbol(
 
 def rank_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     passed = [r for r in rows if r.get("pass")]
-    passed.sort(key=lambda r: (r.get("scan_score") or 0), reverse=True)
+    # Prefer high launch_score, low scan_score (early move)
+    passed.sort(
+        key=lambda r: (-(r.get("launch_score") or 0), r.get("scan_score") or 99),
+    )
     return passed
 
 
@@ -394,7 +407,7 @@ def run_scan(
     print(f"Open book (TSD): {book_opens}")
     if cross_book != book_opens:
         print(f"Cross-book occupied: {cross_book}")
-    print(f"Filters: BUY cross | score>={SCAN_SCORE_MIN} | trend>0 | mcap>=${MCAP_MIN/1e6:.0f}M")
+    print(f"Filters: BUY/early_bull | LAUNCH phase | scan<={LAUNCH_SCAN_MAX} | trend>0 | mcap>=${MCAP_MIN/1e6:.0f}M")
     if not skip_profiler:
         print("Profiler: watch-10 gate, MIN 30 TSD analogs required")
     else:

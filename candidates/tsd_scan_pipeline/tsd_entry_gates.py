@@ -1,8 +1,8 @@
 """
-Q-ALPHA UTS v2 — shared entry gates (five-gate system, Phase 1).
+Q-ALPHA UTS v2 — shared entry gates (five-gate system).
 
-No order unless all gates pass. Used by watch queue admission and
-future setup_watch_agent entry executor.
+Lane B (LAUNCH): low scan_score + launch_score + early trigger — NOT high scan_score.
+Lane A (gap): fresh cross gates for future gap queue.
 """
 from __future__ import annotations
 
@@ -23,15 +23,19 @@ if str(CANDIDATES_DIR) not in sys.path:
 from state_paths import is_trading_day, state_path
 from tsd_scan_pipeline.tsd_capacity import load_state, open_symbols
 from tsd_scan_pipeline.tsd_entry import classify_session
+from tsd_scan_pipeline.tsd_launch_score import (
+    LAUNCH_SCAN_MAX,
+    LAUNCH_SCORE_MIN,
+    enrich_launch_fields,
+    is_launch_candidate,
+)
 
 ET = pytz.timezone("America/New_York")
 
-# Phase 1 entry gate thresholds
-SCAN_SCORE_ENTRY_MIN = 70.0
 WT_GAP_MIN = 3.0
 ENTRY_WINDOW_START = time(9, 35)
 ENTRY_WINDOW_END = time(14, 0)
-WATCH_TIMEOUT = time(11, 0)  # Phase 3: skip unconfirmed queue rows by 11:00 ET
+WATCH_TIMEOUT = time(11, 0)
 
 
 def is_entry_window(now: datetime | None = None) -> bool:
@@ -68,11 +72,7 @@ def leg_eligible_for_day2_tighten(
     *,
     now: datetime | None = None,
 ) -> bool:
-    """
-    Day-2 structure tighten only after at least one full trading day since entry.
-
-    Skips legs opened on the prior trading day (first RTH session after fill).
-    """
+    """Day-2 structure tighten only after at least one full trading day since entry."""
     day = int(trail_doc.get("trading_day") or 1)
     if day < 2:
         return False
@@ -88,7 +88,6 @@ def leg_eligible_for_day2_tighten(
         opened = opened.astimezone(ET)
 
     now_dt = _as_et(now)
-    # Too fresh if opened on or after the previous trading day
     if opened.date() >= _prior_trading_day(now_dt.date()):
         return False
     return True
@@ -126,11 +125,7 @@ def occupied_symbols() -> set[str]:
 
 
 def fetch_regime_bull(*, polygon_key: str | None = None) -> tuple[bool, str, dict[str, Any]]:
-    """
-    SPY >= SMA50 regime gate via Polygon.
-
-    Returns (is_bull, regime_label, details).
-    """
+    """SPY >= SMA50 regime gate via Polygon."""
     key = polygon_key or os.environ.get("POLYGON_API_KEY", "")
     if not key:
         return False, "NO_KEY", {}
@@ -144,21 +139,84 @@ def fetch_regime_bull(*, polygon_key: str | None = None) -> tuple[bool, str, dic
         return False, f"ERR:{exc}", {}
 
 
-def evaluate_entry_gates(
+def infer_signal_lane(candidate: dict[str, Any]) -> str:
+    """
+    Lane B: LAUNCH / TSD swing (default).
+    Lane A: fresh WT cross (gap-style, future gap queue).
+    """
+    if is_launch_candidate(candidate) or candidate.get("early_bull"):
+        return "B"
+    if candidate.get("buy_signal") and float(candidate.get("wt_gap") or 99) < 15.0:
+        return "A"
+    return "B"
+
+
+def evaluate_launch_gates(
     candidate: dict[str, Any],
     *,
     regime_bull: bool | None = None,
     require_rth_window: bool = False,
     now: datetime | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """
-    Evaluate Phase 1 entry gates for a scan candidate.
+    """Lane B LAUNCH gates — low scan_score, high launch_score, no EXTENSION."""
+    row = enrich_launch_fields(candidate)
+    sym = str(row.get("symbol", "")).upper()
+    phase = row.get("phase", "NEUTRAL")
 
-    Returns (all_passed, gate_map, reject_reasons).
-    """
+    gates: dict[str, bool] = {
+        "launch_score": float(row.get("launch_score") or 0) >= LAUNCH_SCORE_MIN,
+        "scan_score_cap": float(row.get("scan_score") or 99) <= LAUNCH_SCAN_MAX,
+        "trigger": bool(row.get("buy_signal")) or bool(row.get("early_bull")),
+        "not_extension": phase != "EXTENSION",
+        "is_launch": phase == "LAUNCH",
+        "wt_gap": float(row.get("wt_gap") or 0) >= WT_GAP_MIN,
+        "regime": regime_bull is not False,
+        "dedup": sym not in occupied_symbols() if sym else False,
+        "rth_window": is_entry_window(now),
+    }
+    if regime_bull is None:
+        bull, _, _ = fetch_regime_bull()
+        gates["regime"] = bull
+
+    reasons: list[str] = []
+    if phase == "EXTENSION":
+        reasons.append("extension_phase")
+    if not gates["launch_score"]:
+        reasons.append(f"launch_score<{LAUNCH_SCORE_MIN:.0f}")
+    if not gates["scan_score_cap"]:
+        reasons.append(f"scan_score>{LAUNCH_SCAN_MAX:.0f}")
+    if not gates["trigger"]:
+        reasons.append("no_buy_or_early_bull")
+    if not gates["wt_gap"]:
+        reasons.append(f"wt_gap<{WT_GAP_MIN:.0f}")
+    if not gates["regime"]:
+        reasons.append("regime_bear")
+    if not gates["dedup"]:
+        reasons.append("cross_book_occupied")
+    if require_rth_window and not gates["rth_window"]:
+        reasons.append("outside_entry_window")
+
+    core = (
+        "launch_score", "scan_score_cap", "trigger", "not_extension",
+        "wt_gap", "regime", "dedup",
+    )
+    passed = all(gates[k] for k in core)
+    if require_rth_window:
+        passed = passed and gates["rth_window"]
+    return passed, gates, reasons
+
+
+def evaluate_lane_a_gates(
+    candidate: dict[str, Any],
+    *,
+    regime_bull: bool | None = None,
+    require_rth_window: bool = False,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, bool], list[str]]:
+    """Lane A gap-style gates (watch_and_enter port)."""
     sym = str(candidate.get("symbol", "")).upper()
     gates: dict[str, bool] = {
-        "scan_score": float(candidate.get("scan_score") or 0) >= SCAN_SCORE_ENTRY_MIN,
+        "buy_signal": bool(candidate.get("buy_signal")),
         "wt_gap": float(candidate.get("wt_gap") or 0) >= WT_GAP_MIN,
         "regime": regime_bull is not False,
         "dedup": sym not in occupied_symbols() if sym else False,
@@ -169,8 +227,8 @@ def evaluate_entry_gates(
         gates["regime"] = bull
 
     reasons: list[str] = []
-    if not gates["scan_score"]:
-        reasons.append(f"scan_score<{SCAN_SCORE_ENTRY_MIN:.0f}")
+    if not gates["buy_signal"]:
+        reasons.append("no_buy_signal")
     if not gates["wt_gap"]:
         reasons.append(f"wt_gap<{WT_GAP_MIN:.0f}")
     if not gates["regime"]:
@@ -180,11 +238,35 @@ def evaluate_entry_gates(
     if require_rth_window and not gates["rth_window"]:
         reasons.append("outside_entry_window")
 
-    core = ("scan_score", "wt_gap", "regime", "dedup")
+    core = ("buy_signal", "wt_gap", "regime", "dedup")
     passed = all(gates[k] for k in core)
     if require_rth_window:
         passed = passed and gates["rth_window"]
     return passed, gates, reasons
+
+
+def evaluate_entry_gates(
+    candidate: dict[str, Any],
+    *,
+    regime_bull: bool | None = None,
+    require_rth_window: bool = False,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, bool], list[str]]:
+    """Dispatch to Lane A or Lane B (LAUNCH) gate sets."""
+    lane = str(candidate.get("signal_lane") or infer_signal_lane(candidate)).upper()
+    if lane == "A":
+        return evaluate_lane_a_gates(
+            candidate,
+            regime_bull=regime_bull,
+            require_rth_window=require_rth_window,
+            now=now,
+        )
+    return evaluate_launch_gates(
+        candidate,
+        regime_bull=regime_bull,
+        require_rth_window=require_rth_window,
+        now=now,
+    )
 
 
 def is_watch_timeout(now: datetime | None = None) -> bool:
@@ -193,12 +275,3 @@ def is_watch_timeout(now: datetime | None = None) -> bool:
     if dt.weekday() >= 5 or not is_trading_day(dt.date()):
         return False
     return dt.time() >= WATCH_TIMEOUT
-
-
-def infer_signal_lane(candidate: dict[str, Any]) -> str:
-    """
-    Lane A: fresh WT cross (tight wt_gap). Lane B: hold-above-cross swing.
-    """
-    if candidate.get("buy_signal") and float(candidate.get("wt_gap") or 99) < 15.0:
-        return "A"
-    return "B"

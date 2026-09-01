@@ -1,9 +1,9 @@
-"""Unit tests for UTS v2 Phase 1 entry gates."""
+"""Unit tests for UTS v2 LAUNCH entry gates."""
 from __future__ import annotations
 
 import sys
 import unittest
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,7 +12,6 @@ sys.path.insert(0, str(ROOT / "candidates"))
 
 import pytz
 from tsd_scan_pipeline.tsd_entry_gates import (
-    SCAN_SCORE_ENTRY_MIN,
     WT_GAP_MIN,
     evaluate_entry_gates,
     infer_signal_lane,
@@ -21,6 +20,27 @@ from tsd_scan_pipeline.tsd_entry_gates import (
 )
 
 ET = pytz.timezone("America/New_York")
+
+ZIP_LAUNCH = {
+    "symbol": "ZIP",
+    "scan_score": 34.0,
+    "trend_strength": 0.16,
+    "buy_signal": True,
+    "early_bull": False,
+    "close": 4.245,
+    "open": 4.30,
+    "wt_gap": 5.0,
+}
+
+WEAV_EXT = {
+    "symbol": "WEAV",
+    "scan_score": 77.99,
+    "trend_strength": 0.67,
+    "buy_signal": True,
+    "early_bull": False,
+    "close": 7.31,
+    "wt_gap": 5.0,
+}
 
 
 class TestEntryWindow(unittest.TestCase):
@@ -39,43 +59,52 @@ class TestEntryWindow(unittest.TestCase):
 
 class TestEvaluateGates(unittest.TestCase):
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_passes_all_core_gates(self, _occ):
-        cand = {"symbol": "WEAV", "scan_score": 75, "wt_gap": 5.0, "close": 7.31}
-        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True)
+    def test_launch_passes(self, _occ):
+        passed, gates, reasons = evaluate_entry_gates(ZIP_LAUNCH, regime_bull=True)
         self.assertTrue(passed)
-        self.assertTrue(gates["scan_score"])
-        self.assertTrue(gates["wt_gap"])
+        self.assertTrue(gates["launch_score"])
+        self.assertTrue(gates["scan_score_cap"])
+        self.assertTrue(gates["trigger"])
+        self.assertTrue(gates["not_extension"])
         self.assertEqual(reasons, [])
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_rejects_low_score(self, _occ):
-        cand = {"symbol": "X", "scan_score": 65, "wt_gap": 5.0}
+    def test_rejects_extension_weav(self, _occ):
+        passed, gates, reasons = evaluate_entry_gates(WEAV_EXT, regime_bull=True)
+        self.assertFalse(passed)
+        self.assertFalse(gates["not_extension"])
+        self.assertIn("extension_phase", reasons)
+
+    @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
+    def test_rejects_high_scan_score(self, _occ):
+        cand = {**ZIP_LAUNCH, "scan_score": 60}
         passed, _, reasons = evaluate_entry_gates(cand, regime_bull=True)
         self.assertFalse(passed)
         self.assertTrue(any("scan_score" in r for r in reasons))
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value={"WEAV"})
     def test_rejects_cross_book(self, _occ):
-        cand = {"symbol": "WEAV", "scan_score": 80, "wt_gap": 5.0}
-        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True)
+        passed, gates, reasons = evaluate_entry_gates(WEAV_EXT, regime_bull=True)
         self.assertFalse(passed)
         self.assertFalse(gates["dedup"])
         self.assertIn("cross_book_occupied", reasons)
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_rejects_bear_regime(self, _occ):
-        cand = {"symbol": "X", "scan_score": 80, "wt_gap": 5.0}
-        passed, gates, _ = evaluate_entry_gates(cand, regime_bull=False)
+        passed, gates, _ = evaluate_entry_gates(ZIP_LAUNCH, regime_bull=False)
         self.assertFalse(passed)
         self.assertFalse(gates["regime"])
 
 
 class TestSignalLane(unittest.TestCase):
-    def test_lane_a_fresh_cross(self):
-        self.assertEqual(infer_signal_lane({"buy_signal": True, "wt_gap": 5.0}), "A")
+    def test_lane_b_launch(self):
+        self.assertEqual(infer_signal_lane(ZIP_LAUNCH), "B")
 
-    def test_lane_b_swing(self):
-        self.assertEqual(infer_signal_lane({"buy_signal": False, "wt_gap": 20.0}), "B")
+    def test_lane_a_fresh_cross(self):
+        self.assertEqual(
+            infer_signal_lane({"buy_signal": True, "wt_gap": 5.0, "scan_score": 40}),
+            "A",
+        )
 
 
 class TestDay2Eligibility(unittest.TestCase):

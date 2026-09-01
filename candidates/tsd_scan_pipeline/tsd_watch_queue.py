@@ -26,8 +26,8 @@ from tsd_scan_pipeline.tsd_entry_gates import (
     evaluate_entry_gates,
     fetch_regime_bull,
     infer_signal_lane,
-    occupied_symbols,
 )
+from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
 
 ET = pytz.timezone("America/New_York")
 
@@ -66,8 +66,9 @@ def add_to_watch_queue(
     """
     Admit profiler-pass scan picks to the watch queue (no IBKR orders).
 
-    Applies Phase 1 gates: scan_score>=70, wt_gap>=3, regime BULL, cross-book dedup.
-    RTH 09:35-14:00 is recorded but does not block queue admission (Phase 3 executor).
+    Applies LAUNCH gates: launch_score>=50, scan_score<=55, buy/early_bull,
+    not EXTENSION, wt_gap>=3, regime BULL, cross-book dedup.
+    PM/extended queue admission OK — executor handles session (Phase 3).
     """
     state = load_queue()
     when = scan_at or datetime.now(ET).isoformat()
@@ -78,8 +79,9 @@ def add_to_watch_queue(
 
     for cand in trade_candidates:
         sym = str(cand.get("symbol", "")).upper()
+        enriched = enrich_launch_fields({**cand, "symbol": sym})
         passed, gates, reasons = evaluate_entry_gates(
-            cand, regime_bull=bull, require_rth_window=False,
+            enriched, regime_bull=bull, require_rth_window=False,
         )
 
         if not passed:
@@ -88,24 +90,30 @@ def add_to_watch_queue(
                 "status": "SKIPPED",
                 "reason": ";".join(reasons) or "gate_fail",
                 "gates": gates,
+                "phase": enriched.get("phase"),
             })
-            print(f"  QUEUE SKIP {sym}: {reasons}")
+            print(f"  QUEUE SKIP {sym}: {reasons} phase={enriched.get('phase')}")
             continue
 
         row = {
             "symbol": sym,
-            "signal_lane": infer_signal_lane(cand),
-            "entry_score": float(cand.get("scan_score") or 0),
-            "cross_level": round(float(cand.get("close") or 0), 4),
-            "scan_score": float(cand.get("scan_score") or 0),
-            "wt_gap": float(cand.get("wt_gap") or 0),
+            "signal_lane": infer_signal_lane(enriched),
+            "entry_score": float(enriched.get("launch_score") or 0),
+            "launch_score": float(enriched.get("launch_score") or 0),
+            "phase": enriched.get("phase"),
+            "signal_bar_red": bool(enriched.get("signal_bar_red")),
+            "early_bull": bool(enriched.get("early_bull")),
+            "buy_signal": bool(enriched.get("buy_signal")),
+            "cross_level": round(float(enriched.get("close") or 0), 4),
+            "scan_score": float(enriched.get("scan_score") or 0),
+            "wt_gap": float(enriched.get("wt_gap") or 0),
             "added_at": when,
             "status": "WATCHING",
             "gates": gates,
             "regime": regime_label,
-            "kill_pct": cand.get("kill_pct"),
-            "close": cand.get("close"),
-            "tsd_profile": cand.get("tsd_profile"),
+            "kill_pct": enriched.get("kill_pct"),
+            "close": enriched.get("close"),
+            "tsd_profile": enriched.get("tsd_profile"),
             "scan_at": when,
         }
 
@@ -129,7 +137,8 @@ def add_to_watch_queue(
         results.append({"symbol": sym, "status": action, "lane": row["signal_lane"], "gates": gates})
         print(
             f"  QUEUE {action} {sym} lane={row['signal_lane']} "
-            f"score={row['scan_score']:.1f} wt_gap={row['wt_gap']:.1f} "
+            f"phase={row['phase']} launch={row['launch_score']:.0f} "
+            f"scan={row['scan_score']:.1f} wt_gap={row['wt_gap']:.1f} "
             f"cross={row['cross_level']}"
         )
 
@@ -206,7 +215,13 @@ def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
     """Convert a queue row to execute_live_entries candidate dict."""
     return {
         "symbol": str(row["symbol"]).upper(),
-        "scan_score": float(row.get("scan_score") or row.get("entry_score") or 0),
+        "signal_lane": row.get("signal_lane"),
+        "scan_score": float(row.get("scan_score") or 0),
+        "launch_score": float(row.get("launch_score") or row.get("entry_score") or 0),
+        "phase": row.get("phase"),
+        "buy_signal": bool(row.get("buy_signal")),
+        "early_bull": bool(row.get("early_bull")),
+        "signal_bar_red": bool(row.get("signal_bar_red")),
         "wt_gap": float(row.get("wt_gap") or 0),
         "close": float(row.get("close") or row.get("cross_level") or 0),
         "kill_pct": row.get("kill_pct"),
