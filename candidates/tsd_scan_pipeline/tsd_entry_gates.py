@@ -31,6 +31,7 @@ SCAN_SCORE_ENTRY_MIN = 70.0
 WT_GAP_MIN = 3.0
 ENTRY_WINDOW_START = time(9, 35)
 ENTRY_WINDOW_END = time(14, 0)
+WATCH_TIMEOUT = time(11, 0)  # Phase 3: skip unconfirmed queue rows by 11:00 ET
 
 
 def is_entry_window(now: datetime | None = None) -> bool:
@@ -184,6 +185,14 @@ def evaluate_entry_gates(
     if require_rth_window:
         passed = passed and gates["rth_window"]
     return passed, gates, reasons
+
+
+def is_watch_timeout(now: datetime | None = None) -> bool:
+    """True when ET is at or past the 11:00 confirmation deadline."""
+    dt = _as_et(now)
+    if dt.weekday() >= 5 or not is_trading_day(dt.date()):
+        return False
+    return dt.time() >= WATCH_TIMEOUT
 
 
 def infer_signal_lane(candidate: dict[str, Any]) -> str:

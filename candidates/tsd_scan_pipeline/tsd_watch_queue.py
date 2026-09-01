@@ -193,6 +193,55 @@ def execute_live_entries(
     return results
 
 
+def get_watching_rows() -> list[dict[str, Any]]:
+    """Return queue rows with status WATCHING."""
+    return [
+        dict(r)
+        for r in load_queue().get("queue") or []
+        if str(r.get("status", "")).upper() == "WATCHING"
+    ]
+
+
+def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a queue row to execute_live_entries candidate dict."""
+    return {
+        "symbol": str(row["symbol"]).upper(),
+        "scan_score": float(row.get("scan_score") or row.get("entry_score") or 0),
+        "wt_gap": float(row.get("wt_gap") or 0),
+        "close": float(row.get("close") or row.get("cross_level") or 0),
+        "kill_pct": row.get("kill_pct"),
+        "tsd_profile": row.get("tsd_profile"),
+    }
+
+
+def update_queue_row(
+    symbol: str,
+    *,
+    status: WatchStatus | None = None,
+    reason: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> bool:
+    """Update a queue row by symbol. Returns True if found."""
+    state = load_queue()
+    idx = _queue_index(state, symbol)
+    if idx is None:
+        return False
+    row = state["queue"][idx]
+    if status is not None:
+        row["status"] = status
+    if reason is not None:
+        row["skip_reason"] = reason
+    if status == "CONFIRMED":
+        row["confirmed_at"] = datetime.now(ET).isoformat()
+    if status == "SKIPPED":
+        row["skipped_at"] = datetime.now(ET).isoformat()
+    if extra:
+        row.update(extra)
+    state["queue"][idx] = row
+    save_queue(state)
+    return True
+
+
 def watching_symbols() -> list[str]:
     """Symbols currently WATCHING in the queue."""
     state = load_queue()

@@ -14,9 +14,10 @@ $ErrorActionPreference = "Continue"
 $CandDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SchedPs1 = Join-Path $CandDir "start_tsd_scheduler_scheduled.ps1"
 $TrailPs1 = Join-Path $CandDir "start_tsd_trail_monitor_scheduled.ps1"
+$WatchPs1 = Join-Path $CandDir "start_setup_watch_scheduled.ps1"
 $WeeklyPs1 = Join-Path $CandDir "start_tsd_weekly_reports_scheduled.ps1"
 
-foreach ($p in @($SchedPs1, $TrailPs1, $WeeklyPs1)) {
+foreach ($p in @($SchedPs1, $TrailPs1, $WatchPs1, $WeeklyPs1)) {
     if (-not (Test-Path -LiteralPath $p)) {
         Write-Error "Missing: $p"
         exit 1
@@ -25,6 +26,7 @@ foreach ($p in @($SchedPs1, $TrailPs1, $WeeklyPs1)) {
 
 $trSched = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SchedPs1"
 $trTrail = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TrailPs1"
+$trWatch = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WatchPs1"
 $trWeekly = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WeeklyPs1"
 
 $results = @{}
@@ -38,13 +40,17 @@ $results["QAlpha TSD Scheduler"] = ($LASTEXITCODE -eq 0)
 schtasks /Create /F /TN "QAlpha TSD Trail Monitor" /TR $trTrail /SC DAILY /ST 04:00 /RL LIMITED
 $results["QAlpha TSD Trail Monitor"] = ($LASTEXITCODE -eq 0)
 
+# Setup watch agent — RTH 30s loop, confirm queue then enter (09:35-14:00 ET)
+schtasks /Create /F /TN "QAlpha TSD Setup Watch" /TR $trWatch /SC DAILY /ST 09:30 /RL LIMITED
+$results["QAlpha TSD Setup Watch"] = ($LASTEXITCODE -eq 0)
+
 # Weekly scorecard + options study — Friday 5:00 PM local (= ET on this PC)
 schtasks /Create /F /TN "QAlpha TSD Weekly Reports" /TR $trWeekly /SC WEEKLY /D FRI /ST 17:00 /RL LIMITED
 $results["QAlpha TSD Weekly Reports"] = ($LASTEXITCODE -eq 0)
 
 Write-Host ""
 Write-Host "Results:"
-foreach ($name in @("QAlpha TSD Scheduler", "QAlpha TSD Trail Monitor", "QAlpha TSD Weekly Reports")) {
+foreach ($name in @("QAlpha TSD Scheduler", "QAlpha TSD Trail Monitor", "QAlpha TSD Setup Watch", "QAlpha TSD Weekly Reports")) {
     $status = if ($results[$name]) { "OK" } else { "FAILED" }
     Write-Host "  $name : $status"
 }
@@ -61,6 +67,7 @@ Write-Host "  schtasks /Query /TN `"QAlpha TSD Weekly Reports`" /V /FO LIST"
 Write-Host ""
 Write-Host "Logs: candidates\logs\tsd_scheduler_YYYY-MM-DD.log"
 Write-Host "      candidates\logs\tsd_trail_YYYY-MM-DD.log"
+Write-Host "      candidates\logs\setup_watch_YYYY-MM-DD.log"
 Write-Host "      candidates\logs\tsd_weekly_reports_YYYY-MM-DD.log"
 Write-Host ""
 Write-Host "Weekly outputs: candidates\tsd_scan_pipeline\results\scorecard_*.md"
