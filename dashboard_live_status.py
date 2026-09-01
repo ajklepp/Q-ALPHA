@@ -14,12 +14,18 @@ import streamlit as st
 
 from dashboard_theme import MUTED, NEGATIVE, POSITIVE, ACCENT, BG, BORDER, TEXT, regime_banner, section_header
 from dashboard_tsd_helpers import (
+    build_tranche_table_rows,
+    distance_from_current,
     format_gate_summary,
+    format_level,
+    hold_time_display,
     map_exit_layer,
     mfe_in_r,
+    next_trail_stop,
     parse_tranche_json,
     progress_fraction,
     progress_milestones,
+    progress_tick_labels,
 )
 
 TSD_STARTING_POOL = 3000.0
@@ -228,57 +234,59 @@ def _render_tsd_open_card(row: dict) -> None:
         mfe_label = f"{_safe_float(mfe_r, 0):.1f}R MFE" if mfe_r is not None else "—"
         st.metric("P&L", f"${pnl_dollars:+.2f}", f"{shares} sh · {mfe_label}")
 
-    # Row 2: three stop metrics
+    # Row 2: three stop metrics — price + % from entry, delta from current
     s1, s2, s3 = st.columns(3)
     with s1:
-        if kill_price > 0 and current_price <= kill_price:
-            k_delta = "AT / below kill"
-        elif kill_price > 0:
-            k_delta = f"{(current_price - kill_price) / current_price:.1%} above"
+        if kill_price > 0:
+            k_primary = format_level(kill_price, entry_price)
+            if current_price <= kill_price:
+                k_delta = "AT / below kill"
+            else:
+                k_delta = distance_from_current(kill_price, current_price, label="kill")
+            st.metric("Kill", k_primary, k_delta)
         else:
-            k_delta = "—"
-        st.metric("Kill", f"${kill_price:.2f}" if kill_price else "—", k_delta)
+            st.metric("Kill", "—", "—")
     with s2:
         if math.isfinite(structure_stop) and structure_stop > 0:
-            reason = str(row.get("structure_stop_reason") or "")
+            s_primary = format_level(structure_stop, entry_price)
             if current_price <= structure_stop:
                 st_delta = "BREACHED"
             else:
-                st_delta = f"{(current_price - structure_stop) / current_price:.1%} above"
+                st_delta = distance_from_current(
+                    structure_stop, current_price, label="structure",
+                )
+            reason = str(row.get("structure_stop_reason") or "")
             if reason:
                 st_delta += f" ({reason})"
-            st.metric("Structure", f"${structure_stop:.2f}", st_delta)
+            st.metric("Structure", s_primary, st_delta)
         else:
             st.metric("Structure", "—", "pending bootstrap")
     with s3:
-        if math.isfinite(next_trail) and next_trail > 0:
-            st.metric("Trail stop", f"${next_trail:.2f}", "nearest armed tranche")
+        raw_tranches = parse_tranche_json(row.get("tranche_json"))
+        nxt = next_trail_stop(raw_tranches) if raw_tranches else None
+        if nxt is None and math.isfinite(next_trail) and next_trail > 0:
+            nxt = next_trail
+        if nxt is not None and nxt > 0:
+            t_primary = format_level(nxt, entry_price)
+            t_delta = distance_from_current(nxt, current_price, label="trail")
+            st.metric("Trail stop", t_primary, t_delta)
         else:
             st.metric("Trail stop", "—", "no tranche armed")
 
     # Row 3: T1–T4 mini table
     tranches = parse_tranche_json(row.get("tranche_json"))
     if tranches:
-        tbl = []
-        for t in tranches:
-            armed = "✓" if t.get("armed") else ("—" if not t.get("closed") else "closed")
-            trig = t.get("trigger_price")
-            tstop = t.get("trail_stop")
-            tbl.append({
-                "ID": t.get("id"),
-                "Sh": t.get("shares"),
-                "Trigger": f"${_safe_float(trig, 0):.2f}" if trig else "—",
-                "Armed": armed,
-                "Trail $": f"${_safe_float(tstop, 0):.2f}" if tstop else "—",
-            })
+        tbl = build_tranche_table_rows(
+            tranches, entry=entry_price, current=current_price,
+        )
         st.dataframe(pd.DataFrame(tbl), hide_index=True, use_container_width=True)
 
-    # Progress: entry → structure → T1 → T2
+    # Progress: Kill → Structure → Entry → T1 → T2 tick labels
     milestones = progress_milestones(row)
     if milestones:
         frac = progress_fraction(current_price, milestones)
-        labels = " → ".join(f"{n} ${p:.2f}" for n, p in milestones)
-        st.progress(frac, text=f"{labels} · now ${current_price:.2f}")
+        ticks = progress_tick_labels(row)
+        st.progress(frac, text=f"{ticks} · now ${current_price:.2f}")
     hhmm = _updated_hhmm_et(row.get("last_updated"))
     bar_ts = str(row.get("last_bar_time") or "")[:19]
     cap = f"Updated: {hhmm} ET" if hhmm else "Updated: —"
@@ -526,30 +534,38 @@ def render_tsd_trade_log(
             st.info("No closed TSD legs yet.")
         else:
             log = pd.DataFrame(closed)
-            log["Date"] = log["entry_date"]
             log["Ticker"] = log["symbol"]
-            log["Entry"] = log["entry_price"]
-            log["Exit"] = log["exit_price"]
-            log["P&L$"] = log["pnl_dollars"]
-            log["P&L%"] = log["pnl_pct"]
+            log["Entry"] = log["entry_price"].apply(
+                lambda x: f"${_safe_float(x, 0):.2f}" if x is not None else "—"
+            )
+            log["Exit"] = log["exit_price"].apply(
+                lambda x: f"${_safe_float(x, 0):.2f}" if x is not None else "—"
+            )
+            log["P&L%"] = log["pnl_pct"].apply(
+                lambda x: f"{_safe_float(x, 0):+.1%}" if x is not None else "—"
+            )
+            log["Exit%"] = log.apply(
+                lambda r: (
+                    f"{((_safe_float(r['exit_price'], 0) - _safe_float(r['entry_price'], 0)) / _safe_float(r['entry_price'], 1)):+.1%}"
+                    if _safe_float(r.get("entry_price"), 0) > 0
+                    and r.get("exit_price") is not None
+                    else "—"
+                ),
+                axis=1,
+            )
+            log["Hold"] = log.apply(
+                lambda r: hold_time_display(
+                    r.get("leg_opened_at"), r.get("closed_at"),
+                ),
+                axis=1,
+            )
             log["Layer"] = log.apply(
                 lambda r: r.get("exit_layer") or map_exit_layer(r.get("exit_reason")),
                 axis=1,
             )
-            log["Reason"] = log["exit_reason"]
-            if "launch_score" in log.columns:
-                log["Launch"] = log["launch_score"]
-            if "phase" in log.columns:
-                log["Phase"] = log["phase"]
-            cols = [
-                c for c in [
-                    "Date", "Ticker", "Entry", "Exit", "P&L$", "P&L%",
-                    "Layer", "Launch", "Phase", "Reason",
-                ]
-                if c in log.columns
-            ]
-            show = log[cols]
-            styled = show.style.map(style_pnl_fn, subset=["P&L$", "P&L%"])
+            cols = ["Ticker", "Entry", "Exit", "P&L%", "Exit%", "Hold", "Layer"]
+            show = log[[c for c in cols if c in log.columns]]
+            styled = show.style.map(style_pnl_fn, subset=["P&L%", "Exit%"])
             st.dataframe(styled, use_container_width=True, hide_index=True)
 
 

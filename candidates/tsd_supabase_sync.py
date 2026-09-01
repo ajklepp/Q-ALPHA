@@ -96,6 +96,8 @@ def _serialize_tranches(trail: dict[str, Any]) -> list[dict[str, Any]]:
             "id": t.get("id"),
             "shares": t.get("shares"),
             "trigger_price": _finite(t.get("trigger_price")),
+            "trail_pct": _finite(t.get("trail_pct")),
+            "run_high": _finite(t.get("run_high")),
             "armed": armed,
             "trail_stop": stop,
             "closed": bool(t.get("closed")),
