@@ -73,6 +73,14 @@ def add_to_watch_queue(
     """
     state = load_queue()
     when = scan_at or datetime.now(ET).isoformat()
+    try:
+        gate_now = datetime.fromisoformat(when)
+        if gate_now.tzinfo is None:
+            gate_now = ET.localize(gate_now)
+        else:
+            gate_now = gate_now.astimezone(ET)
+    except (TypeError, ValueError):
+        gate_now = datetime.now(ET)
     bull, regime_label, regime_detail = fetch_regime_bull(polygon_key=polygon_key)
     results: list[dict[str, Any]] = []
 
@@ -85,6 +93,7 @@ def add_to_watch_queue(
             enriched,
             regime_bull=bull,
             require_rth_window=False,
+            now=gate_now,
             polygon_key=polygon_key,
         )
 
@@ -242,12 +251,18 @@ def execute_live_entries(
 
 
 def get_watching_rows() -> list[dict[str, Any]]:
-    """Return queue rows with status WATCHING."""
-    return [
+    """Return WATCHING rows sorted by combined HTF+launch rank (highest first)."""
+    rows = [
         dict(r)
         for r in load_queue().get("queue") or []
         if str(r.get("status", "")).upper() == "WATCHING"
     ]
+    rows.sort(
+        key=lambda r: -float(
+            r.get("combined_rank_score") or r.get("launch_score") or 0
+        ),
+    )
+    return rows
 
 
 def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:

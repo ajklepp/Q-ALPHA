@@ -24,6 +24,7 @@ from state_paths import is_trading_day, state_path
 from tsd_scan_pipeline.tsd_capacity import load_state, open_symbols
 from tsd_scan_pipeline.tsd_entry import classify_session
 from tsd_scan_pipeline.tsd_htf_gates import evaluate_htf_daily_gates
+from tsd_scan_pipeline.tsd_1h_signal import evaluate_1h_buy_signal
 from tsd_scan_pipeline.tsd_launch_score import (
     enrich_launch_fields,
     is_launch_candidate,
@@ -141,10 +142,13 @@ def evaluate_launch_gates(
     htf_pass, htf_gates, htf_reasons, htf_score = evaluate_htf_daily_gates(
         row, polygon_key=polygon_key,
     )
+    htf_1h_ok, _htf_1h_meta = evaluate_1h_buy_signal(row, polygon_key=polygon_key)
     row["htf_score"] = htf_score
+    row["htf_1h_buy_signal"] = htf_1h_ok
 
     gates: dict[str, bool] = {
         "buy_signal": bool(row.get("buy_signal")),
+        "htf_1h_buy": htf_1h_ok,
         "launch_candidate": is_launch_candidate(row),
         "signal_bar_red": bool(row.get("signal_bar_red")),
         "not_extension": phase != "EXTENSION",
@@ -164,6 +168,8 @@ def evaluate_launch_gates(
         reasons.append("extension_phase")
     if not gates["buy_signal"]:
         reasons.append("no_buy_signal")
+    if not gates["htf_1h_buy"]:
+        reasons.append("no_1h_buy_signal")
     if not gates["launch_candidate"]:
         reasons.append("not_launch_candidate")
     if not gates["signal_bar_red"]:
@@ -178,6 +184,7 @@ def evaluate_launch_gates(
 
     core = (
         "buy_signal",
+        "htf_1h_buy",
         "launch_candidate",
         "signal_bar_red",
         "not_extension",

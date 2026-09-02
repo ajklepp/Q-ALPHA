@@ -179,8 +179,12 @@ def progress_milestones(row: dict[str, Any]) -> list[tuple[str, float]]:
 
     named: list[tuple[str, float]] = []
     kill = _sf(row.get("kill_price"), 0.0)
+    kill_pct = _sf(row.get("kill_pct"), 0.0)
     if kill > 0:
         named.append(("Kill", kill))
+    if entry > 0 and kill_pct > 0 and not row.get("one_r_locked"):
+        one_r = round(entry * (1.0 + kill_pct), 4)
+        named.append(("+1R", one_r))
     structure = _sf(row.get("structure_stop"), float("nan"))
     if math.isfinite(structure) and structure > 0:
         named.append(("Structure", structure))
@@ -291,6 +295,8 @@ def map_exit_layer(reason: str | None) -> str:
             "structure",
             "orb",
             "day3",
+            "day5",
+            "thesis_fail",
             "base_break",
             "breakeven",
             "thesis",

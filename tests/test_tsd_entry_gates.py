@@ -39,6 +39,7 @@ ZIP_LAUNCH = {
     "htf_range_20d_pct": 0.35,
     "htf_close_above_sma50": True,
     "htf_sma20_rising": True,
+    "htf_1h_buy_signal": True,
 }
 
 WEAV_EXT = {

@@ -174,6 +174,7 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "structure_stop": _finite(leg.get("structure_stop")),
                     "rth_armed": bool(leg.get("rth_armed")),
                     "structure_stop_reason": leg.get("structure_stop_reason"),
+                    "one_r_locked": bool(leg.get("one_r_locked")),
                     "breakeven_locked": bool(leg.get("breakeven_locked")),
                     "tranche_json": tranche_rows,
                     "t1_trigger_price": t1_trigger,

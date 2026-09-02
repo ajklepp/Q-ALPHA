@@ -261,6 +261,8 @@ def _render_tsd_open_card(row: dict) -> None:
             st.metric("Structure", s_primary, st_delta)
         else:
             st.metric("Structure", "—", "KILL ONLY until +1R")
+            if str(row.get("structure_stop_reason") or "") == "kill_only_until_1r":
+                st.caption("Layer 2 inactive until price touches +1R")
     with s3:
         raw_tranches = parse_tranche_json(row.get("tranche_json"))
         nxt = next_trail_stop(raw_tranches) if raw_tranches else None

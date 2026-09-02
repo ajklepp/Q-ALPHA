@@ -55,7 +55,7 @@ TWS_CLIENT_ID = 93
 
 MCAP_MIN = 300_000_000
 WATCH_TOP_N = 10
-TRADE_TOP_N = 3
+TRADE_TOP_N = 2
 NEAR_CROSS_THRESHOLD = 15.0
 PACING_SEC = 2.5
 HIST_DURATION = bar_count_for_lookback(60)
@@ -455,7 +455,7 @@ def run_scan(
 
     queue_results: list[dict[str, Any]] = []
     if live and trade:
-        print("\n--- WATCH QUEUE (top 3 profiler-pass, gate-filtered — no direct entries) ---")
+        print("\n--- WATCH QUEUE (top 2 profiler-pass, gate-filtered — no direct entries) ---")
         queue_results = add_to_watch_queue(
             trade, scan_at=now_et.isoformat(), polygon_key=polygon_key,
         )
@@ -506,7 +506,7 @@ def run_scan(
     else:
         print("\nWATCH top 10: (none - no fresh BUY passed filters on last 3H bar)")
     if trade and not live:
-        print("\nTRADE top 3 (dry-run - use --live to add to watch queue):")
+        print("\nTRADE top 2 (dry-run - use --live to add to watch queue):")
         for r in trade:
             print(f"  {r['symbol']:<6} score={r.get('scan_score')} kill={r.get('kill_pct', 'n/a')}")
     print("=" * 64)

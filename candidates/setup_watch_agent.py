@@ -24,7 +24,7 @@ ROOT = CANDIDATES_DIR.parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
-from setup_watch_confirmation import SessionQuote, compute_rvol, confirm_setup
+from setup_watch_confirmation import SessionQuote, build_session_quote, compute_rvol
 from tsd_scan_pipeline.tsd_capacity import load_state, save_state
 from tsd_scan_pipeline.tsd_entry import classify_session
 from tsd_scan_pipeline.tsd_entry_gates import (
@@ -242,11 +242,10 @@ def process_watching_row(
     sym = str(row["symbol"]).upper()
     now_et = now or datetime.now(ET)
 
-    is_launch = _is_launch_row(row)
     passed, gates, reasons = evaluate_entry_gates(
         queue_row_as_candidate(row),
         regime_bull=regime_bull,
-        require_rth_window=not dry_run and not is_launch,
+        require_rth_window=not dry_run,
         now=now_et,
     )
     if not passed:
@@ -262,17 +261,7 @@ def process_watching_row(
             if quote is None:
                 return {"symbol": sym, "status": "WAIT", "reason": "bars_unavailable"}
 
-    ok, confirm_reason = True, "htf_launch_direct"
-    if str(row.get("signal_lane", "B")).upper() == "A":
-        ok, confirm_reason = confirm_setup(row, quote)
-    if not ok:
-        return {
-            "symbol": sym,
-            "status": "WATCHING",
-            "reason": confirm_reason,
-            "price": quote.price,
-            "rvol": round(quote.rvol, 2),
-        }
+    confirm_reason = "htf_launch_direct"
 
     if dry_run:
         return {
@@ -319,16 +308,9 @@ def run_pass(*, dry_run: bool = False) -> dict[str, Any]:
     if not watching:
         return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
 
-    launch_rows = [r for r in watching if _is_launch_row(r)]
     if not is_entry_window(now) and not dry_run:
-        if not launch_rows:
-            print("Outside entry window (09:35-15:00 ET) — skip confirmation")
-            return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
-        watching = launch_rows
-        print(
-            f"Extended/PM — LAUNCH-only pass: "
-            f"{[r['symbol'] for r in watching]}"
-        )
+        print("Outside entry window (09:35-15:00 ET) — skip entries")
+        return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
 
     ib: IB | None = None
     if not dry_run:

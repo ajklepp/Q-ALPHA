@@ -3,7 +3,7 @@ Q-ALPHA TSD pipeline — profiler v2 (3HR swing analogs).
 
 Historical analog definition:
   - 3H TSD BUY cross fired (IBKR-aligned bars preferred)
-  - scan_score >= 60, trend_strength > 0 at signal bar
+  - Phase 2.5 LAUNCH lane: buy_signal + launch_score>=50 + scan<=55, not EXTENSION
 
 MINIMUM 30 analog instances to trade — INSUFFICIENT = skip entirely.
 
@@ -174,13 +174,34 @@ def _bars_3h_for_profiler(
 
 
 def _extract_analogs(enriched: pd.DataFrame) -> list[dict[str, Any]]:
+    """Launch-lane analogs: buy_signal on bar (no scan_score>=60 floor)."""
+    from tsd_scan_pipeline.tsd_launch_score import (
+        LAUNCH_SCAN_MAX,
+        LAUNCH_SCORE_MIN,
+        compute_launch_phase,
+        compute_launch_score,
+        signal_bar_red,
+    )
+
     analogs: list[dict[str, Any]] = []
     for ts, row in enriched.iterrows():
         if not bool(row.get("buy_signal")):
             continue
         score = float(row.get("scan_score") or 0)
         trend = float(row.get("trend_strength") or -999)
-        if score < SCAN_SCORE_MIN or trend <= 0:
+        bar = {
+            "scan_score": score,
+            "trend_strength": trend,
+            "buy_signal": True,
+            "early_bull": bool(row.get("early_bull")),
+            "open": float(row.get("open") or row["close"]),
+            "close": float(row["close"]),
+        }
+        phase = compute_launch_phase(bar)
+        if phase == "EXTENSION":
+            continue
+        launch_score = compute_launch_score(bar)
+        if launch_score < LAUNCH_SCORE_MIN or score > LAUNCH_SCAN_MAX:
             continue
         analogs.append(
             {
@@ -189,6 +210,8 @@ def _extract_analogs(enriched: pd.DataFrame) -> list[dict[str, Any]]:
                 "close": float(row["close"]),
                 "scan_score": score,
                 "trend_strength": trend,
+                "launch_score": launch_score,
+                "signal_bar_red": signal_bar_red(bar),
                 "wt1": float(row["wt1"]),
                 "wt2": float(row["wt2"]),
             }

@@ -1,12 +1,18 @@
 """Unit tests for UTS v2 LAUNCH watch queue."""
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "candidates"))
@@ -19,12 +25,16 @@ ZIP_LAUNCH = {
     "trend_strength": 0.16,
     "buy_signal": True,
     "early_bull": False,
-    "close": 5.25,
-    "open": 5.30,
+    "close": 4.245,
+    "open": 4.30,
     "wt_gap": 5.1,
     "kill_pct": 0.08,
     "market_cap": 500_000_000,
     "tsd_profile": {"analog_count": 42, "analog_win_rate": 52.4},
+    "htf_range_20d_pct": 0.35,
+    "htf_close_above_sma50": True,
+    "htf_sma20_rising": True,
+    "htf_1h_buy_signal": True,
 }
 
 
@@ -92,8 +102,8 @@ class TestWatchQueue(unittest.TestCase):
 
     @patch("tsd_scan_pipeline.tsd_watch_queue.fetch_regime_bull", return_value=(True, "BULL", {}))
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_skip_low_wt_gap(self, _occ, _reg):
-        cand = {**ZIP_LAUNCH, "wt_gap": 1.0}
+    def test_skip_htf_fail(self, _occ, _reg):
+        cand = {**ZIP_LAUNCH, "htf_close_above_sma50": False}
         results = wq.add_to_watch_queue([cand])
         self.assertEqual(results[0]["status"], "SKIPPED")
         state = json.loads(self._queue_path.read_text(encoding="utf-8"))
