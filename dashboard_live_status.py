@@ -337,48 +337,62 @@ def render_live_status_tab(
         full_slots = len({r.get("symbol") for r in tsd_rows if not r.get("t4_only")})
     open_names = int(tsd_pool.get("open_names") or len({r.get("symbol") for r in tsd_rows}))
 
-    mtm_notional = sum(
+    in_market_mtm = sum(
         _safe_float(r.get("current_price"), 0.0) * int(_safe_float(r.get("shares"), 0))
         for r in tsd_rows
     )
-    mtm_total = cash + mtm_notional
-    pnl_dollar = mtm_total - starting
+    total_equity = cash + in_market_mtm
+    realized_pnl = sum(_safe_float(r.get("pnl_dollars"), 0.0) for r in tsd_closed)
+    unrealized_pnl = sum(_safe_float(r.get("pnl_dollars"), 0.0) for r in tsd_rows)
+    total_pnl = total_equity - starting
+    total_pnl_pct = (total_pnl / starting * 100.0) if starting > 0 else 0.0
+    reconcile_gap = abs(realized_pnl + unrealized_pnl + starting - total_equity)
     closed_stats = tsd_closed_stats(tsd_closed)
 
     with st.container(border=True):
         section_header("Session KPIs (TSD)", "3HR swing pool — separate from gap runoff")
-        cap = f"TSD pool ${starting:,.0f} start · gap-agent residual book excluded from KPIs"
+        cap = (
+            "Equity = cash + marked positions · realized from closed legs"
+        )
         if not gap_open_df.empty:
             gap_syms = ", ".join(
                 sorted(str(t) for t in gap_open_df.get("ticker", pd.Series(dtype=str)))
             )
             cap += f" · Gap runoff: {len(gap_open_df)} open ({gap_syms})"
         st.caption(cap)
+        if reconcile_gap > 1.0:
+            st.caption(
+                f"⚠ Reconcile gap ${reconcile_gap:,.2f} — "
+                f"run candidates/tsd_scan_pipeline/reconcile_pool.py"
+            )
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
-            st.metric("Pool", f"${cash + deployed:,.2f}", f"${cash:,.0f}/${deployed:,.0f}")
+            st.metric("Cash", f"${cash:,.2f}")
         with col2:
-            st.metric("MTM P&L", f"${mtm_total:,.2f}", f"{pnl_dollar:+.0f}")
+            st.metric("In market (MTM)", f"${in_market_mtm:,.2f}")
         with col3:
-            st.metric("Total Trades", str(closed_stats["total"]), "closed legs")
+            st.metric("Total equity", f"${total_equity:,.2f}")
         with col4:
-            if closed_stats["total"]:
-                wr = closed_stats["win_rate"] or 0.0
-                st.metric(
-                    "Win Rate",
-                    f"{wr:.0%}",
-                    f"{closed_stats['winners']}W / {closed_stats['losers']}L",
-                )
-            else:
-                st.metric("Win Rate", "—", "0 closed legs")
-        with col5:
             st.metric(
-                "Full slots",
-                f"{full_slots}/{TSD_MAX_FULL_SLOTS}",
-                f"{TSD_MAX_FULL_SLOTS - full_slots} free",
+                "Total P&L",
+                f"${total_pnl:+,.2f}",
+                f"{total_pnl_pct:+.1f}%",
             )
+        with col5:
+            st.metric("Realized", f"${realized_pnl:+,.2f}")
         with col6:
-            st.metric("Open names", str(open_names), "legs in book")
+            st.metric("Unrealized", f"${unrealized_pnl:+,.2f}")
+        st.caption(
+            f"Deployed (cost basis) ${deployed:,.2f} · "
+            f"{full_slots}/{TSD_MAX_FULL_SLOTS} full slots · "
+            f"{open_names} open names · "
+            f"{closed_stats['total']} closed legs"
+            + (
+                f" · {closed_stats['win_rate']:.0%} win"
+                if closed_stats["total"] and closed_stats["win_rate"] is not None
+                else ""
+            )
+        )
 
     spy_regime = str(tsd_pool.get("spy_regime") or "UNKNOWN").upper()
     vix_regime = str(tsd_pool.get("vix_regime") or "NORMAL")

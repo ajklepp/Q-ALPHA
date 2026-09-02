@@ -146,6 +146,7 @@ def place_tsd_exit(
     shares: int,
     *,
     ref_price: float | None = None,
+    entry_price: float | None = None,
     reason: str = "trail",
 ) -> dict[str, Any]:
     """
@@ -208,7 +209,12 @@ def place_tsd_exit(
             pass
         return {"status": "REJECTED", "reason": "no_fill_timeout", "symbol": sym, "exit_reason": reason}
 
-    release_on_exit(int(filled), avg_fill)
+    release_on_exit(
+        int(filled),
+        avg_fill,
+        entry_price=entry_price,
+        symbol=sym,
+    )
     return {
         "status": "FILLED",
         "symbol": sym,

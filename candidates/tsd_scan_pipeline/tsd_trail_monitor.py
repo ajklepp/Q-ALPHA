@@ -129,13 +129,16 @@ def _exit_all_remaining(
         return []
 
     px = float(quote.get("close") or quote.get("last") or leg.get("price") or 0)
+    entry_px = float((leg.get("trail") or {}).get("entry_price") or leg.get("price") or 0)
     print(f"  {sym} STRUCTURE EXIT {rem}sh @ ~{px:.2f} reason={reason}")
 
     results: list[dict[str, Any]] = []
     if dry_run:
         fill = {"status": "DRY_RUN", "fill_price": px, "shares": rem}
     else:
-        fill = place_tsd_exit(ib, sym, rem, ref_price=px, reason=reason)
+        fill = place_tsd_exit(
+            ib, sym, rem, ref_price=px, entry_price=entry_px, reason=reason,
+        )
 
     record_leg_exit(
         pos,
@@ -254,6 +257,9 @@ def _process_leg(
             f"  {sym} EXIT {ex['tranche_id']}: {ex['shares']}sh "
             f"@ {ex['exit_price']:.2f} reason={ex['reason']}"
         )
+        entry_px = float(
+            (leg.get("trail") or {}).get("entry_price") or leg.get("price") or 0
+        )
         if dry_run:
             fill = {"status": "DRY_RUN", **ex}
         else:
@@ -262,6 +268,7 @@ def _process_leg(
                 sym,
                 int(ex["shares"]),
                 ref_price=float(ex["exit_price"]),
+                entry_price=entry_px,
                 reason=str(ex["reason"]),
             )
         record_leg_exit(
