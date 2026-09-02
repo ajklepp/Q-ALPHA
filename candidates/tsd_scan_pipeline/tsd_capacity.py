@@ -24,8 +24,9 @@ from tsd_scan_pipeline.tsd_structure import init_leg_session_fields
 
 ET = pytz.timezone("America/New_York")
 
-MAX_NEW_ENTRIES_PER_SCAN = 3
-MAX_FULL_SLOTS = 10
+MAX_NEW_ENTRIES_PER_SCAN = 2
+MAX_FULL_SLOTS = 2
+MAX_NEW_ENTRIES_PER_DAY = 2
 MAX_ENTRIES_PER_TICKER = 3
 MAX_ADDONS_PER_TICKER = 2
 
@@ -90,6 +91,18 @@ def open_symbols(state: dict[str, Any]) -> list[str]:
     ]
 
 
+def entries_opened_today(state: dict[str, Any], *, when: datetime | None = None) -> int:
+    """Count legs opened on the current ET calendar day."""
+    today = (when or datetime.now(ET)).astimezone(ET).date().isoformat()
+    count = 0
+    for pos in state.get("positions") or []:
+        for leg in pos.get("legs") or []:
+            leg_time = str(leg.get("time") or "")[:10]
+            if leg_time == today:
+                count += 1
+    return count
+
+
 def can_enter(
     state: dict[str, Any],
     symbol: str,
@@ -103,12 +116,15 @@ def can_enter(
     sym = symbol.upper()
     entries_scan = int(state.get("entries_this_scan") or 0)
     if entries_scan >= MAX_NEW_ENTRIES_PER_SCAN:
-        return False, "scan_cap_3"
+        return False, "scan_cap_2"
+
+    if not is_addon and entries_opened_today(state) >= MAX_NEW_ENTRIES_PER_DAY:
+        return False, "daily_cap_2"
 
     pos = _position(state, sym)
     if pos is None:
         if full_slots_used(state) >= MAX_FULL_SLOTS:
-            return False, "slots_full_10"
+            return False, "slots_full_2"
         return True, "new"
 
     entry_count = int(pos.get("entry_count") or 1)

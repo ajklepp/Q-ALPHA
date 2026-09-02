@@ -1,8 +1,8 @@
 """
-Q-ALPHA UTS v2 — shared entry gates (five-gate system).
+Q-ALPHA UTS v2 Phase 2.5 — strict HTF entry gates.
 
-Lane B (LAUNCH): low scan_score + launch_score + early trigger — NOT high scan_score.
-Lane A (gap): fresh cross gates for future gap queue.
+Lane B (LAUNCH): buy_signal + is_launch_candidate + red signal bar + HTF daily gates.
+SPY regime is dashboard context only — never vetoes entry.
 """
 from __future__ import annotations
 
@@ -23,30 +23,28 @@ if str(CANDIDATES_DIR) not in sys.path:
 from state_paths import is_trading_day, state_path
 from tsd_scan_pipeline.tsd_capacity import load_state, open_symbols
 from tsd_scan_pipeline.tsd_entry import classify_session
+from tsd_scan_pipeline.tsd_htf_gates import evaluate_htf_daily_gates
 from tsd_scan_pipeline.tsd_launch_score import (
-    LAUNCH_SCAN_MAX,
-    LAUNCH_SCORE_MIN,
     enrich_launch_fields,
     is_launch_candidate,
 )
 
 ET = pytz.timezone("America/New_York")
 
-WT_GAP_MIN = 3.0
 ENTRY_WINDOW_START = time(9, 35)
-ENTRY_WINDOW_END = time(14, 0)
+ENTRY_CUTOFF = time(15, 0)  # no new entries at or after 15:00 ET
 WATCH_TIMEOUT = time(11, 0)
 
 
 def is_entry_window(now: datetime | None = None) -> bool:
-    """True when ET is weekday RTH between 09:35 and 14:00 inclusive."""
+    """True when ET is weekday RTH between 09:35 and before 15:00 ET."""
     dt = _as_et(now)
     if dt.weekday() >= 5 or not is_trading_day(dt.date()):
         return False
     if classify_session(dt) != "RTH":
         return False
     t = dt.time()
-    return ENTRY_WINDOW_START <= t <= ENTRY_WINDOW_END
+    return ENTRY_WINDOW_START <= t < ENTRY_CUTOFF
 
 
 def _as_et(now: datetime | None) -> datetime:
@@ -72,25 +70,8 @@ def leg_eligible_for_day2_tighten(
     *,
     now: datetime | None = None,
 ) -> bool:
-    """Day-2 structure tighten only after at least one full trading day since entry."""
-    day = int(trail_doc.get("trading_day") or 1)
-    if day < 2:
-        return False
-
-    opened_raw = leg.get("time") or trail_doc.get("opened_at")
-    if not opened_raw:
-        return False
-
-    opened = datetime.fromisoformat(str(opened_raw))
-    if opened.tzinfo is None:
-        opened = ET.localize(opened)
-    else:
-        opened = opened.astimezone(ET)
-
-    now_dt = _as_et(now)
-    if opened.date() >= _prior_trading_day(now_dt.date()):
-        return False
-    return True
+    """DISABLED — Phase 2.5 removed day-2 structure tighten."""
+    return False
 
 
 def gap_open_symbols() -> set[str]:
@@ -125,7 +106,7 @@ def occupied_symbols() -> set[str]:
 
 
 def fetch_regime_bull(*, polygon_key: str | None = None) -> tuple[bool, str, dict[str, Any]]:
-    """SPY >= SMA50 regime gate via Polygon."""
+    """SPY >= SMA50 — dashboard context only; does not gate entries."""
     key = polygon_key or os.environ.get("POLYGON_API_KEY", "")
     if not key:
         return False, "NO_KEY", {}
@@ -140,14 +121,7 @@ def fetch_regime_bull(*, polygon_key: str | None = None) -> tuple[bool, str, dic
 
 
 def infer_signal_lane(candidate: dict[str, Any]) -> str:
-    """
-    Lane B: LAUNCH / TSD swing (default).
-    Lane A: fresh WT cross (gap-style, future gap queue).
-    """
-    if is_launch_candidate(candidate) or candidate.get("early_bull"):
-        return "B"
-    if candidate.get("buy_signal") and float(candidate.get("wt_gap") or 99) < 15.0:
-        return "A"
+    """Phase 2.5: LAUNCH lane B only for new entries."""
     return "B"
 
 
@@ -157,48 +131,59 @@ def evaluate_launch_gates(
     regime_bull: bool | None = None,
     require_rth_window: bool = False,
     now: datetime | None = None,
+    polygon_key: str | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """Lane B LAUNCH gates — low scan_score, high launch_score, no EXTENSION."""
+    """Strict HTF LAUNCH gates — no scan_score floor, no SPY veto."""
     row = enrich_launch_fields(candidate)
     sym = str(row.get("symbol", "")).upper()
     phase = row.get("phase", "NEUTRAL")
 
+    htf_pass, htf_gates, htf_reasons, htf_score = evaluate_htf_daily_gates(
+        row, polygon_key=polygon_key,
+    )
+    row["htf_score"] = htf_score
+
     gates: dict[str, bool] = {
-        "launch_score": float(row.get("launch_score") or 0) >= LAUNCH_SCORE_MIN,
-        "scan_score_cap": float(row.get("scan_score") or 99) <= LAUNCH_SCAN_MAX,
-        "trigger": bool(row.get("buy_signal")) or bool(row.get("early_bull")),
+        "buy_signal": bool(row.get("buy_signal")),
+        "launch_candidate": is_launch_candidate(row),
+        "signal_bar_red": bool(row.get("signal_bar_red")),
         "not_extension": phase != "EXTENSION",
-        "is_launch": phase == "LAUNCH",
-        "wt_gap": float(row.get("wt_gap") or 0) >= WT_GAP_MIN,
-        "regime": regime_bull is not False,
+        "htf_daily": htf_pass,
         "dedup": sym not in occupied_symbols() if sym else False,
+        "entry_cutoff": _as_et(now).time() < ENTRY_CUTOFF,
         "rth_window": is_entry_window(now),
+        **{f"htf_{k}": v for k, v in htf_gates.items()},
     }
-    if regime_bull is None:
-        bull, _, _ = fetch_regime_bull()
-        gates["regime"] = bull
+    _, regime_label, _ = (
+        fetch_regime_bull(polygon_key=polygon_key) if regime_bull is None else (regime_bull, "CTX", {})
+    )
+    gates["regime_context"] = True  # informational only; label in {regime_label}
 
     reasons: list[str] = []
     if phase == "EXTENSION":
         reasons.append("extension_phase")
-    if not gates["launch_score"]:
-        reasons.append(f"launch_score<{LAUNCH_SCORE_MIN:.0f}")
-    if not gates["scan_score_cap"]:
-        reasons.append(f"scan_score>{LAUNCH_SCAN_MAX:.0f}")
-    if not gates["trigger"]:
-        reasons.append("no_buy_or_early_bull")
-    if not gates["wt_gap"]:
-        reasons.append(f"wt_gap<{WT_GAP_MIN:.0f}")
-    if not gates["regime"]:
-        reasons.append("regime_bear")
+    if not gates["buy_signal"]:
+        reasons.append("no_buy_signal")
+    if not gates["launch_candidate"]:
+        reasons.append("not_launch_candidate")
+    if not gates["signal_bar_red"]:
+        reasons.append("signal_bar_not_red")
+    reasons.extend(htf_reasons)
     if not gates["dedup"]:
         reasons.append("cross_book_occupied")
+    if not gates["entry_cutoff"]:
+        reasons.append("after_15:00_cutoff")
     if require_rth_window and not gates["rth_window"]:
         reasons.append("outside_entry_window")
 
     core = (
-        "launch_score", "scan_score_cap", "trigger", "not_extension",
-        "wt_gap", "regime", "dedup",
+        "buy_signal",
+        "launch_candidate",
+        "signal_bar_red",
+        "not_extension",
+        "htf_daily",
+        "dedup",
+        "entry_cutoff",
     )
     passed = all(gates[k] for k in core)
     if require_rth_window:
@@ -212,37 +197,16 @@ def evaluate_lane_a_gates(
     regime_bull: bool | None = None,
     require_rth_window: bool = False,
     now: datetime | None = None,
+    polygon_key: str | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """Lane A gap-style gates (watch_and_enter port)."""
-    sym = str(candidate.get("symbol", "")).upper()
-    gates: dict[str, bool] = {
-        "buy_signal": bool(candidate.get("buy_signal")),
-        "wt_gap": float(candidate.get("wt_gap") or 0) >= WT_GAP_MIN,
-        "regime": regime_bull is not False,
-        "dedup": sym not in occupied_symbols() if sym else False,
-        "rth_window": is_entry_window(now),
-    }
-    if regime_bull is None:
-        bull, _, _ = fetch_regime_bull()
-        gates["regime"] = bull
-
-    reasons: list[str] = []
-    if not gates["buy_signal"]:
-        reasons.append("no_buy_signal")
-    if not gates["wt_gap"]:
-        reasons.append(f"wt_gap<{WT_GAP_MIN:.0f}")
-    if not gates["regime"]:
-        reasons.append("regime_bear")
-    if not gates["dedup"]:
-        reasons.append("cross_book_occupied")
-    if require_rth_window and not gates["rth_window"]:
-        reasons.append("outside_entry_window")
-
-    core = ("buy_signal", "wt_gap", "regime", "dedup")
-    passed = all(gates[k] for k in core)
-    if require_rth_window:
-        passed = passed and gates["rth_window"]
-    return passed, gates, reasons
+    """Lane A disabled in Phase 2.5 — redirect to LAUNCH gates."""
+    return evaluate_launch_gates(
+        candidate,
+        regime_bull=regime_bull,
+        require_rth_window=require_rth_window,
+        now=now,
+        polygon_key=polygon_key,
+    )
 
 
 def evaluate_entry_gates(
@@ -251,21 +215,15 @@ def evaluate_entry_gates(
     regime_bull: bool | None = None,
     require_rth_window: bool = False,
     now: datetime | None = None,
+    polygon_key: str | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """Dispatch to Lane A or Lane B (LAUNCH) gate sets."""
-    lane = str(candidate.get("signal_lane") or infer_signal_lane(candidate)).upper()
-    if lane == "A":
-        return evaluate_lane_a_gates(
-            candidate,
-            regime_bull=regime_bull,
-            require_rth_window=require_rth_window,
-            now=now,
-        )
+    """Dispatch to strict HTF LAUNCH gates."""
     return evaluate_launch_gates(
         candidate,
         regime_bull=regime_bull,
         require_rth_window=require_rth_window,
         now=now,
+        polygon_key=polygon_key,
     )
 
 

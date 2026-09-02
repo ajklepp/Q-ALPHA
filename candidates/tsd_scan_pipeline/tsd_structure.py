@@ -1,27 +1,30 @@
 """
-Q-ALPHA TSD — RTH structure stop (Layer 2) and ORB bootstrap.
+Q-ALPHA TSD — structure stop (Layer 2) — UTS v2 Phase 2.5 kill-until-1R.
 
 Layer 1: broker kill stop (MAE p75) — never cancelled while shares remain.
-Layer 2: software structure stop armed at RTH open from ORB.
+Layer 2: BE lock only after +1R (entry * (1 + kill_pct)) touched; no ORB arm.
 Layer 3: strategy_a 4-tranche trail (T1–T4).
 """
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import pytz
-from ib_insync import IB, Stock
 
 from tsd_scan_pipeline.tsd_entry import SessionKind, classify_session
 from tsd_scan_pipeline.tsd_trail import (
     any_tranche_trailing,
-    remaining_shares,
     sim_state_from_dict,
 )
 
+if TYPE_CHECKING:
+    from ib_insync import IB
+
 ET = pytz.timezone("America/New_York")
 
+BE_LOCK_PCT = 0.003  # structure_stop = entry * (1 - BE_LOCK_PCT) after +1R
+THESIS_FAIL_DAY = 5
 STRUCTURE_MAX_PCT = 0.03
 STRUCTURE_MIN_PCT = 0.015
 STRUCTURE_LOW_RVOL_MAX_PCT = 0.02
@@ -34,6 +37,16 @@ RTH_CLOSE = time(16, 0)
 RTH_MINUTES = 390
 
 
+def one_r_price(entry: float, kill_pct: float) -> float:
+    """+1R target: entry * (1 + kill_pct)."""
+    return float(entry) * (1.0 + float(kill_pct))
+
+
+def be_lock_price(entry: float) -> float:
+    """Breakeven lock stop after +1R touched."""
+    return round(float(entry) * (1.0 - BE_LOCK_PCT), 2)
+
+
 def compute_structure_stop(
     entry: float,
     orb_low: float,
@@ -43,10 +56,9 @@ def compute_structure_stop(
     max_pct: float = STRUCTURE_MAX_PCT,
 ) -> tuple[float, str]:
     """
-    Compute thesis structure stop between kill and entry.
+    Legacy ORB structure formula (kept for tests / reference).
 
-    candidates = [entry*(1-max), orb_low*(1-buffer), entry*(1-trail_pct)]
-    stop = max(min(candidates), kill+0.01, entry*0.985)
+    Phase 2.5 runtime does NOT arm structure from ORB at RTH open.
     """
     if entry <= 0 or orb_low <= 0:
         raise ValueError("entry and orb_low must be positive")
@@ -90,8 +102,10 @@ def _bar_et(bar) -> datetime:
     return ts.astimezone(ET)
 
 
-def fetch_orb_bars(ib: IB, symbol: str, *, day: date | None = None) -> list:
+def fetch_orb_bars(ib: "IB", symbol: str, *, day: date | None = None) -> list:
     """1-min RTH bars for ORB window (09:30–09:44 ET)."""
+    from ib_insync import Stock
+
     contract = Stock(symbol.upper(), "SMART", "USD")
     ib.qualifyContracts(contract)
     bars = ib.reqHistoricalData(
@@ -116,11 +130,10 @@ def fetch_orb_bars(ib: IB, symbol: str, *, day: date | None = None) -> list:
     return orb
 
 
-def is_low_rvol_day(ib: IB, symbol: str, *, now: datetime | None = None) -> bool:
-    """
-    True when today's session volume is below 50% of expected pace vs 20d avg.
-    Used to tighten structure max from 3% to 2%.
-    """
+def is_low_rvol_day(ib: "IB", symbol: str, *, now: datetime | None = None) -> bool:
+    """True when today's session volume is below 50% of expected pace vs 20d avg."""
+    from ib_insync import Stock
+
     dt = _as_et(now)
     if dt.time() < RTH_BOOTSTRAP_AFTER:
         return False
@@ -147,10 +160,7 @@ def is_low_rvol_day(ib: IB, symbol: str, *, now: datetime | None = None) -> bool
 
     intraday = fetch_orb_bars(ib, symbol, day=dt.date())
     today_vol = sum(float(b.volume or 0) for b in intraday)
-    minutes_elapsed = max(
-        1,
-        (dt.hour - 9) * 60 + dt.minute - 30,
-    )
+    minutes_elapsed = max(1, (dt.hour - 9) * 60 + dt.minute - 30)
     expected = avg_daily * (minutes_elapsed / RTH_MINUTES)
     if expected <= 0:
         return False
@@ -167,6 +177,41 @@ def orb_high_low(orb_bars: list) -> tuple[float, float] | None:
     return max(highs), min(lows)
 
 
+def maybe_arm_be_lock_on_1r(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    quote_high: float,
+) -> bool:
+    """
+    Arm BE structure stop once price touches +1R.
+
+    Until +1R: structure_stop stays None (kill is the only stop).
+    After +1R: structure_stop = entry * 0.997 (BE lock).
+  """
+    if leg.get("one_r_locked"):
+        return False
+
+    entry = float(leg.get("price") or trail_doc.get("entry_price") or 0)
+    kill_pct = float(trail_doc.get("kill_pct") or leg.get("kill_pct") or 0)
+    if entry <= 0 or kill_pct <= 0:
+        return False
+
+    if float(quote_high) < one_r_price(entry, kill_pct):
+        return False
+
+    be_stop = be_lock_price(entry)
+    leg["structure_stop"] = be_stop
+    leg["structure_stop_reason"] = "be_lock_1r"
+    leg["one_r_locked"] = True
+    leg["breakeven_locked"] = True
+    trail_doc["structure_stop"] = be_stop
+    trail_doc["one_r_locked"] = True
+    trail_doc["breakeven_locked"] = True
+    leg["trail"] = trail_doc
+    return True
+
+
 def maybe_ratchet_breakeven(
     leg: dict[str, Any],
     trail_doc: dict[str, Any],
@@ -174,10 +219,13 @@ def maybe_ratchet_breakeven(
     quote_high: float,
 ) -> bool:
     """
-  Lock structure stop to breakeven when +0.5R or T1 trigger price touched.
-    Returns True if ratchet applied.
+    Ratchet structure stop higher after BE lock (+1R already touched).
+
+    Only runs once one_r_locked; uses +0.5R / T1 triggers for further ratchet.
     """
-    if leg.get("breakeven_locked"):
+    if not leg.get("one_r_locked"):
+        return False
+    if leg.get("breakeven_locked") and leg.get("structure_stop_reason") != "be_lock_1r":
         return False
 
     entry = float(leg.get("price") or trail_doc.get("entry_price") or 0)
@@ -221,30 +269,19 @@ def apply_day_structure_rules(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Day-2 tighten when no tranche is trailing yet."""
-    from tsd_scan_pipeline.tsd_entry_gates import leg_eligible_for_day2_tighten
+    """DISABLED — Phase 2.5 removed day-2 tighten to entry*0.99."""
+    return
 
-    if not leg_eligible_for_day2_tighten(leg, trail_doc, now=now):
-        return
-    if any_tranche_trailing(trail_doc):
-        return
 
-    entry = float(leg.get("price") or trail_doc.get("entry_price") or 0)
-    if entry <= 0:
-        return
-
-    tightened = round(entry * 0.99, 2)
-    current = float(leg.get("structure_stop") or 0)
-    if tightened > current:
-        leg["structure_stop"] = tightened
-        leg["structure_stop_reason"] = "day2_tighten"
-        trail_doc["structure_stop"] = tightened
+def should_thesis_fail_exit(trail_doc: dict[str, Any]) -> bool:
+    """Day 5+ with no tranche trailing → thesis failed."""
+    day = int(trail_doc.get("trading_day") or 1)
+    return day >= THESIS_FAIL_DAY and not any_tranche_trailing(trail_doc)
 
 
 def should_day3_force_exit(trail_doc: dict[str, Any]) -> bool:
-    """Day 3+ with no tranche trailing → thesis failed."""
-    day = int(trail_doc.get("trading_day") or 1)
-    return day >= 3 and not any_tranche_trailing(trail_doc)
+    """Backward-compatible alias — now uses day-5 thesis fail."""
+    return should_thesis_fail_exit(trail_doc)
 
 
 def structure_stop_breached(quote_low: float, structure_stop: float | None) -> bool:
@@ -253,92 +290,63 @@ def structure_stop_breached(quote_low: float, structure_stop: float | None) -> b
     return float(quote_low) <= float(structure_stop)
 
 
-def notify_rth_armed(symbol: str, structure_stop: float, kill_price: float) -> None:
-    """Optional Telegram when RTH structure arms."""
-    try:
-        from autonomous_agent import send_telegram
+def ensure_rth_monitoring(
+    leg: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """
+    Mark leg as RTH-monitored without arming ORB structure.
 
-        send_telegram(
-            f"TSD {symbol.upper()} RTH armed | "
-            f"Structure ${structure_stop:.2f} | "
-            f"Kill ${kill_price:.2f} (backstop)"
-        )
-    except Exception:
-        pass
+    Phase 2.5: kill-only until +1R; structure_stop remains None until BE lock.
+    """
+    if leg.get("rth_armed"):
+        return {"armed": True, "leg": leg, "reason": "already_armed"}
+
+    if not is_rth_bootstrap_ready(now):
+        return {"armed": False, "leg": leg, "reason": "before_rth_window"}
+
+    when = _as_et(now).isoformat()
+    leg["rth_armed"] = True
+    leg["rth_armed_at"] = when
+    if leg.get("structure_stop") is None and not leg.get("one_r_locked"):
+        leg["structure_stop"] = None
+        leg["structure_stop_reason"] = "kill_only_until_1r"
+
+    trail = dict(leg.get("trail") or {})
+    trail["rth_armed"] = True
+    if not trail.get("one_r_locked"):
+        trail["structure_stop"] = None
+    leg["trail"] = trail
+
+    if not leg.get("session_at_entry"):
+        leg["session_at_entry"] = classify_session(now)
+
+    return {"armed": True, "leg": leg, "reason": "kill_only_until_1r"}
 
 
 def bootstrap_rth_structure(
-    ib: IB,
+    ib: "IB",
     leg: dict[str, Any],
     symbol: str,
     *,
     dry_run: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """
-    Arm Layer-2 structure stop from ORB on first RTH pass (>= 09:35 ET).
-    Returns {armed: bool, leg: dict, reason?: str}.
-    """
-    if leg.get("rth_armed"):
-        return {"armed": True, "leg": leg, "reason": "already_armed"}
-
-    if not is_rth_bootstrap_ready(now):
-        return {"armed": False, "leg": leg, "reason": "before_bootstrap_window"}
-
-    orb_bars = fetch_orb_bars(ib, symbol, day=_as_et(now).date())
-    hl = orb_high_low(orb_bars)
-    if hl is None:
-        return {"armed": False, "leg": leg, "reason": "orb_fetch_failed"}
-
-    orb_high, orb_low = hl
-    trail = dict(leg.get("trail") or {})
-    entry = float(leg.get("price") or trail.get("entry_price") or 0)
-    kill_price = float(trail.get("kill_price") or 0)
-    trail_pct = float(trail.get("trail_pct") or 0.04)
-
-    max_pct = STRUCTURE_MAX_PCT
-    if is_low_rvol_day(ib, symbol, now=now):
-        max_pct = STRUCTURE_LOW_RVOL_MAX_PCT
-
-    stop, reason = compute_structure_stop(
-        entry, orb_low, kill_price, trail_pct, max_pct=max_pct,
-    )
-
-    when = _as_et(now).isoformat()
-    leg["rth_armed"] = True
-    leg["rth_armed_at"] = when
-    leg["structure_stop"] = stop
-    leg["structure_stop_reason"] = reason
-    leg["breakeven_locked"] = False
-    leg["orb_low"] = round(orb_low, 4)
-    leg["orb_high"] = round(orb_high, 4)
-
-    trail["rth_armed"] = True
-    trail["structure_stop"] = stop
-    trail["breakeven_locked"] = False
-    leg["trail"] = trail
-
-    if not leg.get("session_at_entry"):
-        leg["session_at_entry"] = classify_session(now)
-
-    print(
-        f"  {symbol.upper()} RTH armed structure=${stop:.2f} "
-        f"ORB {orb_low:.2f}-{orb_high:.2f} kill=${kill_price:.2f}"
-    )
-    if not dry_run:
-        notify_rth_armed(symbol, stop, kill_price)
-
-    return {"armed": True, "leg": leg, "structure_stop": stop}
+    """Phase 2.5: no ORB arm — delegate to ensure_rth_monitoring."""
+    _ = ib, symbol, dry_run
+    return ensure_rth_monitoring(leg, now=now)
 
 
 def init_leg_session_fields(session: SessionKind) -> dict[str, Any]:
-    """Default per-leg RTH structure fields at entry."""
+    """Default per-leg structure fields at entry."""
     return {
         "session_at_entry": session,
         "rth_armed": False,
         "rth_armed_at": None,
         "structure_stop": None,
         "structure_stop_reason": None,
+        "one_r_locked": False,
         "breakeven_locked": False,
         "orb_low": None,
         "orb_high": None,

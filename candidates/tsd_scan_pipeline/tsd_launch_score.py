@@ -108,12 +108,15 @@ def compute_launch_score(row: dict[str, Any]) -> float:
 
 
 def enrich_launch_fields(row: dict[str, Any]) -> dict[str, Any]:
-    """Add launch_score, phase, signal_bar_red to a scan/queue row."""
+    """Add launch_score, phase, signal_bar_red, combined rank score to a scan/queue row."""
     out = dict(row)
     out["signal_bar_red"] = signal_bar_red(out)
     out["launch_score"] = compute_launch_score(out)
     out["phase"] = compute_launch_phase(out)
-    out["entry_score"] = out["launch_score"]
+    launch = float(out["launch_score"])
+    htf = float(out.get("htf_score") or 0)
+    out["combined_rank_score"] = round(launch + htf, 1)
+    out["entry_score"] = out["combined_rank_score"]
     return out
 
 

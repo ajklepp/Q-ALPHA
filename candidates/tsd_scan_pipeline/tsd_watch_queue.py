@@ -82,7 +82,10 @@ def add_to_watch_queue(
         sym = str(cand.get("symbol", "")).upper()
         enriched = enrich_launch_fields({**cand, "symbol": sym})
         passed, gates, reasons = evaluate_entry_gates(
-            enriched, regime_bull=bull, require_rth_window=False,
+            enriched,
+            regime_bull=bull,
+            require_rth_window=False,
+            polygon_key=polygon_key,
         )
 
         if not passed:
@@ -117,6 +120,13 @@ def add_to_watch_queue(
             "signal_lane": infer_signal_lane(qh_row),
             "entry_score": float(qh_row.get("launch_score_display") or qh_row.get("launch_score") or 0),
             "launch_score": float(qh_row.get("launch_score") or 0),
+            "htf_score": float(qh_row.get("htf_score") or gates.get("htf_score") or 0),
+            "combined_rank_score": float(
+                qh_row.get("combined_rank_score")
+                or enriched.get("combined_rank_score")
+                or qh_row.get("launch_score")
+                or 0
+            ),
             "launch_score_display": float(qh_row.get("launch_score_display") or qh_row.get("launch_score") or 0),
             "phase": qh_row.get("phase"),
             "signal_bar_red": bool(qh_row.get("signal_bar_red")),

@@ -262,7 +262,9 @@ def process_watching_row(
             if quote is None:
                 return {"symbol": sym, "status": "WAIT", "reason": "bars_unavailable"}
 
-    ok, confirm_reason = confirm_setup(row, quote)
+    ok, confirm_reason = True, "htf_launch_direct"
+    if str(row.get("signal_lane", "B")).upper() == "A":
+        ok, confirm_reason = confirm_setup(row, quote)
     if not ok:
         return {
             "symbol": sym,
@@ -320,7 +322,7 @@ def run_pass(*, dry_run: bool = False) -> dict[str, Any]:
     launch_rows = [r for r in watching if _is_launch_row(r)]
     if not is_entry_window(now) and not dry_run:
         if not launch_rows:
-            print("Outside entry window (09:35-14:00 ET) — skip confirmation")
+            print("Outside entry window (09:35-15:00 ET) — skip confirmation")
             return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
         watching = launch_rows
         print(

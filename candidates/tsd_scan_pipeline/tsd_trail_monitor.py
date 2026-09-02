@@ -1,8 +1,8 @@
 """
 Q-ALPHA TSD pipeline — Phase 4 software trail monitor.
 
-3-layer stop pyramid:
-  L1 broker kill (always on) | L2 RTH structure stop | L3 T1–T4 software trail
+3-layer stop pyramid (Phase 2.5 kill-until-1R):
+  L1 broker kill (always on) | L2 BE lock after +1R | L3 T1–T4 software trail
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --once
@@ -39,11 +39,11 @@ from tsd_scan_pipeline.tsd_base_break import check_base_break
 from tsd_scan_pipeline.tsd_scan_ibkr import fetch_3h_bars
 from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
-    apply_day_structure_rules,
-    bootstrap_rth_structure,
+    ensure_rth_monitoring,
+    maybe_arm_be_lock_on_1r,
     maybe_ratchet_breakeven,
     poll_interval_sec,
-    should_day3_force_exit,
+    should_thesis_fail_exit,
     structure_stop_breached,
 )
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
@@ -177,7 +177,7 @@ def _process_leg(
     trail = maybe_roll_trading_day(dict(leg["trail"]))
 
     if not leg.get("rth_armed"):
-        boot = bootstrap_rth_structure(ib, leg, sym, dry_run=dry_run)
+        boot = ensure_rth_monitoring(leg)
         leg = boot["leg"]
         trail = leg.get("trail") or trail
         if not boot.get("armed"):
@@ -186,18 +186,19 @@ def _process_leg(
             results.append({
                 "symbol": sym,
                 "leg": leg_index,
-                "status": "BOOTSTRAP_PENDING",
+                "status": "RTH_PENDING",
                 "reason": boot.get("reason"),
             })
             return results
 
-    apply_day_structure_rules(leg, trail)
+    maybe_arm_be_lock_on_1r(leg, trail, quote_high=quote["high"])
+    trail = leg.get("trail") or trail
 
-    if should_day3_force_exit(trail):
+    if should_thesis_fail_exit(trail):
         results.extend(
             _exit_all_remaining(
                 ib, pos, leg_index, leg, sym,
-                reason="day3_thesis_fail",
+                reason="thesis_fail_day5",
                 quote=quote,
                 dry_run=dry_run,
             )

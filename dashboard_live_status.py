@@ -29,7 +29,7 @@ from dashboard_tsd_helpers import (
 )
 
 TSD_STARTING_POOL = 3000.0
-TSD_MAX_FULL_SLOTS = 10
+TSD_MAX_FULL_SLOTS = 2
 IBKR_3H_CLOSE_HOURS_ET = (1, 4, 5, 8, 11, 14, 17, 19, 22)
 TWS_LAG = timedelta(hours=3, minutes=3)
 
@@ -215,10 +215,10 @@ def _render_tsd_open_card(row: dict) -> None:
     if phase:
         badges.append(phase)
     if row.get("rth_armed"):
-        badges.append("RTH armed")
+        badges.append("RTH monitor")
     if row.get("pre_catalyst"):
         badges.append("pre_catalyst")
-    if row.get("breakeven_locked"):
+    if row.get("one_r_locked") or row.get("breakeven_locked"):
         badges.append("BE locked")
     badge_line = " · ".join(badges) if badges else ""
 
@@ -260,7 +260,7 @@ def _render_tsd_open_card(row: dict) -> None:
                 st_delta += f" ({reason})"
             st.metric("Structure", s_primary, st_delta)
         else:
-            st.metric("Structure", "—", "pending bootstrap")
+            st.metric("Structure", "—", "KILL ONLY until +1R")
     with s3:
         raw_tranches = parse_tranche_json(row.get("tranche_json"))
         nxt = next_trail_stop(raw_tranches) if raw_tranches else None

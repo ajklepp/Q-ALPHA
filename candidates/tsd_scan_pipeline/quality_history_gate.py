@@ -148,7 +148,7 @@ def evaluate_quality_history_gate(
         "dollar_vol_floor": True if dollar_vol is None else float(dollar_vol) >= MIN_DOLLAR_VOL_20D,
         "price_floor": price >= MIN_PRICE_FLOOR if price > 0 else True,
         "analog_count": analog_count >= MIN_TSD_ANALOGS,
-        "analog_win_rate": True if win_rate is None else win_rate >= ANALOG_WIN_RATE_MIN,
+        "analog_win_rate": True,  # Phase 2.5: demoted — never hard-blocks
         "not_extension": row.get("phase") != "EXTENSION",
         "no_distress": not distress if not FUNDAMENTAL_DISTRESS_SPEC_ONLY else True,
     }
@@ -164,8 +164,6 @@ def evaluate_quality_history_gate(
         reasons.append(f"price<{MIN_PRICE_FLOOR:.0f}")
     if not gates["analog_count"]:
         reasons.append(f"analog_count<{MIN_TSD_ANALOGS}")
-    if not gates["analog_win_rate"]:
-        reasons.append(f"analog_win_rate<{ANALOG_WIN_RATE_MIN:.0f}%")
     if not gates["not_extension"]:
         reasons.append("extension_phase")
     if distress and not FUNDAMENTAL_DISTRESS_SPEC_ONLY:

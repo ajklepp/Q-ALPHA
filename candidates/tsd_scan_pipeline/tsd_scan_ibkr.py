@@ -38,10 +38,12 @@ from tsd_scan_pipeline.tsd_capacity import (
 from tsd_scan_pipeline.tsd_entry_gates import occupied_symbols
 from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue
 from tsd_scan_pipeline.tsd_profiler import profile_watchlist
+from tsd_scan_pipeline.tsd_htf_gates import compute_combined_rank_score, evaluate_htf_daily_gates
 from tsd_scan_pipeline.tsd_launch_score import (
     LAUNCH_SCAN_MAX,
     enrich_launch_fields,
     is_launch_candidate,
+    signal_bar_red,
 )
 from tsd_scan_pipeline.tsd_signals import enrich_tsd, last_bar_summary
 from tws_scan_pipeline.pipeline import fetch_polygon_mcap  # noqa: E402
@@ -278,8 +280,16 @@ def evaluate_symbol(
         row["wt_gap"] = abs(wt1 - wt2)
         row["near_cross"] = abs(wt1 - wt2) < NEAR_CROSS_THRESHOLD
 
-    if not (summary.get("buy_signal") or summary.get("early_bull")):
-        row["reject_reason"] = "no_trigger"
+    if not summary.get("buy_signal"):
+        row["reject_reason"] = "no_buy_signal"
+        return row
+
+    if not signal_bar_red(row):
+        row["reject_reason"] = "signal_bar_not_red"
+        return row
+
+    if not is_launch_candidate(row):
+        row["reject_reason"] = "not_launch_candidate"
         return row
 
     if row.get("phase") == "EXTENSION":
@@ -313,11 +323,16 @@ def evaluate_symbol(
     return row
 
 
-def rank_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def rank_candidates(rows: list[dict[str, Any]], *, polygon_key: str | None = None) -> list[dict[str, Any]]:
     passed = [r for r in rows if r.get("pass")]
-    # Prefer high launch_score, low scan_score (early move)
+    for row in passed:
+        _, _, _, htf_score = evaluate_htf_daily_gates(row, polygon_key=polygon_key)
+        row["htf_score"] = htf_score
+        row["combined_rank_score"] = compute_combined_rank_score(
+            enrich_launch_fields({**row, "htf_score": htf_score}),
+        )
     passed.sort(
-        key=lambda r: (-(r.get("launch_score") or 0), r.get("scan_score") or 99),
+        key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
     )
     return passed
 
@@ -407,7 +422,7 @@ def run_scan(
     print(f"Open book (TSD): {book_opens}")
     if cross_book != book_opens:
         print(f"Cross-book occupied: {cross_book}")
-    print(f"Filters: BUY/early_bull | LAUNCH phase | scan<={LAUNCH_SCAN_MAX} | trend>0 | mcap>=${MCAP_MIN/1e6:.0f}M")
+    print(f"Filters: buy_signal + red bar + LAUNCH | scan<={LAUNCH_SCAN_MAX} | HTF daily | mcap>=${MCAP_MIN/1e6:.0f}M")
     if not skip_profiler:
         print("Profiler: watch-10 gate, MIN 30 TSD analogs required")
     else:
@@ -431,7 +446,7 @@ def run_scan(
             time.sleep(PACING_SEC)
 
     elapsed = time.perf_counter() - t0
-    signal_candidates = rank_candidates(rows)
+    signal_candidates = rank_candidates(rows, polygon_key=polygon_key)
     watch_candidates = signal_candidates[:WATCH_TOP_N]
 
     print(f"\n--- Profiler on watch-{len(watch_candidates)} ---")
