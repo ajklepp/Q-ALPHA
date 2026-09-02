@@ -4,20 +4,24 @@ One-off TSD pool reconcile — compare tsd_pool_state.json to book-derived accou
 
 Usage (from repo root):
   python candidates/tsd_scan_pipeline/reconcile_pool.py
+  python candidates/tsd_scan_pipeline/reconcile_pool.py --apply
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATES = ROOT / "candidates"
+SNAPSHOT_DIR = CANDIDATES / "uts_v2"
 sys.path.insert(0, str(CANDIDATES))
 
 from state_paths import state_path  # noqa: E402
-from tsd_scan_pipeline.tsd_pool import load_pool  # noqa: E402
+from tsd_scan_pipeline.tsd_pool import load_pool, save_pool  # noqa: E402
 
 
 def _closed_leg_pnl(leg: dict[str, Any]) -> float:
@@ -156,7 +160,52 @@ def reconcile() -> dict[str, Any]:
     }
 
 
+def apply_corrections(r: dict[str, Any]) -> dict[str, Any]:
+    """Write book-derived cash/deployed to pool file; return before/after snapshot."""
+    pool_path = Path(r["pool_file"])
+    before = load_pool(pool_path)
+    after = dict(before)
+    after["pool"] = round(float(r["expected_cash"]), 2)
+    after["deployed"] = round(float(r["expected_deployed"]), 2)
+    save_pool(after, pool_path)
+    return {
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "pool_file": str(pool_path),
+        "book_file": r["book_file"],
+        "before": {
+            "pool": float(before.get("pool") or 0.0),
+            "deployed": float(before.get("deployed") or 0.0),
+        },
+        "after": {
+            "pool": after["pool"],
+            "deployed": after["deployed"],
+        },
+        "corrections": {
+            "pool": round(after["pool"] - float(before.get("pool") or 0.0), 2),
+            "deployed": round(after["deployed"] - float(before.get("deployed") or 0.0), 2),
+        },
+        "reconcile": r,
+    }
+
+
+def write_snapshot(snapshot: dict[str, Any]) -> Path:
+    """Persist reconcile snapshot for version control (pool file stays gitignored)."""
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out = SNAPSHOT_DIR / f"pool_reconcile_{ts}.json"
+    out.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+    return out
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Reconcile TSD pool vs book")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply book-derived pool/deployed corrections and write snapshot",
+    )
+    args = parser.parse_args()
+
     r = reconcile()
     print("=== TSD pool reconcile ===")
     print(f"Pool file : {r['pool_file']}")
@@ -185,6 +234,20 @@ def main() -> None:
     print("Suggested corrections (add to file values):")
     print(f"  pool     : ${r['suggested_pool_correction']:+,.2f}")
     print(f"  deployed : ${r['suggested_deployed_correction']:+,.2f}")
+
+    if args.apply:
+        snapshot = apply_corrections(r)
+        snap_path = write_snapshot(snapshot)
+        print()
+        print("=== APPLIED ===")
+        print(f"pool     : ${snapshot['before']['pool']:,.2f} -> ${snapshot['after']['pool']:,.2f}")
+        print(
+            f"deployed : ${snapshot['before']['deployed']:,.2f} "
+            f"-> ${snapshot['after']['deployed']:,.2f}"
+        )
+        print(f"Snapshot : {snap_path}")
+        r2 = reconcile()
+        print(f"Post-apply reconcile gap: ${r2['reconcile_gap']:,.2f}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,39 @@
+{
+  "applied_at": "2026-09-02T00:22:49.187936+00:00",
+  "pool_file": "C:\\Users\\ajkle\\Documents\\Q-ALPHA\\candidates\\tsd_pool_state.json",
+  "book_file": "C:\\Users\\ajkle\\Documents\\Q-ALPHA\\candidates\\tsd_book_state.json",
+  "before": {
+    "pool": 4200.0,
+    "deployed": 0.0
+  },
+  "after": {
+    "pool": 2494.68,
+    "deployed": 487.8
+  },
+  "corrections": {
+    "pool": -1705.32,
+    "deployed": 487.8
+  },
+  "reconcile": {
+    "pool_file": "C:\\Users\\ajkle\\Documents\\Q-ALPHA\\candidates\\tsd_pool_state.json",
+    "book_file": "C:\\Users\\ajkle\\Documents\\Q-ALPHA\\candidates\\tsd_book_state.json",
+    "starting_pool": 3000.0,
+    "pool_cash": 4200.0,
+    "pool_deployed": 0.0,
+    "pool_plus_deployed": 4200.0,
+    "realized_pnl": -17.51999999999996,
+    "unrealized_pnl": -0.5399999999999636,
+    "open_cost_basis": 487.79999999999995,
+    "open_mtm": 487.26,
+    "closed_legs": 8,
+    "open_legs": 2,
+    "equity_mtm": 4687.26,
+    "equity_pnl_identity": 2981.94,
+    "reconcile_gap": 1705.3200000000002,
+    "expected_cash": 2494.6800000000003,
+    "expected_deployed": 487.79999999999995,
+    "phantom_deployed_estimate": -487.79999999999995,
+    "suggested_pool_correction": -1705.3199999999997,
+    "suggested_deployed_correction": 487.79999999999995
+  }
+}
