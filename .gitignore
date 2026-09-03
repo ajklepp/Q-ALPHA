@@ -22,7 +22,7 @@ models/*.joblib
 .ipynb_checkpoints/
 .DS_Store
 Thumbs.db
-.cursor/
+.cursor/*
 !.cursor/rules/
 !.cursor/rules/**/*.mdc
 write_exp6.py

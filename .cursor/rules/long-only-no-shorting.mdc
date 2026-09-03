@@ -1,0 +1,31 @@
+---
+description: Strategy is LONG-ONLY — never open or intend short positions
+alwaysApply: true
+---
+
+# LONG-ONLY — no shorting
+
+Q-Alpha / Peak Hour Performers / UTS / TSD is a **long-only** system.
+
+## Locked
+
+- Entry action is always **BUY**. Never place intentional short entries (`SELL` to open).
+- Do not add short-selling strategies, inverse ETFs as shorts, or sell-to-open stock legs.
+- Ignore SELL/short signal dots from indicators — exits are flatten/cover of longs only.
+- A broker short (e.g. orphan `qty < 0`) is **cleanup only** (cover to flat), not a strategy.
+
+## Allowed SELL
+
+- Closing or reducing an existing **long** (trail, kill, time-cap, flatten).
+- Canceling working exit orders on longs.
+
+## Not allowed
+
+```python
+# BAD — intentional short
+MarketOrder("SELL", qty)  # with no long to close
+# GOOD — long entry
+MarketOrder("BUY", qty)
+# GOOD — exit long / cover orphan short to flat
+MarketOrder("SELL", long_qty)  # or BUY to cover qty < 0 cleanup
+```
