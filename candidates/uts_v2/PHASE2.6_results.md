@@ -8,7 +8,7 @@
 | Buy trigger | Last **completed 1H** bar: buy + launch + red. 3H buy is **not** required. |
 | HTF | Daily range ≥25%, close > SMA50, SMA20 rising, price ≥ $5. Pre-filter universe once/session. |
 | Hours ET | **07 / 11 / 12 / 13** only. 08:00 not on the list. Last bar = 13:00 close. |
-| Scan clock | 07:05, 11:05, 12:05, 13:05 ET. HTF refresh 04:30 (+ noon). |
+| Scan clock | 07:15, 11:15, 12:15, 13:15 ET (close+15 delayed Polygon). HTF 04:30 (+ noon). |
 | Capacity | 2 **per hourly scan**, dynamic **2–10** slots, **no 2/day cap**. |
 | Sizing | Slot-then-size: S=$300 frozen until N=10, then S=equity/10. Never full-pool/2. |
 | Idle | `idle_no_1r` day ≥6 if never +1R and not trailing. Do **not** cut day 2–5. |

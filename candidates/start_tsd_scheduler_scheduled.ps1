@@ -1,6 +1,6 @@
 # =============================================================================
 # Q-ALPHA — candidates/start_tsd_scheduler_scheduled.ps1
-# TSD pipeline scheduler tick (Polygon :20 + TWS :03 slots).
+# TSD pipeline scheduler tick (UTS v2.6 launch :15 slots via --tick every 5 min).
 #
 # Register (Aaron runs once):
 #   .\candidates\register_tsd_tasks.ps1

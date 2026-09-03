@@ -1,7 +1,8 @@
 """
 Q-ALPHA TSD pipeline — ET slot scheduler (UTS v2.6).
 
-LAUNCH scans at 07:05 / 11:05 / 12:05 / 13:05 ET (1H bar close + 5 min).
+LAUNCH scans at 07:15 / 11:15 / 12:15 / 13:15 ET (1H bar close + 15 min).
+Delayed Polygon: wait so the completed hour is in the API (no front-run).
 HTF universe refresh at 04:30 ET (optional noon).
 Trail monitor unchanged (each tick unless dedicated loop is alive).
 
@@ -37,7 +38,7 @@ ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 STATE_PATH = RESULTS_DIR / "tsd_scheduler_state.json"
 LAUNCH_HOURS_ET = (7, 11, 12, 13)
-LAUNCH_LAG_MIN = 5
+LAUNCH_LAG_MIN = 15  # delayed Polygon settle; do not front-run forming 1H bar
 HTF_REFRESH_AT = time(4, 30)
 POLYGON_LAG_MIN = 20
 TWS_LAG = timedelta(hours=3, minutes=3)
@@ -60,7 +61,7 @@ def _slot_key(kind: str, bar_hour: int, when: datetime) -> str:
 
 
 def launch_run_at(bar_hour: int, on_date: date) -> datetime:
-    """1H LAUNCH scan at bar_close + 5 minutes (Polygon 1H settle)."""
+    """1H LAUNCH scan at bar_close + 15 min (delayed Polygon settle)."""
     naive = datetime.combine(on_date, time(bar_hour, LAUNCH_LAG_MIN))
     return ET.localize(naive)
 

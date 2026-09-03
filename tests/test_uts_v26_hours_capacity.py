@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "candidates"))
 
 import pytz
+from tsd_scan_pipeline.scheduler import LAUNCH_LAG_MIN, launch_run_at
 from tsd_scan_pipeline.tsd_1h_signal import is_allowed_hour, is_launch_hour_window
 from tsd_scan_pipeline.tsd_capacity import (
     MAX_FULL_SLOTS,
@@ -33,7 +34,7 @@ from tsd_scan_pipeline.tsd_structure import (
 )
 
 ET = pytz.timezone("America/New_York")
-LAUNCH_NOW = ET.localize(datetime(2026, 9, 1, 7, 5))
+LAUNCH_NOW = ET.localize(datetime(2026, 9, 1, 7, 15))
 
 LAUNCH_ROW = {
     "symbol": "ZIP",
@@ -60,6 +61,13 @@ class TestHoursAllowlist(unittest.TestCase):
         self.assertTrue(is_allowed_hour(7))
         self.assertTrue(is_launch_hour_window(LAUNCH_NOW))
         self.assertTrue(is_entry_window(LAUNCH_NOW))
+
+    def test_launch_run_at_0715_not_0705(self):
+        self.assertEqual(LAUNCH_LAG_MIN, 15)
+        sched = launch_run_at(7, date(2026, 9, 1))
+        self.assertEqual(sched.hour, 7)
+        self.assertEqual(sched.minute, 15)
+        self.assertNotEqual(sched.minute, 5)
 
     def test_0800_not_in_allowlist(self):
         self.assertFalse(is_allowed_hour(8))
