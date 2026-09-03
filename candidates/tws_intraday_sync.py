@@ -610,6 +610,15 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                 ib, mark_fn=_tws_mark_price,
             )
             summary["tsd_upserted"] = tsd_summary.get("upserted", 0)
+            summary["tsd_closed"] = tsd_summary.get("closed_upserted", 0)
+            summary["tsd_pool"] = bool(tsd_summary.get("pool_synced"))
+            summary["tsd_queue"] = int(tsd_summary.get("watch_queue_synced") or 0)
+            print(
+                f"  TSD sync: open={summary['tsd_upserted']} "
+                f"closed={summary['tsd_closed']} "
+                f"pool={summary['tsd_pool']} "
+                f"queue={summary['tsd_queue']}"
+            )
             if tsd_summary.get("verify_errors"):
                 summary["sync_errors"].extend(tsd_summary["verify_errors"])
         except Exception as exc:

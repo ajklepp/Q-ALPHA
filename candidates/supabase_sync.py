@@ -278,6 +278,34 @@ class SupabaseSync:
             .execute()
         )
 
+    def _upsert_strip_unknown(
+        self,
+        table: str,
+        record: dict,
+        *,
+        on_conflict: str,
+        max_strips: int = 12,
+    ) -> None:
+        """Upsert; on PGRST204 unknown-column, drop that key and retry."""
+        import re
+
+        payload = dict(record)
+        for _ in range(max_strips):
+            try:
+                self.client.table(table).upsert(
+                    payload, on_conflict=on_conflict
+                ).execute()
+                return
+            except Exception as exc:
+                err = str(exc)
+                m = re.search(r"Could not find the '([^']+)' column", err)
+                if "PGRST204" not in err or not m:
+                    raise
+                col = m.group(1)
+                if col not in payload:
+                    raise
+                payload.pop(col, None)
+
     def upsert_tsd_position(self, row: dict) -> None:
         """Insert or update one TSD open leg (tsd_positions table)."""
         record = {field: row.get(field) for field in TSD_POSITION_FIELDS}
@@ -288,9 +316,9 @@ class SupabaseSync:
         record["last_updated"] = (
             row.get("last_updated") or datetime.now(timezone.utc).isoformat()
         )
-        self.client.table("tsd_positions").upsert(
-            record, on_conflict="symbol,leg_opened_at"
-        ).execute()
+        self._upsert_strip_unknown(
+            "tsd_positions", record, on_conflict="symbol,leg_opened_at"
+        )
 
     def get_tsd_positions(self, *, status: str = "OPEN") -> list:
         """Fetch TSD positions for dashboard (default: open legs only)."""
@@ -346,9 +374,30 @@ class SupabaseSync:
             "sizing_pct": state.get("sizing_pct") or "100%",
             "last_updated": state.get("last_updated") or datetime.now(timezone.utc).isoformat(),
         }
-        self.client.table("tsd_pool_snapshots").upsert(
-            snapshot, on_conflict="snapshot_date"
-        ).execute()
+        try:
+            self.client.table("tsd_pool_snapshots").upsert(
+                snapshot, on_conflict="snapshot_date"
+            ).execute()
+        except Exception as exc:
+            # Live schema may lag ALTER for regime/sizing columns.
+            err = str(exc)
+            if "PGRST204" not in err and "sizing_pct" not in err and "spy_regime" not in err:
+                raise
+            core = {
+                k: snapshot[k]
+                for k in (
+                    "snapshot_date",
+                    "pool",
+                    "deployed",
+                    "open_positions",
+                    "open_names",
+                    "starting_pool",
+                    "last_updated",
+                )
+            }
+            self.client.table("tsd_pool_snapshots").upsert(
+                core, on_conflict="snapshot_date"
+            ).execute()
 
     def get_latest_tsd_pool(self) -> dict | None:
         """Most recent TSD pool snapshot."""
@@ -389,9 +438,14 @@ class SupabaseSync:
                 r.get("updated_at") or datetime.now(timezone.utc).isoformat()
             )
             clean.append(item)
-        self.client.table("tsd_watchlist").upsert(
-            clean, on_conflict="symbol"
-        ).execute()
+        try:
+            self.client.table("tsd_watchlist").upsert(
+                clean, on_conflict="symbol"
+            ).execute()
+        except Exception:
+            # Strip unknown optional columns (analog_*, launch_score, …) and retry.
+            for r in clean:
+                self._upsert_strip_unknown("tsd_watchlist", r, on_conflict="symbol")
 
     def get_tsd_watchlist(self) -> list:
         result = (

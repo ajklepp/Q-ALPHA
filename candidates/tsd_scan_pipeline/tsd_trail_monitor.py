@@ -35,6 +35,7 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
 )
 from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
 from tsd_scan_pipeline.tsd_exit import place_tsd_exit, sync_kill_quantity  # noqa: E402
+from tsd_scan_pipeline.tsd_notify import format_exited, notify_tsd  # noqa: E402
 from tsd_scan_pipeline.tsd_base_break import check_base_break
 from tsd_scan_pipeline.tsd_scan_ibkr import fetch_3h_bars
 from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
@@ -155,6 +156,19 @@ def _exit_all_remaining(
     pos["legs"][leg_index] = leg
     if not dry_run:
         sync_kill_quantity(ib, leg, sym, dry_run=False)
+    exit_px = float(fill.get("fill_price") or px)
+    entry_px = float((leg.get("trail") or {}).get("entry_price") or leg.get("price") or 0)
+    pnl = (exit_px - entry_px) * rem if entry_px > 0 else None
+    if not dry_run:
+        notify_tsd(
+            format_exited(
+                sym,
+                reason=reason,
+                shares=rem,
+                exit_price=exit_px,
+                pnl_dollars=pnl,
+            )
+        )
     results.append({"symbol": sym, "leg": leg_index, "reason": reason, "fill": fill})
     return results
 
@@ -290,6 +304,29 @@ def _process_leg(
         leg["status"] = "CLOSED"
         if not dry_run:
             sync_kill_quantity(ib, leg, sym, dry_run=False)
+            # Aggregate PnL across exits on this leg for one telegram (full flat).
+            entry_px = float(trail.get("entry_price") or leg.get("price") or 0)
+            pnl = 0.0
+            exit_shares = 0
+            last_reason = "trail_flat"
+            last_px = entry_px
+            for ex in leg.get("exits") or []:
+                sh = int(ex.get("shares") or 0)
+                px = float(ex.get("exit_price") or 0)
+                if sh > 0 and px > 0 and entry_px > 0:
+                    pnl += (px - entry_px) * sh
+                    exit_shares += sh
+                    last_px = px
+                last_reason = str(ex.get("reason") or last_reason)
+            notify_tsd(
+                format_exited(
+                    sym,
+                    reason=last_reason,
+                    shares=exit_shares or None,
+                    exit_price=last_px if exit_shares else None,
+                    pnl_dollars=pnl if exit_shares else None,
+                )
+            )
     if is_t4_only(trail):
         pos["t4_only"] = True
         print(f"  {sym}: T4-only runner — slot freed")
@@ -383,6 +420,22 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     if not dry_run:
         save_state(state)
+        # Full exits only — if any action closed a leg / exited remaining, push cloud.
+        exit_like = [
+            a for a in actions
+            if a.get("reason")
+            or str((a.get("fill") or {}).get("status") or "").upper() == "FILLED"
+            or a.get("tranche_id")
+        ]
+        if exit_like:
+            try:
+                from tsd_supabase_sync import push_dashboard_best_effort
+
+                push_dashboard_best_effort(
+                    ib, mark_fn=None, book=state, telegram_on_fail=False,
+                )
+            except Exception as exc:
+                print(f"  on-exit dashboard sync warn: {exc}")
 
     try:
         ib.disconnect()

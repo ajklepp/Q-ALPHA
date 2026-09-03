@@ -160,17 +160,29 @@ def run_1h_launch_scan(
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
         queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
         admitted: set[str] = set()
+        skipped: list[dict[str, Any]] = []
         for qr in queue_results:
             sym = str(qr.get("symbol", "")).upper()
             st = str(qr.get("status", "")).upper()
             if st in QUEUE_ADMIT_STATUSES:
                 admitted.add(sym)
             else:
+                skipped.append(qr)
                 print(f"  LIVE SKIP {sym}: status={st} reason={qr.get('reason', '')}")
 
         enter_rows = [r for r in take if str(r.get("symbol", "")).upper() in admitted]
         if not enter_rows:
             print("  No queue-admitted names to enter")
+            if take and skipped:
+                try:
+                    from tsd_scan_pipeline.tsd_notify import (
+                        format_queue_skip_summary,
+                        notify_tsd,
+                    )
+
+                    notify_tsd(format_queue_skip_summary(len(take), skipped))
+                except Exception:
+                    pass
             print("=" * 64)
             return 0
 

@@ -483,14 +483,48 @@ def sync_tsd_watch_queue_from_file() -> int:
     return len(rows)
 
 
+def push_dashboard_best_effort(
+    ib=None,
+    *,
+    mark_fn: Callable | None = None,
+    book: dict[str, Any] | None = None,
+    telegram_on_fail: bool = False,
+) -> dict[str, Any]:
+    """
+    Best-effort book → Supabase push after entry/exit.
+
+    Never raises. Optional Telegram if sync fails hard.
+    """
+    try:
+        summary = sync_tsd_positions_to_supabase(
+            ib, mark_fn=mark_fn, book=book,
+        )
+    except Exception as exc:
+        print(f"  dashboard sync warn: {exc}")
+        summary = {"verify_errors": [f"push:{exc}"], "upserted": 0}
+    errs = summary.get("verify_errors") or []
+    if telegram_on_fail and errs:
+        try:
+            from tsd_scan_pipeline.tsd_notify import notify_tsd
+
+            notify_tsd(f"Peak Hour sync failed\n{errs[0]}")
+        except Exception:
+            pass
+    return summary
+
+
 def sync_tsd_positions_to_supabase(
     ib=None,
     *,
     mark_fn: Callable | None = None,
+    book: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Upsert open TSD legs + pool snapshot to Supabase; prune stale OPEN rows.
     Returns summary dict with upserted count and verify errors.
+
+    If ``book`` is passed, use it (caller just mutated in-memory state).
+    Otherwise load from disk.
     """
     from supabase_sync import SupabaseSync
 
@@ -504,7 +538,7 @@ def sync_tsd_positions_to_supabase(
         "verify_errors": [],
     }
 
-    book = load_state()
+    book = book if book is not None else load_state()
     rows = flatten_open_legs(book)
     closed_rows = flatten_closed_legs(book)
     if ib is not None and mark_fn is not None and rows:
@@ -584,7 +618,11 @@ def sync_tsd_positions_to_supabase(
     try:
         summary["watch_queue_synced"] = sync_tsd_watch_queue_from_file()
     except Exception as exc:
-        summary["verify_errors"].append(f"tsd_watch_queue:{exc}")
+        err = str(exc)
+        if "PGRST205" in err or "tsd_watch_queue" in err:
+            print(f"  TSD watch_queue table missing (optional): {exc}")
+        else:
+            summary["verify_errors"].append(f"tsd_watch_queue:{exc}")
 
     verify_errors = _verify_tsd_supabase_rows(rows)
     summary["verify_errors"].extend(verify_errors)

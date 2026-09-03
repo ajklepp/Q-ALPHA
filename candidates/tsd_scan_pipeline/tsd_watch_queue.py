@@ -209,11 +209,15 @@ def execute_live_entries(
     book_state: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """
-    Place session-aware BUY orders (Phase 3 setup_watch_agent only).
+    Place session-aware BUY orders for Peak Hour / setup-watch.
 
-    NOT called from tsd_scan_ibkr in UTS v2 Phase 1+.
+    On FILLED: telegram + best-effort Supabase push (dashboard within seconds).
     """
+    from tsd_scan_pipeline.tsd_capacity import save_state
+    from tsd_scan_pipeline.tsd_notify import format_entered, notify_tsd
+
     results: list[dict[str, Any]] = []
+    any_fill = False
     for cand in trade_candidates:
         sym = cand["symbol"]
         has_open = sym in open_symbols(book_state)
@@ -254,12 +258,37 @@ def execute_live_entries(
             tsd_profile=cand.get("tsd_profile"),
             session_at_entry=fill.get("session"),
         )
+        any_fill = True
         results.append({**fill, "kind": entry_kind})
         print(
             f"  ENTRY FILLED {sym} ({entry_kind}): {fill['shares']} @ {fill['fill_price']:.2f} "
             f"session={fill.get('session')} kill={fill.get('kill_pct'):.1%} "
             f"kill_oid={fill.get('kill_order_id')}"
         )
+        notify_tsd(
+            format_entered(
+                sym,
+                shares=int(fill["shares"]),
+                fill_price=float(fill["fill_price"]),
+                kill_pct=fill.get("kill_pct"),
+                bar_hour=cand.get("htf_1h_bar_hour"),
+                rank=cand.get("combined_rank_score") or cand.get("launch_score"),
+                kind=entry_kind,
+            )
+        )
+
+    if any_fill:
+        try:
+            save_state(book_state)
+        except Exception as exc:
+            print(f"  book save warn after fill: {exc}")
+        try:
+            from tsd_supabase_sync import push_dashboard_best_effort
+
+            push_dashboard_best_effort(book=book_state, telegram_on_fail=True)
+        except Exception as exc:
+            print(f"  on-fill dashboard sync warn: {exc}")
+
     return results
 
 

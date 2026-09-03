@@ -50,12 +50,9 @@ BARS_PER_MINUTE = 60  # 1-sec bars from IB; we aggregate last minute
 
 
 def _notify(msg: str) -> None:
-    try:
-        from autonomous_agent import send_telegram
+    from tsd_scan_pipeline.tsd_notify import notify_tsd
 
-        send_telegram(msg)
-    except Exception:
-        print(f"  [telegram] {msg}")
+    notify_tsd(msg)
 
 
 def _minutes_since_open(now: datetime) -> int:
@@ -279,11 +276,7 @@ def process_watching_row(
     results = execute_live_entries(ib, [cand], book)
     save_state(book)
     fill = results[0] if results else {}
-    if fill.get("status") == "FILLED":
-        _notify(
-            f"TSD {sym} ENTERED\n{fill.get('shares')}sh @ ${fill.get('fill_price'):.2f}\n"
-            f"{confirm_reason}"
-        )
+    # Telegram + Supabase on-fill are handled inside execute_live_entries.
     return {"symbol": sym, "status": "ENTERED", "fill": fill, "reason": confirm_reason}
 
 
