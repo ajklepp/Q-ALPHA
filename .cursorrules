@@ -87,6 +87,12 @@ SUPABASE_PROJECT         ← Supabase project ref
     - data_pipeline.py, features.py, model.py at root: ask first
     - EXP-0012: never touch, it is the working baseline
 
+11. LONG-ONLY — NO SHORTING
+    - Entries are BUY only; never open intentional short stock positions
+    - SELL only to exit/reduce longs (or BUY to cover orphan shorts as cleanup)
+    - Ignore indicator SELL/short dots; strategy remains long-only
+    - See also: .cursor/rules/long-only-no-shorting.mdc
+
 ## NEW UNIVERSE (for EXP-0013 onwards)
 - Float: 15M – 200M shares
 - Price: $5 – $200
