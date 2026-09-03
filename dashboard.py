@@ -89,7 +89,7 @@ STARTING_POOL = 3000.0
 OPEN_STATUSES = {"OPEN", "T1_HIT", "T2_HIT", "T3_TRAIL", "PENDING_MOC"}
 MAX_SLOTS = 10
 SYSTEM_VERSION = SHARED_VERSION  # keep Home + Profiles pages in sync
-SYSTEM_START_DATE = "2026-08-17"
+SYSTEM_START_DATE = "2026-09-02"  # Peak Hour Performers v3.0 clean slate
 SYSTEM_START = datetime.strptime(SYSTEM_START_DATE, "%Y-%m-%d").date()
 DAYS_RUNNING = (datetime.now().date() - SYSTEM_START).days
 # Bump when SupabaseSync gains/loses methods. Streamlit @st.cache_resource can
@@ -2211,7 +2211,7 @@ def render_footer() -> None:
         )
     with col2:
         st.caption(
-            f"v{SYSTEM_VERSION} · "
+            f"v{SYSTEM_VERSION} · Peak Hour Performers · "
             f"Running {DAYS_RUNNING} days · "
             f"Q-ALPHA 2026"
         )

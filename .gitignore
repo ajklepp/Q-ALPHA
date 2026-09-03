@@ -11,6 +11,8 @@ candidates/paper_trades.json
 candidates/tsd_watch_queue.json
 candidates/tsd_book_state.json
 candidates/tsd_pool_state.json
+candidates/archive/
+candidates/tsd_scan_pipeline/results/tsd_scheduler_state.json
 candidates/pending_approvals.json
 data/*.csv
 data/*.parquet

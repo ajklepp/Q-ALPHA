@@ -30,8 +30,9 @@ from dashboard_tsd_helpers import (
 
 TSD_STARTING_POOL = 3000.0
 TSD_MAX_FULL_SLOTS = 10
-IBKR_3H_CLOSE_HOURS_ET = (1, 4, 5, 8, 11, 14, 17, 19, 22)
-TWS_LAG = timedelta(hours=3, minutes=3)
+# Peak Hour Performers: 1H launch scan slots (bar close + 15 min)
+PHP_LAUNCH_HOURS_ET = (7, 11, 12, 13)
+PHP_LAUNCH_LAG_MIN = 15
 
 
 def _safe_float(x, default: float = 0.0) -> float:
@@ -66,6 +67,7 @@ def _updated_hhmm_et(updated) -> str | None:
 
 
 def _next_tsd_scan_countdown() -> str:
+    """Countdown to next Peak Hour Performers 1H launch tick (:15 after bar close)."""
     et = pytz.timezone("America/New_York")
     now_et = datetime.now(et)
     candidates: list[datetime] = []
@@ -73,9 +75,8 @@ def _next_tsd_scan_countdown() -> str:
         d = now_et.date() + timedelta(days=day_offset)
         if d.weekday() >= 5:
             continue
-        for hour in IBKR_3H_CLOSE_HOURS_ET:
-            close = et.localize(datetime.combine(d, dtime(hour, 0)))
-            slot = close + TWS_LAG
+        for hour in PHP_LAUNCH_HOURS_ET:
+            slot = et.localize(datetime.combine(d, dtime(hour, PHP_LAUNCH_LAG_MIN)))
             if slot > now_et:
                 candidates.append(slot)
     if not candidates:
@@ -293,7 +294,7 @@ def _render_tsd_open_card(row: dict) -> None:
     bar_ts = str(row.get("last_bar_time") or "")[:19]
     cap = f"Updated: {hhmm} ET" if hhmm else "Updated: —"
     if bar_ts:
-        cap += f" · 3H bar {bar_ts}"
+                cap += f" · 1H bar {bar_ts}"
     st.caption(cap)
     st.divider()
 
@@ -352,7 +353,10 @@ def render_live_status_tab(
     closed_stats = tsd_closed_stats(tsd_closed)
 
     with st.container(border=True):
-        section_header("Session KPIs (TSD)", "3HR swing pool — separate from gap runoff")
+        section_header(
+            "Session KPIs",
+            "Peak Hour Performers · $3k paper pool (slot ladder)",
+        )
         cap = (
             "Equity = cash + marked positions · realized from closed legs"
         )
@@ -409,7 +413,7 @@ def render_live_status_tab(
     with st.container(border=True):
         section_header(
             "Entry Pipeline",
-            "UTS v2 watch queue — LAUNCH + quality gates (news is context only)",
+            "HTF + 1H LAUNCH · hours 07/11/12/13 @ :15 · analogs soft-only (never veto)",
         )
         if tsd_err:
             st.caption(tsd_err)
@@ -433,13 +437,13 @@ def render_live_status_tab(
 
     with st.container(border=True):
         section_header(
-            "Open Positions (TSD)",
-            "3-layer: kill (catastrophe) · structure (thesis) · trail (profit)",
+            "Open Positions",
+            "KILL ONLY until +1R · then BE lock · 4-tranche trail",
         )
         if tsd_err:
             st.error(tsd_err)
         elif not tsd_rows:
-            st.info("No open TSD positions in Supabase.")
+            st.info("No open Peak Hour Performers positions.")
         else:
             for row in tsd_rows:
                 _render_tsd_open_card(row)
@@ -456,13 +460,13 @@ def render_live_status_tab(
 
     with st.container(border=True):
         section_header(
-            "TSD Watchlist",
-            "Watch-10 from last scan — Launch score primary; Ext = extension risk",
+            "Watchlist",
+            "Last scan context — Launch score primary; Ext = extension risk",
         )
         if tsd_err:
             st.caption(tsd_err)
         elif not tsd_watch:
-            st.info("No TSD watchlist in Supabase yet — runs after next TSD scan.")
+            st.info("No watchlist yet — runs after next 1H launch scan.")
         else:
             wl_rows = []
             for r in tsd_watch:
@@ -521,7 +525,7 @@ def render_live_header(
     except Exception:
         pass
     with col1:
-        brand_block(live_et, subtitle="TSD 3HR Swing · Live Paper")
+        brand_block(live_et, subtitle="Peak Hour Performers · Live Paper")
     with col2:
         st.metric("Version", f"v{system_version}")
     with col3:
@@ -543,11 +547,11 @@ def render_tsd_trade_log(
         err = str(exc)
 
     with st.container(border=True):
-        section_header("TSD Trade Log", "Closed 3HR swing legs")
+        section_header("Trade Log", "Closed Peak Hour Performers legs")
         if err:
-            st.caption(f"TSD closed legs unavailable: {err}")
+            st.caption(f"Closed legs unavailable: {err}")
         elif not closed:
-            st.info("No closed TSD legs yet.")
+            st.info("No closed legs yet — Peak Hour Performers v3.0 clean slate.")
         else:
             log = pd.DataFrame(closed)
             log["Ticker"] = log["symbol"]
@@ -601,7 +605,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
         err = str(exc)
 
     with st.container(border=True):
-        section_header("TSD Performance", "3HR swing book — closed legs + pool history")
+        section_header("Performance", "Peak Hour Performers book — closed legs + pool")
         if err:
             st.caption(f"TSD performance unavailable: {err}")
             return
@@ -617,7 +621,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             s4.metric("Win Rate", "—")
 
     with st.container(border=True):
-        section_header("TSD Equity Curve", "Pool cash + deployed over time")
+        section_header("Equity Curve", "Pool cash + marked equity over time")
         if pool_history:
             hist_df = pd.DataFrame(pool_history)
             dates = pd.to_datetime(hist_df["snapshot_date"])
@@ -652,7 +656,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             st.info("No TSD pool history yet.")
 
     with st.container(border=True):
-        section_header("TSD P&L Per Trade", "Closed legs only")
+        section_header("P&L Per Trade", "Closed legs only")
         if closed:
             plot_df = pd.DataFrame(closed)
             plot_df["label"] = (
