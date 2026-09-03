@@ -47,12 +47,18 @@ Write-Host "TSD weekly scorecard..."
 $rc1 = $LASTEXITCODE
 if ($null -eq $rc1) { $rc1 = 0 }
 
+Write-Host "Peak Hour weekly funnel..."
+$PhpFunnel = Join-Path $CandDir "uts_v2\php_weekly_funnel.py"
+& $Python $PhpFunnel --days 7 --write *>> $LogFile
+$rcPhp = $LASTEXITCODE
+if ($null -eq $rcPhp) { $rcPhp = 0 }
+
 Write-Host "TSD options overlay study..."
 & $Python $OptionsStudy --days 5 --write *>> $LogFile
 $rc2 = $LASTEXITCODE
 if ($null -eq $rc2) { $rc2 = 0 }
 
-$exitCode = if ($rc1 -ne 0 -or $rc2 -ne 0) { 1 } else { 0 }
+$exitCode = if ($rc1 -ne 0 -or $rc2 -ne 0 -or $rcPhp -ne 0) { 1 } else { 0 }
 $endStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
-Add-Content -LiteralPath $LogFile -Value "======== TSD WEEKLY REPORTS END exit=$exitCode scorecard=$rc1 study=$rc2 $endStamp ========"
+Add-Content -LiteralPath $LogFile -Value "======== TSD WEEKLY REPORTS END exit=$exitCode scorecard=$rc1 php_funnel=$rcPhp study=$rc2 $endStamp ========"
 exit $exitCode

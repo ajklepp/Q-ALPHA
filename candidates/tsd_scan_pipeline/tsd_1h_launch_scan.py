@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ CANDIDATES_DIR = PIPELINE_DIR.parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
+from tsd_scan_pipeline.php_scan_funnel import (  # noqa: E402
+    build_scan_funnel_doc,
+    write_scan_funnel,
+)
 from tsd_scan_pipeline.tsd_1h_signal import (
     ALLOWED_HOURS,
     BAR_SOURCE,
@@ -158,6 +163,37 @@ def evaluate_1h_symbol(
     return out
 
 
+def _persist_funnel(
+    *,
+    now_et: datetime,
+    htf_pass_count: int,
+    symbols_scanned: int,
+    all_rows: list[dict[str, Any]],
+    ranked: list[dict[str, Any]],
+    take: list[dict[str, Any]],
+    queue_results: list[dict[str, Any]] | None,
+    entry_results: list[dict[str, Any]] | None,
+    t0: float,
+    live: bool,
+) -> Path:
+    """Write research funnel artifact (dashboard board stays passers-only)."""
+    doc = build_scan_funnel_doc(
+        now_et=now_et,
+        bar_source=BAR_SOURCE,
+        hours=sorted(ALLOWED_HOURS),
+        htf_pass_count=htf_pass_count,
+        symbols_scanned=symbols_scanned,
+        all_rows=all_rows,
+        ranked=ranked,
+        take=take,
+        queue_results=queue_results,
+        entry_results=entry_results,
+        runtime_sec=time.time() - t0,
+        live=live,
+    )
+    return write_scan_funnel(doc, now_et=now_et)
+
+
 def run_1h_launch_scan(
     *,
     live: bool = False,
@@ -165,6 +201,7 @@ def run_1h_launch_scan(
     now: datetime | None = None,
 ) -> int:
     """Hourly 1H LAUNCH scan on today's HTF-pass universe."""
+    t0 = time.time()
     now_et = now or datetime.now(ET)
     if now_et.tzinfo is None:
         now_et = ET.localize(now_et)
@@ -188,7 +225,8 @@ def run_1h_launch_scan(
     symbols = htf_pass_symbols()
     if max_symbols:
         symbols = symbols[:max_symbols]
-    print(f"HTF-pass universe: {len(symbols)}")
+    htf_pass_count = len(symbols)
+    print(f"HTF-pass universe: {htf_pass_count}")
 
     book = load_state()
     reset_scan_counter(book)
@@ -222,6 +260,7 @@ def run_1h_launch_scan(
 
     queue_results: list[dict[str, Any]] = []
     entry_results: list[dict[str, Any]] = []
+    exit_code = 0
 
     if live and take:
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
@@ -256,40 +295,28 @@ def run_1h_launch_scan(
                     notify_tsd(format_queue_skip_summary(len(take), skipped))
                 except Exception:
                     pass
-            _write_launch_artifact(
-                now_et=now_et,
-                ranked=ranked,
-                take=take,
-                queue_results=queue_results,
-            )
-            print("=" * 64)
-            return 0
+        else:
+            from ib_insync import IB, util
 
-        from ib_insync import IB, util
-
-        util.startLoop()
-        ib = IB()
-        try:
-            ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
-        except Exception as exc:
-            print(f"CONNECT FAILED: {exc}")
-            _write_launch_artifact(
-                now_et=now_et,
-                ranked=ranked,
-                take=take,
-                queue_results=queue_results,
-            )
-            return 1
-        book = load_state()
-        reset_scan_counter(book)
-        entry_results = execute_live_entries(ib, enter_rows, book)
-        save_state(book)
-        try:
-            ib.disconnect()
-        except Exception:
-            pass
-        for fill in entry_results:
-            print(f"  {fill.get('symbol')} {fill.get('status')} {fill.get('reason', '')}")
+            util.startLoop()
+            ib = IB()
+            try:
+                ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
+            except Exception as exc:
+                print(f"CONNECT FAILED: {exc}")
+                exit_code = 1
+                ib = None
+            if ib is not None:
+                book = load_state()
+                reset_scan_counter(book)
+                entry_results = execute_live_entries(ib, enter_rows, book)
+                save_state(book)
+                try:
+                    ib.disconnect()
+                except Exception:
+                    pass
+                for fill in entry_results:
+                    print(f"  {fill.get('symbol')} {fill.get('status')} {fill.get('reason', '')}")
 
     _write_launch_artifact(
         now_et=now_et,
@@ -298,9 +325,21 @@ def run_1h_launch_scan(
         queue_results=queue_results,
         entry_results=entry_results,
     )
+    _persist_funnel(
+        now_et=now_et,
+        htf_pass_count=htf_pass_count,
+        symbols_scanned=len(rows),
+        all_rows=rows,
+        ranked=ranked,
+        take=take,
+        queue_results=queue_results,
+        entry_results=entry_results,
+        t0=t0,
+        live=live,
+    )
 
     print("=" * 64)
-    return 0
+    return exit_code
 
 
 def main() -> int:

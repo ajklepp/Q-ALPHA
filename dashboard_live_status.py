@@ -754,6 +754,14 @@ def render_live_status_tab(
             "Peak Hour launches",
             "Today's 1H @ :15 board — queue + OPEN (not legacy 3H watchlist)",
         )
+        try:
+            from tsd_scan_pipeline.php_scan_funnel import funnel_caption
+
+            cap_line = funnel_caption()
+            if cap_line:
+                st.caption(cap_line)
+        except Exception:
+            pass
         board_rows, fallback_cap = _build_peak_hour_launch_board(
             tsd_queue, tsd_rows, tsd_watch,
         )
