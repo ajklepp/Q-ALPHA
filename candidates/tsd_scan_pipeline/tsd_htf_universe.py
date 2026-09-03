@@ -23,7 +23,12 @@ CANDIDATES_DIR = PIPELINE_DIR.parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
-from tsd_scan_pipeline.tsd_htf_gates import HTF_BARS_NEEDED, HTF_RANGE_20D_MIN, compute_htf_metrics
+from tsd_scan_pipeline.tsd_htf_gates import (
+    HTF_BARS_NEEDED,
+    HTF_RANGE_20D_MIN,
+    compute_htf_metrics,
+    compute_htf_rank_score,
+)
 from tsd_scan_pipeline.universe_tsd import (
     MIN_PRICE,
     POLYGON_BASE,
@@ -136,6 +141,9 @@ def build_htf_universe(*, refresh: bool = False, polygon_key: str | None = None)
             "htf_range_20d_pct": metrics.get("range_20d_pct"),
             "htf_close_above_sma50": True,
             "htf_sma20_rising": True,
+            "htf_dist_sma50_pct": metrics.get("dist_sma50_pct"),
+            "htf_sma20_slope_pct": metrics.get("sma20_slope_pct"),
+            "htf_score": compute_htf_rank_score(metrics),
             "close": px,
         })
 

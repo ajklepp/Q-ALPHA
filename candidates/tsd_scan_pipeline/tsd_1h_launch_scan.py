@@ -34,7 +34,7 @@ from tsd_scan_pipeline.tsd_capacity import (
     reset_scan_counter,
     save_state,
 )
-from tsd_scan_pipeline.tsd_htf_gates import compute_combined_rank_score
+from tsd_scan_pipeline.tsd_htf_gates import compute_combined_rank_score, compute_htf_rank_score
 from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe, htf_pass_symbols
 from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
 from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue, execute_live_entries
@@ -42,12 +42,21 @@ from tsd_scan_pipeline.universe_tsd import load_polygon_key
 
 ET = pytz.timezone("America/New_York")
 
+QUEUE_ADMIT_STATUSES = {"ADDED", "UPDATED", "WATCHING"}
+
 
 def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rank by continuous HTF+launch; tie-break lower scan_score."""
     passed = [r for r in rows if r.get("pass")]
     for row in passed:
+        enriched = enrich_launch_fields(row)
+        if row.get("htf_range_20d_pct") is not None:
+            row["htf_score"] = compute_htf_rank_score(row)
+        elif row.get("htf_score") is None:
+            row["htf_score"] = 0.0
+        row["launch_score"] = enriched.get("launch_score")
         row["combined_rank_score"] = compute_combined_rank_score(
-            enrich_launch_fields(row),
+            {**enriched, "htf_score": row["htf_score"]},
         )
     passed.sort(
         key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
@@ -148,8 +157,23 @@ def run_1h_launch_scan(
         )
 
     if live and take:
-        print("\n--- WATCH QUEUE / ENTER (1H close = entry ref) ---")
-        add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
+        print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
+        queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
+        admitted: set[str] = set()
+        for qr in queue_results:
+            sym = str(qr.get("symbol", "")).upper()
+            st = str(qr.get("status", "")).upper()
+            if st in QUEUE_ADMIT_STATUSES:
+                admitted.add(sym)
+            else:
+                print(f"  LIVE SKIP {sym}: status={st} reason={qr.get('reason', '')}")
+
+        enter_rows = [r for r in take if str(r.get("symbol", "")).upper() in admitted]
+        if not enter_rows:
+            print("  No queue-admitted names to enter")
+            print("=" * 64)
+            return 0
+
         from ib_insync import IB, util
 
         util.startLoop()
@@ -161,7 +185,7 @@ def run_1h_launch_scan(
             return 1
         book = load_state()
         reset_scan_counter(book)
-        results = execute_live_entries(ib, take, book)
+        results = execute_live_entries(ib, enter_rows, book)
         save_state(book)
         try:
             ib.disconnect()

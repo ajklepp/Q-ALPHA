@@ -1,7 +1,10 @@
 """
 Q-ALPHA UTS v2 Phase 2 — quality + history gate (NOT a news veto).
 
-Research filter: instrument safety, liquidity, profiler analog depth/win rate.
+Hard blocks: instrument safety, liquidity (mcap / dollar vol when present),
+price floor, not_extension.
+Analogs (count / win rate) are soft context only — never veto entry.
+Optional for kill sizing via tsd_profile.kill_pct when present.
 News/sentiment are context tags only — never block admission.
 """
 from __future__ import annotations
@@ -21,7 +24,6 @@ if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
 from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
-from tsd_scan_pipeline.tsd_profiler import MIN_TSD_ANALOGS
 from tsd_scan_pipeline.universe_tsd import (
     MCAP_MIN,
     MIN_DOLLAR_VOL_20D,
@@ -33,7 +35,7 @@ from universe_filter import passes_instrument_safety
 
 ET = pytz.timezone("America/New_York")
 
-# Hard-block thresholds
+# Soft-context thresholds (never hard-block)
 ANALOG_WIN_RATE_MIN = 40.0  # percent of decisive analog outcomes (WIN vs LOSS)
 MIN_PRICE_FLOOR = 5.0
 LOW_FLOAT_SPEC_SHARES = 15_000_000
@@ -78,7 +80,7 @@ def compute_analog_win_rate(profile: dict[str, Any]) -> float | None:
     """
     Win rate (%) from profile analog_win_rate or measured outcome stats.
 
-    Decisive outcomes = WIN + LOSS (FLAT excluded).
+    Decisive outcomes = WIN + LOSS (FLAT excluded). Soft context only.
     """
     if profile.get("analog_win_rate") is not None:
         return float(profile["analog_win_rate"])
@@ -127,7 +129,7 @@ def evaluate_quality_history_gate(
     candidate: dict[str, Any],
 ) -> tuple[bool, dict[str, bool], list[str]]:
     """
-    Hard quality/history blocks only. News never vetoes.
+    Hard quality/history blocks only. Analogs and news never veto.
 
     Returns (passed, gates_dict, reasons).
     """
@@ -147,11 +149,12 @@ def evaluate_quality_history_gate(
         "mcap_floor": True if mcap is None else float(mcap) >= MCAP_MIN,
         "dollar_vol_floor": True if dollar_vol is None else float(dollar_vol) >= MIN_DOLLAR_VOL_20D,
         "price_floor": price >= MIN_PRICE_FLOOR if price > 0 else True,
-        "analog_count": analog_count >= MIN_TSD_ANALOGS,
-        "analog_win_rate": True,  # Phase 2.5: demoted — never hard-blocks
+        "analog_count": True,  # soft context — never hard-blocks (stored on enrich)
+        "analog_win_rate": True,  # soft context — never hard-blocks
         "not_extension": row.get("phase") != "EXTENSION",
         "no_distress": not distress if not FUNDAMENTAL_DISTRESS_SPEC_ONLY else True,
     }
+    _ = (analog_count, win_rate)  # computed for callers via enrich_queue_row
 
     reasons: list[str] = []
     if not gates["instrument_safety"]:
@@ -162,8 +165,6 @@ def evaluate_quality_history_gate(
         reasons.append(f"dollar_vol<{MIN_DOLLAR_VOL_20D:.0f}")
     if not gates["price_floor"]:
         reasons.append(f"price<{MIN_PRICE_FLOOR:.0f}")
-    if not gates["analog_count"]:
-        reasons.append(f"analog_count<{MIN_TSD_ANALOGS}")
     if not gates["not_extension"]:
         reasons.append("extension_phase")
     if distress and not FUNDAMENTAL_DISTRESS_SPEC_ONLY:

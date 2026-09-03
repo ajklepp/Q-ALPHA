@@ -40,6 +40,7 @@ WEAK_PROFILE = {
     "symbol": "WEAK",
     "scan_score": 34.0,
     "buy_signal": True,
+    "close": 5.25,
     "wt_gap": 5.0,
     "market_cap": 500_000_000,
     "tsd_profile": {
@@ -48,6 +49,16 @@ WEAK_PROFILE = {
         "analog_wins": 11,
         "analog_losses": 23,
     },
+}
+
+NO_ANALOGS = {
+    "symbol": "NEWCO",
+    "scan_score": 34.0,
+    "buy_signal": True,
+    "close": 6.50,
+    "open": 6.60,
+    "wt_gap": 5.0,
+    "market_cap": 500_000_000,
 }
 
 
@@ -74,15 +85,29 @@ class TestQualityHistoryGate(unittest.TestCase):
         self.assertEqual(tagged["catalyst_tier"], 0)
 
     @patch("tsd_scan_pipeline.quality_history_gate.passes_instrument_safety", return_value=True)
-    def test_fails_low_analog_win_rate(self, _safe):
+    def test_low_analog_win_rate_does_not_block(self, _safe):
         passed, gates, reasons = evaluate_quality_history_gate(WEAK_PROFILE)
-        self.assertFalse(passed)
-        self.assertFalse(gates["analog_win_rate"])
-        self.assertTrue(any("analog_win_rate" in r for r in reasons))
+        self.assertTrue(passed, msg=reasons)
+        self.assertTrue(gates["analog_win_rate"])
+        self.assertTrue(gates["analog_count"])
+        self.assertFalse(any("analog_win_rate" in r for r in reasons))
         self.assertLess(
             compute_analog_win_rate(WEAK_PROFILE["tsd_profile"]),
             ANALOG_WIN_RATE_MIN,
         )
+
+    @patch("tsd_scan_pipeline.quality_history_gate.passes_instrument_safety", return_value=True)
+    def test_zero_analogs_passes_if_safety_price_ok(self, _safe):
+        passed, gates, reasons = evaluate_quality_history_gate(NO_ANALOGS)
+        self.assertTrue(passed, msg=reasons)
+        self.assertTrue(gates["analog_count"])
+        self.assertTrue(gates["price_floor"])
+        self.assertEqual(reasons, [])
+
+        missing_profile = {**NO_ANALOGS, "tsd_profile": {}}
+        passed2, gates2, _ = evaluate_quality_history_gate(missing_profile)
+        self.assertTrue(passed2)
+        self.assertTrue(gates2["analog_count"])
 
     @patch("tsd_scan_pipeline.quality_history_gate.passes_instrument_safety", return_value=True)
     def test_negative_sentiment_does_not_block(self, _safe):

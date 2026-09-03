@@ -1,10 +1,12 @@
 """
 Q-ALPHA UTS v2 Phase 2.5 — daily HTF entry gates (signal-day close, no look-ahead).
 
-Gates (all required):
+Hard gates (all required):
   - 20d range >= 25%
   - close > SMA50
   - SMA20 rising (SMA20 now > SMA20 10 sessions ago)
+
+htf_score is a continuous rank among passers (not 33.3×3 flat).
 """
 from __future__ import annotations
 
@@ -50,7 +52,19 @@ def compute_htf_metrics(closes: list[float], highs: list[float], lows: list[floa
     signal_close = closes[-1]
     sma50 = _sma(closes, 50)
     sma20_now = _sma(closes, 20)
-    sma20_prior = _sma(closes[:-HTF_SMA_RISE_LOOKBACK], 20) if len(closes) > 20 + HTF_SMA_RISE_LOOKBACK else None
+    sma20_prior = (
+        _sma(closes[:-HTF_SMA_RISE_LOOKBACK], 20)
+        if len(closes) > 20 + HTF_SMA_RISE_LOOKBACK
+        else None
+    )
+
+    dist_sma50 = None
+    if sma50 is not None and sma50 > 0:
+        dist_sma50 = (signal_close - sma50) / sma50
+
+    sma20_slope = None
+    if sma20_now is not None and sma20_prior is not None and sma20_prior > 0:
+        sma20_slope = (sma20_now - sma20_prior) / sma20_prior
 
     return {
         "insufficient_bars": False,
@@ -59,6 +73,8 @@ def compute_htf_metrics(closes: list[float], highs: list[float], lows: list[floa
         "sma50": sma50,
         "sma20": sma20_now,
         "sma20_prior": sma20_prior,
+        "dist_sma50_pct": round(dist_sma50, 4) if dist_sma50 is not None else None,
+        "sma20_slope_pct": round(sma20_slope, 4) if sma20_slope is not None else None,
         "close_above_sma50": sma50 is not None and signal_close > sma50,
         "sma20_rising": (
             sma20_now is not None
@@ -70,6 +86,39 @@ def compute_htf_metrics(closes: list[float], highs: list[float], lows: list[floa
     }
 
 
+def compute_htf_rank_score(metrics_or_row: dict[str, Any]) -> float:
+    """
+    Continuous 0–100 HTF rank score for slot ordering among passers.
+
+    Hard gates stay binary elsewhere; this spreads passers so rank is not
+    launch_score-only (old flat ~99.9 for every passer).
+    """
+    range_pct = float(
+        metrics_or_row.get("range_20d_pct")
+        or metrics_or_row.get("htf_range_20d_pct")
+        or 0.0
+    )
+    # 25%→20 pts, 100%→70 pts (linear between; cap 70)
+    range_pts = 20.0 + max(0.0, (range_pct - HTF_RANGE_20D_MIN) / 0.75) * 50.0
+    range_pts = min(70.0, range_pts)
+
+    dist = metrics_or_row.get("dist_sma50_pct")
+    if dist is None:
+        dist = metrics_or_row.get("htf_dist_sma50_pct")
+    dist_f = float(dist) if dist is not None else 0.0
+    # 0–20% above SMA50 → 0–20 pts
+    dist_pts = min(20.0, max(0.0, dist_f * 100.0))
+
+    slope = metrics_or_row.get("sma20_slope_pct")
+    if slope is None:
+        slope = metrics_or_row.get("htf_sma20_slope_pct")
+    slope_f = float(slope) if slope is not None else 0.0
+    # ~5% SMA20 rise over lookback → 10 pts
+    slope_pts = min(10.0, max(0.0, slope_f * 200.0))
+
+    return round(min(100.0, max(0.0, range_pts + dist_pts + slope_pts)), 1)
+
+
 def evaluate_htf_daily_gates(
     row: dict[str, Any],
     *,
@@ -78,7 +127,7 @@ def evaluate_htf_daily_gates(
     """
     Evaluate daily HTF gates for a candidate.
 
-    Returns (passed, gates, reasons, htf_score 0-100).
+    Returns (passed, gates, reasons, htf_score 0-100 continuous rank).
     Pre-enriched row fields bypass Polygon fetch when all present.
     """
     sym = str(row.get("symbol", "")).upper()
@@ -92,6 +141,8 @@ def evaluate_htf_daily_gates(
             "sma20_rising": bool(row.get("htf_sma20_rising")),
             "range_ok": float(row["htf_range_20d_pct"]) >= HTF_RANGE_20D_MIN,
             "price_ok": float(row.get("close") or row.get("htf_1h_close") or 99) >= HTF_MIN_PRICE,
+            "dist_sma50_pct": row.get("htf_dist_sma50_pct"),
+            "sma20_slope_pct": row.get("htf_sma20_slope_pct"),
         }
     else:
         metrics = _fetch_htf_metrics(sym, polygon_key=polygon_key)
@@ -122,13 +173,9 @@ def evaluate_htf_daily_gates(
     if not gates["price_floor"]:
         reasons.append(f"price<{HTF_MIN_PRICE:.0f}")
 
-  # HTF score: ~33 pts per gate
-    htf_score = round(
-        sum(33.3 for k in ("range_20d", "close_above_sma50", "sma20_rising") if gates[k]),
-        1,
-    )
     passed = all(gates.values())
-    return passed, gates, reasons, min(100.0, htf_score)
+    htf_score = compute_htf_rank_score({**metrics, **row}) if passed else 0.0
+    return passed, gates, reasons, htf_score
 
 
 def compute_combined_rank_score(row: dict[str, Any]) -> float:
