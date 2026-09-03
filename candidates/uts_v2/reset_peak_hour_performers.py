@@ -120,7 +120,7 @@ def archive_and_reset(*, dry_run: bool = False) -> Path:
 
     print("")
     print("Defaults: pool=$3000 deployed=$0 book=[] queue=[] last_runs={}")
-    print("Aaron: cancel ALL TWS paper working orders + flatten any orphans before next live scan.")
+    print("Next: .\\venv\\Scripts\\python.exe candidates\\uts_v2\\flatten_tws_paper.py --dry-run then --live")
     print("=" * 64)
     return archive_dir
 
@@ -128,8 +128,22 @@ def archive_and_reset(*, dry_run: bool = False) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="PHP v3.0 archive + reset local paper state")
     parser.add_argument("--dry-run", action="store_true", help="Print actions only")
+    parser.add_argument(
+        "--also-flatten-tws",
+        action="store_true",
+        help="After JSON reset, run flatten_tws_paper.py --live",
+    )
     args = parser.parse_args()
     archive_and_reset(dry_run=args.dry_run)
+    if args.also_flatten_tws and not args.dry_run:
+        import importlib.util
+
+        path = Path(__file__).resolve().parent / "flatten_tws_paper.py"
+        spec = importlib.util.spec_from_file_location("flatten_tws_paper", path)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return int(mod.run(live=True, port=7497, allow_live_port=False))
     return 0
 
 
