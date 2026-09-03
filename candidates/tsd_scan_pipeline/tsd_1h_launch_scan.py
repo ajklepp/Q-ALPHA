@@ -226,6 +226,12 @@ def run_1h_launch_scan(
     if live and take:
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
         queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
+        try:
+            from tsd_supabase_sync import push_dashboard_best_effort
+
+            push_dashboard_best_effort(telegram_on_fail=False)
+        except Exception as exc:
+            print(f"  post-queue dashboard sync warn: {exc}")
         admitted: set[str] = set()
         skipped: list[dict[str, Any]] = []
         for qr in queue_results:

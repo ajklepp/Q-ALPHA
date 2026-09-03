@@ -335,6 +335,85 @@ def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _board_rows_from_local_queue_and_book(
+    *,
+    open_symbols_set: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build Peak Hour watchlist rows from local queue + open book (cloud queue table may be absent)."""
+    open_set = {s.upper() for s in (open_symbols_set or set())}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    # Open book first → ENTERED
+    try:
+        book = load_state()
+        for i, pos in enumerate(book.get("positions") or [], 1):
+            if str(pos.get("status") or "").upper() != "OPEN":
+                continue
+            sym = str(pos.get("symbol") or "").upper()
+            if not sym:
+                continue
+            for leg in pos.get("legs") or []:
+                if str(leg.get("status") or "").upper() != "OPEN":
+                    continue
+                open_set.add(sym)
+                rows.append({
+                    "symbol": sym,
+                    "rank": i,
+                    "scan_score": _finite(leg.get("scan_score")),
+                    "launch_score": _finite(leg.get("launch_score") or leg.get("scan_score")),
+                    "phase": leg.get("phase"),
+                    "buy_signal": True,
+                    "entry_price": _finite(leg.get("price")),
+                    "wt_gap": _finite(leg.get("htf_1h_bar_hour")),
+                    "in_book": True,
+                    "trade_pick": True,
+                    "status_label": "ENTERED",
+                    "profiler_pass": True,
+                    "tags": ["ENTERED", "from_book"],
+                })
+                seen.add(sym)
+                break
+    except Exception as exc:
+        print(f"  board-from-book warn: {exc}")
+
+    # Local queue
+    try:
+        if WATCH_QUEUE_PATH.exists():
+            payload = json.loads(WATCH_QUEUE_PATH.read_text(encoding="utf-8"))
+            for q in payload.get("queue") or []:
+                sym = str(q.get("symbol") or "").upper()
+                if not sym or sym in seen:
+                    continue
+                st = str(q.get("status") or "QUEUED").upper()
+                if sym in open_set:
+                    label = "ENTERED"
+                elif st in ("WATCHING", "ADDED", "UPDATED", "CONFIRMED", "QUEUED"):
+                    label = "QUEUED"
+                elif st in ("SKIP", "SKIPPED"):
+                    label = "SKIP"
+                else:
+                    label = st
+                rows.append({
+                    "symbol": sym,
+                    "rank": len(rows) + 1,
+                    "scan_score": _finite(q.get("htf_score") or q.get("scan_score")),
+                    "launch_score": _finite(q.get("launch_score") or q.get("combined_rank_score")),
+                    "phase": q.get("phase"),
+                    "buy_signal": bool(q.get("buy_signal") or q.get("htf_1h_buy_signal")),
+                    "entry_price": _finite(q.get("htf_1h_close") or q.get("cross_level")),
+                    "wt_gap": _finite(q.get("htf_1h_bar_hour")),
+                    "in_book": sym in open_set,
+                    "trade_pick": label == "ENTERED",
+                    "status_label": label,
+                    "profiler_pass": True,
+                    "tags": [f"hour={q.get('htf_1h_bar_hour')}", label, "from_queue"],
+                })
+                seen.add(sym)
+    except Exception as exc:
+        print(f"  board-from-queue warn: {exc}")
+    return rows
+
+
 def sync_tsd_watchlist_from_file(
     *,
     open_symbols_set: set[str] | None = None,
@@ -343,13 +422,60 @@ def sync_tsd_watchlist_from_file(
     """
     Upsert Peak Hour 1H launch board to tsd_watchlist (dashboard SoT).
 
-    Uses last_1h_launch.json — NOT the legacy 3H last_watchlist.json.
-    If no 1H artifact yet, clears cloud watchlist so stale Sep-2 names disappear.
+    Prefer last_1h_launch.json; else local queue + open book.
+    Never leave the board empty while local HPE is OPEN.
     """
-    open_set = open_symbols_set or set()
-    trade_set = trade_symbols or set()
-    if not LAUNCH_CACHE.exists():
-        print("  Peak Hour launch cache missing — clearing stale tsd_watchlist")
+    open_set = set(open_symbols_set or set())
+    trade_set = set(trade_symbols or set())
+    rows: list[dict[str, Any]] = []
+    scan_at = datetime.now(ET).isoformat()
+
+    if LAUNCH_CACHE.exists():
+        try:
+            payload = json.loads(LAUNCH_CACHE.read_text(encoding="utf-8"))
+            scan_at = str(payload.get("updated_at") or scan_at)
+            for r in payload.get("rows") or []:
+                sym = str(r.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                status = str(r.get("status") or "SIGNAL").upper()
+                if sym in open_set or status == "ENTERED":
+                    status_label = "ENTERED"
+                elif status in ("QUEUED", "WATCHING", "ADDED", "UPDATED", "TAKE"):
+                    status_label = "QUEUED"
+                elif status in ("SKIP", "SKIPPED"):
+                    status_label = "SKIP"
+                else:
+                    status_label = status
+                rows.append({
+                    "symbol": sym,
+                    "rank": int(r.get("rank") or 0),
+                    "scan_score": _finite(r.get("htf_score")),
+                    "launch_score": _finite(r.get("launch_score") or r.get("combined_rank_score")),
+                    "phase": r.get("phase"),
+                    "buy_signal": bool(r.get("buy_signal")),
+                    "entry_price": _finite(r.get("htf_1h_close")),
+                    "wt_gap": _finite(r.get("htf_1h_bar_hour")),
+                    "early_bull": False,
+                    "in_book": sym in open_set,
+                    "trade_pick": sym in trade_set or status_label == "ENTERED",
+                    "status_label": status_label,
+                    "profiler_pass": True,
+                    "tags": [f"hour={r.get('htf_1h_bar_hour')}", status_label],
+                    "scan_at": scan_at,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as exc:
+            print(f"  launch cache read warn: {exc}")
+
+    if not rows:
+        rows = _board_rows_from_local_queue_and_book(open_symbols_set=open_set)
+        if rows:
+            print(f"  Peak Hour board from local queue/book: {len(rows)} row(s)")
+            scan_at = datetime.now(ET).isoformat()
+
+    if not rows:
+        print("  Peak Hour board empty — clearing stale tsd_watchlist")
         try:
             from supabase_sync import SupabaseSync
 
@@ -357,45 +483,7 @@ def sync_tsd_watchlist_from_file(
         except Exception as exc:
             print(f"  clear watchlist warn: {exc}")
         return 0
-    try:
-        payload = json.loads(LAUNCH_CACHE.read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"  launch cache read warn: {exc}")
-        return 0
-    launch_rows = payload.get("rows") or []
-    scan_at = str(payload.get("updated_at") or datetime.now(ET).isoformat())
-    rows: list[dict[str, Any]] = []
-    for r in launch_rows:
-        sym = str(r.get("symbol") or "").upper()
-        if not sym:
-            continue
-        status = str(r.get("status") or "SIGNAL").upper()
-        if sym in open_set or status == "ENTERED":
-            status_label = "ENTERED"
-        elif status in ("QUEUED", "WATCHING", "ADDED", "UPDATED", "TAKE"):
-            status_label = "QUEUED"
-        elif status in ("SKIP", "SKIPPED"):
-            status_label = "SKIP"
-        else:
-            status_label = status
-        rows.append({
-            "symbol": sym,
-            "rank": int(r.get("rank") or 0),
-            "scan_score": _finite(r.get("htf_score")),
-            "launch_score": _finite(r.get("launch_score") or r.get("combined_rank_score")),
-            "phase": r.get("phase"),
-            "buy_signal": bool(r.get("buy_signal")),
-            "entry_price": _finite(r.get("htf_1h_close")),
-            "wt_gap": _finite(r.get("htf_1h_bar_hour")),  # reuse col as Hour for board
-            "early_bull": False,
-            "in_book": sym in open_set,
-            "trade_pick": sym in trade_set or status_label == "ENTERED",
-            "status_label": status_label,
-            "profiler_pass": True,
-            "tags": [f"hour={r.get('htf_1h_bar_hour')}", status_label],
-            "scan_at": scan_at,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+
     return sync_tsd_watchlist_to_supabase(
         rows,
         scan_at=scan_at,
@@ -540,7 +628,7 @@ def push_dashboard_best_effort(
     telegram_on_fail: bool = False,
 ) -> dict[str, Any]:
     """
-    Best-effort book → Supabase push after entry/exit.
+    Best-effort book → Supabase push after entry/exit/queue admit.
 
     Never raises. Optional Telegram if sync fails hard.
     """
@@ -550,7 +638,19 @@ def push_dashboard_best_effort(
         )
     except Exception as exc:
         print(f"  dashboard sync warn: {exc}")
-        summary = {"verify_errors": [f"push:{exc}"], "upserted": 0}
+        summary = {
+            "verify_errors": [f"push:{exc}"],
+            "upserted": 0,
+            "watch_queue_synced": 0,
+            "watchlist_synced": 0,
+        }
+    print(
+        f"  push_dashboard: open={summary.get('upserted')} "
+        f"closed={summary.get('closed_upserted')} "
+        f"pool={summary.get('pool_synced')} "
+        f"watchlist={summary.get('watchlist_synced')} "
+        f"queue={summary.get('watch_queue_synced')}"
+    )
     errs = summary.get("verify_errors") or []
     if telegram_on_fail and errs:
         try:
@@ -666,12 +766,31 @@ def sync_tsd_positions_to_supabase(
 
     try:
         summary["watch_queue_synced"] = sync_tsd_watch_queue_from_file()
+        print(f"  watch_queue_synced={summary['watch_queue_synced']}")
     except Exception as exc:
         err = str(exc)
         if "PGRST205" in err or "tsd_watch_queue" in err:
-            print(f"  TSD watch_queue table missing (optional): {exc}")
+            msg = (
+                "*** TSD watch_queue table MISSING (PGRST205) — "
+                "run candidates/sql/tsd_cloud.sql; board uses tsd_watchlist mirror ***"
+            )
+            print(f"  {msg}")
+            summary["watch_queue_missing"] = True
+            # One Telegram per process run (not every trail tick).
+            if not getattr(sync_tsd_positions_to_supabase, "_queue_tg_sent", False):
+                try:
+                    from tsd_scan_pipeline.tsd_notify import notify_tsd
+
+                    notify_tsd(
+                        "Peak Hour: tsd_watch_queue table missing in Supabase\n"
+                        "Board mirrored to tsd_watchlist; run tsd_cloud.sql"
+                    )
+                    sync_tsd_positions_to_supabase._queue_tg_sent = True  # type: ignore[attr-defined]
+                except Exception:
+                    pass
         else:
             summary["verify_errors"].append(f"tsd_watch_queue:{exc}")
+            print(f"  *** watch_queue sync FAILED: {exc} ***")
 
     verify_errors = _verify_tsd_supabase_rows(rows)
     summary["verify_errors"].extend(verify_errors)

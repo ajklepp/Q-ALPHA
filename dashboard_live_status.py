@@ -33,6 +33,264 @@ TSD_MAX_FULL_SLOTS = 10
 # Peak Hour Performers: 1H launch scan slots (bar close + 15 min)
 PHP_LAUNCH_HOURS_ET = (7, 11, 12, 13)
 PHP_LAUNCH_LAG_MIN = 15
+ET = pytz.timezone("America/New_York")
+
+# Legacy 3H watchlist labels — ignore for Peak Hour launches board.
+_LEGACY_WATCH_LABELS = {
+    "watching", "profiler ok", "trade pick", "in book",
+}
+
+
+def _is_peak_hour_watchlist(rows: list[dict]) -> bool:
+    """True if cloud watchlist looks like Peak Hour board (not stale 3H)."""
+    if not rows:
+        return False
+    labels = {str(r.get("status_label") or "").strip().lower() for r in rows}
+    php_ok = {"entered", "queued", "skip", "ranked", "take", "signal"}
+    if labels & php_ok:
+        return True
+    if labels <= _LEGACY_WATCH_LABELS:
+        return False
+    # Hour reused in wt_gap as 7/11/12/13 is a Peak Hour signal
+    hours = []
+    for r in rows:
+        try:
+            hours.append(int(float(r.get("wt_gap"))))
+        except (TypeError, ValueError):
+            pass
+    return bool(set(hours) & set(PHP_LAUNCH_HOURS_ET))
+
+
+def _load_local_queue_rows() -> list[dict]:
+    """Local tsd_watch_queue.json rows (dashboard fallback)."""
+    try:
+        import json
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from state_paths import state_path
+
+        path = state_path("tsd_watch_queue.json")
+        if not path.exists():
+            return []
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return list(doc.get("queue") or [])
+    except Exception:
+        return []
+
+
+def _load_local_open_board_rows() -> list[dict]:
+    """Synthesize Peak Hour board rows from local open book legs."""
+    try:
+        import json
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from state_paths import state_path
+
+        path = state_path("tsd_book_state.json")
+        if not path.exists():
+            return []
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        out: list[dict] = []
+        for i, pos in enumerate(doc.get("positions") or [], 1):
+            if str(pos.get("status") or "").upper() != "OPEN":
+                continue
+            sym = str(pos.get("symbol") or "").upper()
+            if not sym:
+                continue
+            for leg in pos.get("legs") or []:
+                if str(leg.get("status") or "").upper() != "OPEN":
+                    continue
+                out.append({
+                    "rank": i,
+                    "symbol": sym,
+                    "status": "ENTERED",
+                    "status_label": "ENTERED",
+                    "launch_score": leg.get("launch_score") or leg.get("scan_score"),
+                    "scan_score": leg.get("scan_score"),
+                    "phase": leg.get("phase"),
+                    "buy_signal": True,
+                    "htf_1h_bar_hour": leg.get("htf_1h_bar_hour"),
+                    "entry_price": leg.get("price"),
+                })
+                break
+        return out
+    except Exception:
+        return []
+
+
+def _board_row_from_sources(
+    *,
+    rank: int,
+    symbol: str,
+    hour: Any,
+    htf: Any,
+    launch: Any,
+    phase: Any,
+    buy: Any,
+    status: Any,
+) -> dict[str, str | int]:
+    hour_s = "—"
+    if hour is not None:
+        try:
+            hour_s = str(int(float(hour)))
+        except (TypeError, ValueError):
+            hour_s = str(hour)
+    return {
+        "Rank": int(rank),
+        "Symbol": str(symbol or "").upper(),
+        "Hour": hour_s,
+        "HTF": f"{_safe_float(htf, 0):.0f}" if htf is not None else "—",
+        "Launch": f"{_safe_float(launch, 0):.0f}" if launch is not None else "—",
+        "Phase": phase or "—",
+        "1H buy": "Y" if buy else "—",
+        "Status": str(status or "—").upper(),
+    }
+
+
+def _build_peak_hour_launch_board(
+    tsd_queue: list[dict],
+    tsd_rows: list[dict],
+    tsd_watch: list[dict],
+) -> tuple[list[dict], str | None]:
+    """
+    Build Peak Hour launches table rows.
+
+    Preference: today's cloud queue + open positions → local queue/book → empty.
+    Never prefer legacy 3H watchlist over queue/opens.
+    Returns (rows, fallback_caption_or_None).
+    """
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+
+    def _is_today(row: dict) -> bool:
+        for key in ("added_at", "scan_at", "updated_at", "last_updated", "opened_at"):
+            v = str(row.get(key) or "")
+            if v.startswith(today):
+                return True
+        # Open positions without date still count as live board
+        if str(row.get("status") or "").upper() == "OPEN":
+            return True
+        if str(row.get("status_label") or "").upper() == "ENTERED":
+            return True
+        return False
+
+    cloud_queue = [r for r in tsd_queue if _is_today(r)] or list(tsd_queue)
+    cloud_opens = list(tsd_rows or [])
+    use_watch = _is_peak_hour_watchlist(tsd_watch)
+
+    merged: dict[str, dict] = {}
+    source = "cloud"
+
+    def _put(sym: str, row: dict) -> None:
+        if not sym:
+            return
+        prev = merged.get(sym)
+        if prev and str(prev.get("Status")) == "ENTERED":
+            return
+        merged[sym] = row
+
+    # 1) Cloud opens + queue (+ Peak Hour–shaped watchlist only as supplement)
+    if cloud_opens or cloud_queue or use_watch:
+        for i, r in enumerate(cloud_opens, 1):
+            sym = str(r.get("symbol") or "").upper()
+            _put(sym, _board_row_from_sources(
+                rank=i,
+                symbol=sym,
+                hour=r.get("htf_1h_bar_hour") or r.get("wt_gap"),
+                htf=r.get("scan_score"),
+                launch=r.get("launch_score"),
+                phase=r.get("phase"),
+                buy=True,
+                status="ENTERED",
+            ))
+        for i, r in enumerate(cloud_queue, 1):
+            sym = str(r.get("symbol") or "").upper()
+            if sym in merged:
+                continue
+            _put(sym, _board_row_from_sources(
+                rank=len(merged) + 1,
+                symbol=sym,
+                hour=r.get("htf_1h_bar_hour") or r.get("wt_gap"),
+                htf=r.get("htf_score") or r.get("scan_score") or r.get("combined_rank_score"),
+                launch=r.get("launch_score") or r.get("launch_score_display"),
+                phase=r.get("phase"),
+                buy=r.get("buy_signal") or r.get("htf_1h_buy_signal"),
+                status=r.get("status") or "QUEUED",
+            ))
+        if use_watch:
+            for i, r in enumerate(tsd_watch, 1):
+                sym = str(r.get("symbol") or "").upper()
+                if sym in merged:
+                    continue
+                _put(sym, _board_row_from_sources(
+                    rank=int(r.get("rank") or len(merged) + 1),
+                    symbol=sym,
+                    hour=r.get("wt_gap"),
+                    htf=r.get("scan_score"),
+                    launch=r.get("launch_score"),
+                    phase=r.get("phase"),
+                    buy=r.get("buy_signal"),
+                    status=r.get("status_label") or r.get("status") or "—",
+                ))
+        if merged:
+            rows = sorted(merged.values(), key=lambda x: int(x.get("Rank") or 0))
+            for i, row in enumerate(rows, 1):
+                row["Rank"] = i
+            return rows, None
+
+    # 2) Local queue + local open book
+    local_q = _load_local_queue_rows()
+    local_o = _load_local_open_board_rows()
+    for i, r in enumerate(local_o, 1):
+        sym = str(r.get("symbol") or "").upper()
+        _put(sym, _board_row_from_sources(
+            rank=i,
+            symbol=sym,
+            hour=r.get("htf_1h_bar_hour"),
+            htf=r.get("scan_score"),
+            launch=r.get("launch_score"),
+            phase=r.get("phase"),
+            buy=True,
+            status="ENTERED",
+        ))
+    for r in local_q:
+        sym = str(r.get("symbol") or "").upper()
+        if sym in merged and str(merged[sym].get("Status")) == "ENTERED":
+            continue
+        st = str(r.get("status") or "QUEUED").upper()
+        if st in ("WATCHING", "ADDED", "UPDATED", "CONFIRMED"):
+            st = "QUEUED" if st != "CONFIRMED" else "QUEUED"
+        if st == "SKIPPED":
+            st = "SKIP"
+        # Promote to ENTERED if open in book
+        if sym in {str(x.get("symbol") or "").upper() for x in local_o}:
+            st = "ENTERED"
+        _put(sym, _board_row_from_sources(
+            rank=len(merged) + 1,
+            symbol=sym,
+            hour=r.get("htf_1h_bar_hour"),
+            htf=r.get("htf_score") or r.get("scan_score") or r.get("combined_rank_score"),
+            launch=r.get("launch_score") or r.get("launch_score_display"),
+            phase=r.get("phase"),
+            buy=r.get("buy_signal") or r.get("htf_1h_buy_signal"),
+            status=st,
+        ))
+    if merged:
+        rows = sorted(merged.values(), key=lambda x: int(x.get("Rank") or 0))
+        for i, row in enumerate(rows, 1):
+            row["Rank"] = i
+        return rows, "local fallback — Supabase lag"
+
+    return [], None
 
 
 def _safe_float(x, default: float = 0.0) -> float:
@@ -415,20 +673,30 @@ def render_live_status_tab(
             "Entry Pipeline",
             "HTF + 1H LAUNCH · hours 07/11/12/13 @ :15 · analogs soft-only (never veto)",
         )
-        if tsd_err:
+        pipe_queue = list(tsd_queue)
+        pipe_fallback = False
+        if not pipe_queue:
+            pipe_queue = _load_local_queue_rows()
+            pipe_fallback = bool(pipe_queue)
+        if tsd_err and not pipe_queue:
             st.caption(tsd_err)
-        elif not tsd_queue:
+        elif not pipe_queue:
             st.info("Queue empty — next `--live` scan")
         else:
+            if pipe_fallback:
+                st.caption("local fallback — Supabase lag")
             q_rows = []
-            for r in tsd_queue:
+            for r in pipe_queue:
                 gates = r.get("gates") or r.get("quality_gates")
+                st_label = str(r.get("status") or "")
+                if st_label.upper() in ("WATCHING", "ADDED", "UPDATED"):
+                    st_label = "QUEUED"
                 q_rows.append({
                     "Symbol": str(r.get("symbol") or ""),
-                    "Status": str(r.get("status") or ""),
+                    "Status": st_label,
                     "Launch": f"{_safe_float(r.get('launch_score_display') or r.get('launch_score'), 0):.0f}",
                     "Phase": r.get("phase") or "—",
-                    "Cross": f"${_safe_float(r.get('cross_level'), 0):.2f}",
+                    "Cross": f"${_safe_float(r.get('cross_level') or r.get('htf_1h_close') or r.get('entry_price'), 0):.2f}",
                     "Gates": format_gate_summary(gates),
                     "Tags": ", ".join(r.get("tags") or []) or "—",
                     "Added": str(r.get("added_at") or "")[:16],
@@ -440,12 +708,35 @@ def render_live_status_tab(
             "Open Positions",
             "KILL ONLY until +1R · then BE lock · 4-tranche trail",
         )
-        if tsd_err:
+        open_rows = list(tsd_rows)
+        open_fallback = False
+        if not open_rows:
+            # Local book → minimal dicts for card renderer when cloud lags
+            try:
+                import json
+                import sys
+                from pathlib import Path
+
+                root = Path(__file__).resolve().parent
+                cand = root / "candidates"
+                if str(cand) not in sys.path:
+                    sys.path.insert(0, str(cand))
+                from state_paths import state_path
+                from tsd_supabase_sync import flatten_open_legs
+
+                book = json.loads(state_path("tsd_book_state.json").read_text(encoding="utf-8"))
+                open_rows = flatten_open_legs(book)
+                open_fallback = bool(open_rows)
+            except Exception:
+                open_rows = []
+        if tsd_err and not open_rows:
             st.error(tsd_err)
-        elif not tsd_rows:
+        elif not open_rows:
             st.info("No open Peak Hour Performers positions.")
         else:
-            for row in tsd_rows:
+            if open_fallback:
+                st.caption("local fallback — Supabase lag")
+            for row in open_rows:
                 _render_tsd_open_card(row)
 
     if not gap_open_df.empty:
@@ -461,51 +752,22 @@ def render_live_status_tab(
     with st.container(border=True):
         section_header(
             "Peak Hour launches",
-            "Today's 1H @ :15 board — not the legacy 3H watchlist",
+            "Today's 1H @ :15 board — queue + OPEN (not legacy 3H watchlist)",
         )
-        if tsd_err:
+        board_rows, fallback_cap = _build_peak_hour_launch_board(
+            tsd_queue, tsd_rows, tsd_watch,
+        )
+        if tsd_err and not board_rows:
             st.caption(tsd_err)
-        elif not tsd_watch and not tsd_queue:
+        elif not board_rows:
             st.info("No Peak Hour launches yet — next scan at 07/11/12/13:15 ET.")
         else:
-            # Prefer Supabase watchlist when it is Peak Hour–shaped; else queue.
-            src = tsd_watch if tsd_watch else tsd_queue
-            from_queue = not tsd_watch
-            wl_rows = []
-            for i, r in enumerate(src, 1):
-                hour = r.get("wt_gap") if not from_queue else r.get("htf_1h_bar_hour")
-                if hour is None and from_queue:
-                    hour = r.get("htf_1h_bar_hour")
-                htf = r.get("scan_score") if not from_queue else (
-                    r.get("htf_score") or r.get("combined_rank_score")
-                )
-                launch = r.get("launch_score") or r.get("launch_score_display")
-                status = (
-                    r.get("status_label")
-                    or r.get("status")
-                    or ("QUEUED" if from_queue else "—")
-                )
-                buy = r.get("buy_signal") or r.get("htf_1h_buy_signal")
-                hour_s = "—"
-                if hour is not None:
-                    try:
-                        hour_s = str(int(float(hour)))
-                    except (TypeError, ValueError):
-                        hour_s = str(hour)
-                wl_rows.append({
-                    "Rank": int(r.get("rank") or i),
-                    "Symbol": str(r.get("symbol") or ""),
-                    "Hour": hour_s,
-                    "HTF": f"{_safe_float(htf, 0):.0f}" if htf is not None else "—",
-                    "Launch": f"{_safe_float(launch, 0):.0f}" if launch is not None else "—",
-                    "Phase": r.get("phase") or "—",
-                    "1H buy": "Y" if buy else "—",
-                    "Status": str(status).upper(),
-                })
+            if fallback_cap:
+                st.caption(fallback_cap)
             st.caption(
                 "Status: QUEUED / ENTERED / SKIP / RANKED · sole live entry = Scheduler 1H LAUNCH"
             )
-            st.dataframe(pd.DataFrame(wl_rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(board_rows), hide_index=True, use_container_width=True)
 
     st.caption(
         "Auto-refresh ~90s · TWS marks every 30m from 07:00 · trail local · "
