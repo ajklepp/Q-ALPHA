@@ -1,15 +1,9 @@
 """
-Q-ALPHA TSD pipeline — PASS 1 Polygon hunt list (:20 ET).
+Q-ALPHA TSD pipeline — PASS 1 Polygon hunt list (3H tags, HTF-gated).
 
-Include-only pre-filter for the NEXT TWS :03 scan. NO orders. NO entries.
-Writes candidates/tsd_scan_pipeline/polygon_hunt_list.json
-
-Include tags (union — never hard-exclude without never-drop override):
-  - near_cross: wt1 < wt2, gap < 20, wt1 rising
-  - early_bull: Pine early_bull on last bar
-  - trend_up: trend_strength improving and > -0.3
-  - already_warm: wt1 > wt2
-  - liquid_core: top 150 by 20d dollar volume (always included)
+UTS v2.6: hourly 1H launch scans the HTF-pass set, not this list.
+Hunt list is 3H tag metadata only. Top-150 liquid_core is NOT always included
+if the name fails HTF. When HTF cache exists, scan that set only.
 
 Usage:
   py -3 candidates/tsd_scan_pipeline/polygon_hunt_list.py
@@ -33,6 +27,7 @@ if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
 from tsd_scan_pipeline.build_3h_bars import aggregate_hourly_to_3h, bars_from_polygon_aggs
+from tsd_scan_pipeline.tsd_htf_universe import htf_pass_symbols
 from tsd_scan_pipeline.tsd_signals import enrich_tsd
 from tsd_scan_pipeline.universe_tsd import (
     LIQUID_CORE_TOP_N,
@@ -132,20 +127,22 @@ def build_polygon_hunt_list(
     max_scan: int | None = None,
     liquid_top_n: int = LIQUID_CORE_TOP_N,
 ) -> dict[str, Any]:
-    """Scan universe with Polygon hourly→3H TSD; write include-only hunt list."""
+    """Scan HTF-pass names with Polygon hourly→3H TSD tags. No liquid_core always-include."""
     meta = schedule_meta()
-    liquid = universe[:liquid_top_n]
+    htf_syms = {s.upper() for s in htf_pass_symbols()}
+    if htf_syms:
+        universe = [r for r in universe if str(r["symbol"]).upper() in htf_syms]
+        print(f"  HTF-pass filter: {len(universe)} names (no non-HTF liquid_core)", flush=True)
+    else:
+        print("  HTF-pass cache empty — scanning tags only, not always-including top-150", flush=True)
+
+    liquid = universe[:liquid_top_n] if htf_syms else []
     liquid_syms = {r["symbol"] for r in liquid}
 
     scan_pool = universe[: max_scan] if max_scan else universe
-    scan_syms = {r["symbol"] for r in scan_pool}
-
-    # Always evaluate liquid_core + scan pool union
-    eval_syms = list(dict.fromkeys([r["symbol"] for r in liquid] + [r["symbol"] for r in scan_pool]))
+    eval_syms = list(dict.fromkeys([r["symbol"] for r in scan_pool]))
 
     hunt: dict[str, dict[str, Any]] = {}
-    for sym in liquid_syms:
-        hunt[sym] = {"symbol": sym, "tags": ["liquid_core"], "wt1": None, "wt2": None}
 
     print(f"  Scanning {len(eval_syms)} symbols (liquid_core={len(liquid_syms)})...", flush=True)
     t0 = time.perf_counter()
@@ -163,11 +160,13 @@ def build_polygon_hunt_list(
                 print(f"    [{i}/{len(eval_syms)}] {sym} ERR {exc}", flush=True)
             continue
 
-        if not tags and sym not in liquid_syms:
+        if not tags:
             if i % 25 == 0:
                 print(f"    [{i}/{len(eval_syms)}] progress (no tag)", flush=True)
             continue
 
+        if htf_syms and str(sym).upper() not in htf_syms:
+            continue
         existing = hunt.get(sym, {"symbol": sym, "tags": [], "wt1": None, "wt2": None})
         merged_tags = list(dict.fromkeys(existing.get("tags", []) + tags))
         if sym in liquid_syms and "liquid_core" not in merged_tags:

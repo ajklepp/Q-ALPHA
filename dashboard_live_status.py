@@ -29,7 +29,7 @@ from dashboard_tsd_helpers import (
 )
 
 TSD_STARTING_POOL = 3000.0
-TSD_MAX_FULL_SLOTS = 2
+TSD_MAX_FULL_SLOTS = 10
 IBKR_3H_CLOSE_HOURS_ET = (1, 4, 5, 8, 11, 14, 17, 19, 22)
 TWS_LAG = timedelta(hours=3, minutes=3)
 
@@ -386,7 +386,7 @@ def render_live_status_tab(
             st.metric("Unrealized", f"${unrealized_pnl:+,.2f}")
         st.caption(
             f"Deployed (cost basis) ${deployed:,.2f} · "
-            f"{full_slots}/{TSD_MAX_FULL_SLOTS} full slots · "
+            f"{full_slots}/{TSD_MAX_FULL_SLOTS} full slots (slot ladder 2–10) · "
             f"{open_names} open names · "
             f"{closed_stats['total']} closed legs"
             + (

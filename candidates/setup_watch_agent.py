@@ -190,9 +190,9 @@ def process_timeouts(now: datetime | None = None) -> list[dict[str, Any]]:
         added = str(row.get("added_at") or "")
         if not _same_et_day(added, now_et):
             continue
-        reason = "timeout_1100"
+        reason = "timeout_1330"
         update_queue_row(sym, status="SKIPPED", reason=reason)
-        msg = f"TSD {sym} SKIPPED\nSetup not confirmed by 11:00 ET"
+        msg = f"TSD {sym} SKIPPED\nNot entered by 13:30 ET (last launch hour)"
         print(f"  TIMEOUT {sym}: {reason}")
         _notify(msg)
         actions.append({"symbol": sym, "status": "SKIPPED", "reason": reason})
@@ -245,7 +245,7 @@ def process_watching_row(
     passed, gates, reasons = evaluate_entry_gates(
         queue_row_as_candidate(row),
         regime_bull=regime_bull,
-        require_rth_window=not dry_run,
+        require_rth_window=False,
         now=now_et,
     )
     if not passed:
@@ -309,7 +309,7 @@ def run_pass(*, dry_run: bool = False) -> dict[str, Any]:
         return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
 
     if not is_entry_window(now) and not dry_run:
-        print("Outside entry window (09:35-15:00 ET) — skip entries")
+        print("Outside launch hours (07/11/12/13 ET) — skip entries")
         return {"mode": mode, "checked_at": now.isoformat(), "actions": actions}
 
     ib: IB | None = None

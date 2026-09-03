@@ -25,8 +25,8 @@ ZIP_LAUNCH = {
     "trend_strength": 0.16,
     "buy_signal": True,
     "early_bull": False,
-    "close": 4.245,
-    "open": 4.30,
+    "close": 5.25,
+    "open": 5.30,
     "wt_gap": 5.1,
     "kill_pct": 0.08,
     "market_cap": 500_000_000,
@@ -35,6 +35,8 @@ ZIP_LAUNCH = {
     "htf_close_above_sma50": True,
     "htf_sma20_rising": True,
     "htf_1h_buy_signal": True,
+    "htf_1h_bar_hour": 12,
+    "htf_1h_close": 5.25,
 }
 
 
@@ -95,7 +97,7 @@ class TestWatchQueue(unittest.TestCase):
             "wt_gap": 5.0,
             "close": 7.31,
         }
-        results = wq.add_to_watch_queue([weav])
+        results = wq.add_to_watch_queue([weav], scan_at="2026-09-01T12:00:00-04:00")
         self.assertEqual(results[0]["status"], "SKIPPED")
         state = json.loads(self._queue_path.read_text(encoding="utf-8"))
         self.assertEqual(len(state["queue"]), 0)
@@ -104,7 +106,7 @@ class TestWatchQueue(unittest.TestCase):
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_skip_htf_fail(self, _occ, _reg):
         cand = {**ZIP_LAUNCH, "htf_close_above_sma50": False}
-        results = wq.add_to_watch_queue([cand])
+        results = wq.add_to_watch_queue([cand], scan_at="2026-09-01T12:00:00-04:00")
         self.assertEqual(results[0]["status"], "SKIPPED")
         state = json.loads(self._queue_path.read_text(encoding="utf-8"))
         self.assertEqual(len(state["queue"]), 0)

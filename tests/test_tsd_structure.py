@@ -97,9 +97,10 @@ class TestKillUntil1R(unittest.TestCase):
         self.assertFalse(structure_stop_breached(7.10, None))
         self.assertTrue(structure_stop_breached(7.10, 7.16))
 
-    def test_thesis_fail_day5(self):
+    def test_idle_no_1r_day6(self):
         trail = {
-            "trading_day": 5,
+            "trading_day": 6,
+            "one_r_locked": False,
             "entry_price": 10.0,
             "kill_price": 9.0,
             "kill_pct": 0.1,
@@ -120,7 +121,7 @@ class TestKillUntil1R(unittest.TestCase):
         }
         self.assertTrue(should_thesis_fail_exit(trail))
 
-        trail["trading_day"] = 4
+        trail["trading_day"] = 5
         self.assertFalse(should_thesis_fail_exit(trail))
 
 

@@ -144,6 +144,15 @@ def add_to_watch_queue(
             "cross_level": round(float(qh_row.get("close") or 0), 4),
             "scan_score": float(qh_row.get("scan_score") or 0),
             "wt_gap": float(qh_row.get("wt_gap") or 0),
+            "htf_1h_bar_time": qh_row.get("htf_1h_bar_time") or cand.get("htf_1h_bar_time"),
+            "htf_1h_bar_hour": qh_row.get("htf_1h_bar_hour") or cand.get("htf_1h_bar_hour"),
+            "htf_1h_close": qh_row.get("htf_1h_close") or qh_row.get("close"),
+            "htf_1h_buy_signal": qh_row.get("htf_1h_buy_signal", cand.get("htf_1h_buy_signal")),
+            "phase_3h": qh_row.get("phase_3h") or qh_row.get("phase"),
+            "structure_mode": "KILL ONLY until +1R",
+            "htf_range_20d_pct": qh_row.get("htf_range_20d_pct") or cand.get("htf_range_20d_pct"),
+            "htf_close_above_sma50": qh_row.get("htf_close_above_sma50", cand.get("htf_close_above_sma50")),
+            "htf_sma20_rising": qh_row.get("htf_sma20_rising", cand.get("htf_sma20_rising")),
             "added_at": when,
             "status": "WATCHING",
             "gates": {**gates, "quality": qh_gates},
@@ -222,7 +231,11 @@ def execute_live_entries(
         print(f"  {entry_kind} {sym}: capacity_ok reason={reason}")
 
         kill_pct = cand.get("kill_pct")
-        fill = place_tsd_entry(ib, sym, entry_price=cand.get("close"), kill_pct=kill_pct)
+        fill = place_tsd_entry(
+            ib, sym,
+            entry_price=cand.get("htf_1h_close") or cand.get("close"),
+            kill_pct=kill_pct,
+        )
         if fill.get("status") != "FILLED":
             results.append({**fill, "kind": entry_kind})
             print(f"  ENTRY FAIL {sym} ({entry_kind}): {fill.get('reason')}")
@@ -273,11 +286,21 @@ def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "scan_score": float(row.get("scan_score") or 0),
         "launch_score": float(row.get("launch_score") or row.get("entry_score") or 0),
         "phase": row.get("phase"),
-        "buy_signal": bool(row.get("buy_signal")),
+        "buy_signal": bool(row.get("buy_signal") or row.get("htf_1h_buy_signal")),
         "early_bull": bool(row.get("early_bull")),
         "signal_bar_red": bool(row.get("signal_bar_red")),
         "wt_gap": float(row.get("wt_gap") or 0),
-        "close": float(row.get("close") or row.get("cross_level") or 0),
+        "close": float(
+            row.get("htf_1h_close") or row.get("entry_price") or row.get("close") or row.get("cross_level") or 0
+        ),
+        "htf_1h_buy_signal": row.get("htf_1h_buy_signal"),
+        "htf_1h_bar_hour": row.get("htf_1h_bar_hour"),
+        "htf_1h_bar_time": row.get("htf_1h_bar_time"),
+        "htf_1h_close": row.get("htf_1h_close"),
+        "phase_3h": row.get("phase_3h") or row.get("phase"),
+        "htf_range_20d_pct": row.get("htf_range_20d_pct"),
+        "htf_close_above_sma50": row.get("htf_close_above_sma50"),
+        "htf_sma20_rising": row.get("htf_sma20_rising"),
         "kill_pct": row.get("kill_pct"),
         "tsd_profile": row.get("tsd_profile"),
     }

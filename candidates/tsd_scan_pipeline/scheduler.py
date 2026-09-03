@@ -1,13 +1,16 @@
 """
-Q-ALPHA TSD pipeline — ET slot scheduler (:20 Polygon, :03 TWS).
+Q-ALPHA TSD pipeline — ET slot scheduler (UTS v2.6).
 
-Dispatches pipeline passes based on IBKR 3H bar-close schedule.
-Designed for Windows Task Scheduler tick every 5 minutes.
+LAUNCH scans at 07:05 / 11:05 / 12:05 / 13:05 ET (1H bar close + 5 min).
+HTF universe refresh at 04:30 ET (optional noon).
+Trail monitor unchanged (each tick unless dedicated loop is alive).
+
+3H :20/:03 clocks are no longer the launch trigger. Force with --polygon / --tws.
 
 Usage:
   py -3 candidates/tsd_scan_pipeline/scheduler.py --tick
-  py -3 candidates/tsd_scan_pipeline/scheduler.py --polygon
-  py -3 candidates/tsd_scan_pipeline/scheduler.py --tws [--live]
+  py -3 candidates/tsd_scan_pipeline/scheduler.py --launch [--live]
+  py -3 candidates/tsd_scan_pipeline/scheduler.py --htf-universe
   py -3 candidates/tsd_scan_pipeline/scheduler.py --trail
   py -3 candidates/tsd_scan_pipeline/scheduler.py --tick --dry-run
 """
@@ -33,6 +36,9 @@ from tsd_scan_pipeline.build_3h_bars import IBKR_3H_CLOSE_HOURS_ET  # noqa: E402
 ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 STATE_PATH = RESULTS_DIR / "tsd_scheduler_state.json"
+LAUNCH_HOURS_ET = (7, 11, 12, 13)
+LAUNCH_LAG_MIN = 5
+HTF_REFRESH_AT = time(4, 30)
 POLYGON_LAG_MIN = 20
 TWS_LAG = timedelta(hours=3, minutes=3)
 TICK_WINDOW_MIN = 8
@@ -51,6 +57,16 @@ def _save_state(state: dict[str, Any]) -> None:
 
 def _slot_key(kind: str, bar_hour: int, when: datetime) -> str:
     return f"{kind}:{when.date().isoformat()}:{bar_hour:02d}"
+
+
+def launch_run_at(bar_hour: int, on_date: date) -> datetime:
+    """1H LAUNCH scan at bar_close + 5 minutes (Polygon 1H settle)."""
+    naive = datetime.combine(on_date, time(bar_hour, LAUNCH_LAG_MIN))
+    return ET.localize(naive)
+
+
+def htf_refresh_at(on_date: date) -> datetime:
+    return ET.localize(datetime.combine(on_date, HTF_REFRESH_AT))
 
 
 def polygon_run_at(bar_hour: int, on_date: date) -> datetime:
@@ -76,8 +92,14 @@ def _due_slots(now: datetime, *, kind: str) -> list[tuple[int, datetime]]:
     check_dates = [now.date(), (now - timedelta(days=1)).date()]
 
     for d in check_dates:
-        for h in IBKR_3H_CLOSE_HOURS_ET:
-            sched = polygon_run_at(h, d) if kind == "polygon" else tws_run_at(h, d)
+        hours = LAUNCH_HOURS_ET if kind == "launch" else IBKR_3H_CLOSE_HOURS_ET
+        for h in hours:
+            if kind == "polygon":
+                sched = polygon_run_at(h, d)
+            elif kind == "launch":
+                sched = launch_run_at(h, d)
+            else:
+                sched = tws_run_at(h, d)
             if sched > now:
                 continue
             if (now - sched) > timedelta(minutes=TICK_WINDOW_MIN):
@@ -109,11 +131,34 @@ def run_tws_pass(*, live: bool) -> int:
     return run_tws_pass(use_scanners=False, max_symbols=None, live=live, enforce_profiler=live)
 
 
+def run_launch_pass(*, live: bool) -> int:
+    from tsd_scan_pipeline.tsd_1h_launch_scan import run_1h_launch_scan
+
+    return run_1h_launch_scan(live=live)
+
+
+def run_htf_universe_pass() -> int:
+    from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe
+
+    build_htf_universe(refresh=True)
+    return 0
+
+
 def run_trail_pass(*, dry_run: bool = False) -> int:
     from tsd_scan_pipeline.tsd_trail_monitor import run_monitor
 
     run_monitor(dry_run=dry_run)
     return 0
+
+
+def _due_clock(now: datetime, at: datetime, kind: str, hour_key: int) -> bool:
+    """True when `at` is in the past within TICK_WINDOW_MIN and not yet marked."""
+    if now < at:
+        return False
+    if (now - at) > timedelta(minutes=TICK_WINDOW_MIN):
+        return False
+    last = (_load_state().get("last_runs") or {})
+    return _slot_key(kind, hour_key, at) not in last
 
 
 def tick(*, dry_run: bool = False, live: bool = True) -> int:
@@ -129,29 +174,31 @@ def tick(*, dry_run: bool = False, live: bool = True) -> int:
         return 0
 
     rc = 0
-    for bar_hour, sched in _due_slots(now, kind="polygon"):
-        print(f"DUE polygon bar={bar_hour:02d}:00 scheduled={sched.isoformat()}")
+    for bar_hour, sched in _due_slots(now, kind="launch"):
+        print(f"DUE 1H launch bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}")
         if dry_run:
             continue
-        rc = max(rc, run_polygon_pass())
-        _mark_ran("polygon", bar_hour, sched)
+        rc = max(rc, run_launch_pass(live=live))
+        _mark_ran("launch", bar_hour, sched)
 
-    for bar_hour, sched in _due_slots(now, kind="tws"):
-        print(f"DUE tws bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}")
+    htf_0430 = htf_refresh_at(now.date())
+    htf_noon = ET.localize(datetime.combine(now.date(), time(12, 0)))
+    for hour_key, sched in ((4, htf_0430), (12, htf_noon)):
+        if not _due_clock(now, sched, "htf", hour_key):
+            continue
+        print(f"DUE HTF universe refresh scheduled={sched.isoformat()}")
         if dry_run:
             continue
-        rc = max(rc, run_tws_pass(live=live))
-        _mark_ran("tws", bar_hour, sched)
+        rc = max(rc, run_htf_universe_pass())
+        _mark_ran("htf", hour_key, sched)
 
     if not dry_run:
-        # Lightweight trail pass each tick when loop task is not running
         if not _trail_loop_active():
             run_trail_pass(dry_run=False)
 
     if dry_run:
-        poly = _due_slots(now, kind="polygon")
-        tws = _due_slots(now, kind="tws")
-        print(f"Dry-run summary: polygon_due={len(poly)} tws_due={len(tws)}")
+        launch = _due_slots(now, kind="launch")
+        print(f"Dry-run summary: launch_due={len(launch)} hours={sorted(LAUNCH_HOURS_ET)}")
     return rc
 
 
@@ -182,18 +229,24 @@ def heartbeat_trail_loop() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="TSD pipeline ET scheduler")
     parser.add_argument("--tick", action="store_true", help="Run schedule tick (default)")
-    parser.add_argument("--polygon", action="store_true", help="Force Polygon PASS 1")
-    parser.add_argument("--tws", action="store_true", help="Force TWS PASS 2")
+    parser.add_argument("--polygon", action="store_true", help="Force Polygon hunt-list pass")
+    parser.add_argument("--tws", action="store_true", help="Force TWS 3H context scan")
+    parser.add_argument("--launch", action="store_true", help="Force 1H LAUNCH v2.6 scan")
+    parser.add_argument("--htf-universe", action="store_true", help="Force HTF-pass universe rebuild")
     parser.add_argument("--trail", action="store_true", help="Force one trail monitor pass")
-    parser.add_argument("--live", action="store_true", help="TWS pass places paper entries")
+    parser.add_argument("--live", action="store_true", help="Launch/TWS pass places paper entries")
     parser.add_argument("--dry-run", action="store_true", help="Log due slots only")
     args = parser.parse_args()
 
-    if not (args.polygon or args.tws or args.trail or args.tick):
+    if not (args.polygon or args.tws or args.trail or args.tick or args.launch or args.htf_universe):
         args.tick = True
 
     if args.polygon:
         return run_polygon_pass()
+    if args.launch:
+        return run_launch_pass(live=args.live)
+    if args.htf_universe:
+        return run_htf_universe_pass()
     if args.tws:
         return run_tws_pass(live=args.live)
     if args.trail:

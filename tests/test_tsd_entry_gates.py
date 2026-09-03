@@ -1,4 +1,4 @@
-"""Unit tests for UTS v2 Phase 2.5 strict HTF entry gates."""
+"""Unit tests for UTS v2.6 1H LAUNCH entry gates."""
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +25,7 @@ from tsd_scan_pipeline.tsd_entry_gates import (
 )
 
 ET = pytz.timezone("America/New_York")
-ENTRY_NOW = ET.localize(datetime(2026, 9, 1, 10, 0))
+ENTRY_NOW = ET.localize(datetime(2026, 9, 1, 7, 5))
 
 ZIP_LAUNCH = {
     "symbol": "ZIP",
@@ -33,13 +33,15 @@ ZIP_LAUNCH = {
     "trend_strength": 0.16,
     "buy_signal": True,
     "early_bull": False,
-    "close": 4.245,
-    "open": 4.30,
+    "close": 5.25,
+    "open": 5.30,
     "wt_gap": 5.0,
     "htf_range_20d_pct": 0.35,
     "htf_close_above_sma50": True,
     "htf_sma20_rising": True,
     "htf_1h_buy_signal": True,
+    "htf_1h_bar_hour": 7,
+    "htf_1h_close": 5.25,
 }
 
 WEAV_EXT = {
@@ -51,25 +53,30 @@ WEAV_EXT = {
     "close": 7.31,
     "open": 7.35,
     "wt_gap": 5.0,
+    "htf_range_20d_pct": 0.35,
+    "htf_close_above_sma50": True,
+    "htf_sma20_rising": True,
+    "htf_1h_buy_signal": True,
+    "htf_1h_bar_hour": 7,
 }
 
 
 class TestEntryWindow(unittest.TestCase):
-    def test_inside_rth_window(self):
-        dt = ET.localize(datetime(2026, 9, 1, 10, 0))
+    def test_0700_allowed(self):
+        dt = ET.localize(datetime(2026, 9, 1, 7, 0))
         self.assertTrue(is_entry_window(dt))
 
-    def test_before_0935(self):
-        dt = ET.localize(datetime(2026, 9, 1, 9, 20))
+    def test_0800_blocked(self):
+        dt = ET.localize(datetime(2026, 9, 1, 8, 0))
         self.assertFalse(is_entry_window(dt))
 
     def test_at_1500_blocked(self):
         dt = ET.localize(datetime(2026, 9, 1, 15, 0))
         self.assertFalse(is_entry_window(dt))
 
-    def test_1459_allowed(self):
-        dt = ET.localize(datetime(2026, 9, 1, 14, 59))
-        self.assertTrue(is_entry_window(dt))
+    def test_1400_blocked(self):
+        dt = ET.localize(datetime(2026, 9, 1, 14, 0))
+        self.assertFalse(is_entry_window(dt))
 
 
 class TestEvaluateGates(unittest.TestCase):
@@ -79,7 +86,7 @@ class TestEvaluateGates(unittest.TestCase):
             ZIP_LAUNCH, regime_bull=False, now=ENTRY_NOW,
         )
         self.assertTrue(passed, msg=reasons)
-        self.assertTrue(gates["buy_signal"])
+        self.assertTrue(gates["htf_1h_buy"])
         self.assertTrue(gates["launch_candidate"])
         self.assertTrue(gates["signal_bar_red"])
         self.assertTrue(gates["htf_daily"])
@@ -87,7 +94,9 @@ class TestEvaluateGates(unittest.TestCase):
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_rejects_extension_weav(self, _occ):
-        passed, gates, reasons = evaluate_entry_gates(WEAV_EXT, regime_bull=True)
+        passed, gates, reasons = evaluate_entry_gates(
+            WEAV_EXT, regime_bull=True, now=ENTRY_NOW,
+        )
         self.assertFalse(passed)
         self.assertFalse(gates["not_extension"])
         self.assertIn("extension_phase", reasons)
@@ -102,8 +111,8 @@ class TestEvaluateGates(unittest.TestCase):
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_rejects_green_signal_bar(self, _occ):
-        cand = {**ZIP_LAUNCH, "open": 4.0, "close": 4.5}
-        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True)
+        cand = {**ZIP_LAUNCH, "open": 5.0, "close": 5.5, "htf_1h_close": 5.5}
+        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True, now=ENTRY_NOW)
         self.assertFalse(passed)
         self.assertFalse(gates["signal_bar_red"])
         self.assertIn("signal_bar_not_red", reasons)
@@ -111,14 +120,16 @@ class TestEvaluateGates(unittest.TestCase):
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_rejects_htf_fail(self, _occ):
         cand = {**ZIP_LAUNCH, "htf_close_above_sma50": False}
-        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True)
+        passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True, now=ENTRY_NOW)
         self.assertFalse(passed)
         self.assertFalse(gates["htf_daily"])
         self.assertTrue(any("sma50" in r for r in reasons))
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value={"WEAV"})
     def test_rejects_cross_book(self, _occ):
-        passed, gates, reasons = evaluate_entry_gates(WEAV_EXT, regime_bull=True)
+        passed, gates, reasons = evaluate_entry_gates(
+            WEAV_EXT, regime_bull=True, now=ENTRY_NOW,
+        )
         self.assertFalse(passed)
         self.assertFalse(gates["dedup"])
         self.assertIn("cross_book_occupied", reasons)

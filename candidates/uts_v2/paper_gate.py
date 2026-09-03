@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-UTS v2 Phase 2.5 paper gate — track closed-leg WR before sizing up.
+UTS v2 Phase 2.5 paper gate — track closed-leg WR before sizing up
+beyond the automatic slot ladder (N grows with equity; S stays $300 until N==10).
 
-Target: 20 closed legs, WR >= 45%.
+Target: 20 closed legs, WR >= 45%. Slot ladder is independent of this gate.
 
 Usage:
   python candidates/uts_v2/paper_gate.py

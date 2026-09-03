@@ -21,6 +21,7 @@ ET = pytz.timezone("America/New_York")
 HTF_RANGE_20D_MIN = 0.25
 HTF_SMA_RISE_LOOKBACK = 10
 HTF_BARS_NEEDED = 60
+HTF_MIN_PRICE = 5.0
 
 
 def _sma(values: list[float], period: int) -> float | None:
@@ -65,6 +66,7 @@ def compute_htf_metrics(closes: list[float], highs: list[float], lows: list[floa
             and sma20_now > sma20_prior
         ),
         "range_ok": range_pct >= HTF_RANGE_20D_MIN,
+        "price_ok": signal_close >= HTF_MIN_PRICE,
     }
 
 
@@ -89,6 +91,7 @@ def evaluate_htf_daily_gates(
             "close_above_sma50": bool(row.get("htf_close_above_sma50")),
             "sma20_rising": bool(row.get("htf_sma20_rising")),
             "range_ok": float(row["htf_range_20d_pct"]) >= HTF_RANGE_20D_MIN,
+            "price_ok": float(row.get("close") or row.get("htf_1h_close") or 99) >= HTF_MIN_PRICE,
         }
     else:
         metrics = _fetch_htf_metrics(sym, polygon_key=polygon_key)
@@ -99,6 +102,7 @@ def evaluate_htf_daily_gates(
             "range_20d": False,
             "close_above_sma50": False,
             "sma20_rising": False,
+            "price_floor": False,
         }
         return False, gates, ["htf_insufficient_bars"], 0.0
 
@@ -107,6 +111,7 @@ def evaluate_htf_daily_gates(
         "range_20d": bool(metrics.get("range_ok")),
         "close_above_sma50": bool(metrics.get("close_above_sma50")),
         "sma20_rising": bool(metrics.get("sma20_rising")),
+        "price_floor": bool(metrics.get("price_ok", True)),
     }
     if not gates["range_20d"]:
         reasons.append(f"range_20d<{HTF_RANGE_20D_MIN:.0%}")
@@ -114,6 +119,8 @@ def evaluate_htf_daily_gates(
         reasons.append("close<=sma50")
     if not gates["sma20_rising"]:
         reasons.append("sma20_flat_or_falling")
+    if not gates["price_floor"]:
+        reasons.append(f"price<{HTF_MIN_PRICE:.0f}")
 
   # HTF score: ~33 pts per gate
     htf_score = round(

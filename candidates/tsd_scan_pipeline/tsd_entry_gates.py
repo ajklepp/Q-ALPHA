@@ -1,7 +1,8 @@
 """
-Q-ALPHA UTS v2 Phase 2.5 — strict HTF entry gates.
+Q-ALPHA UTS v2.6 — 1H LAUNCH entry gates.
 
-Lane B (LAUNCH): buy_signal + is_launch_candidate + red signal bar + HTF daily gates.
+Trigger is last completed 1H bar (buy + launch + red), not 3H buy_signal.
+3H phase != EXTENSION is context only. Hours {7, 11, 12, 13} ET.
 SPY regime is dashboard context only — never vetoes entry.
 """
 from __future__ import annotations
@@ -22,9 +23,12 @@ if str(CANDIDATES_DIR) not in sys.path:
 
 from state_paths import is_trading_day, state_path
 from tsd_scan_pipeline.tsd_capacity import load_state, open_symbols
-from tsd_scan_pipeline.tsd_entry import classify_session
 from tsd_scan_pipeline.tsd_htf_gates import evaluate_htf_daily_gates
-from tsd_scan_pipeline.tsd_1h_signal import evaluate_1h_buy_signal
+from tsd_scan_pipeline.tsd_1h_signal import (
+    evaluate_1h_buy_signal,
+    is_allowed_hour,
+    is_launch_hour_window,
+)
 from tsd_scan_pipeline.tsd_launch_score import (
     enrich_launch_fields,
     is_launch_candidate,
@@ -32,20 +36,15 @@ from tsd_scan_pipeline.tsd_launch_score import (
 
 ET = pytz.timezone("America/New_York")
 
-ENTRY_WINDOW_START = time(9, 35)
-ENTRY_CUTOFF = time(15, 0)  # no new entries at or after 15:00 ET
-WATCH_TIMEOUT = time(11, 0)
+WATCH_TIMEOUT = time(13, 30)  # after last allowed 13:00 bar; not 11:00
 
 
 def is_entry_window(now: datetime | None = None) -> bool:
-    """True when ET is weekday RTH between 09:35 and before 15:00 ET."""
+    """True when ET weekday hour is a launch allowlist hour (07/11/12/13)."""
     dt = _as_et(now)
     if dt.weekday() >= 5 or not is_trading_day(dt.date()):
         return False
-    if classify_session(dt) != "RTH":
-        return False
-    t = dt.time()
-    return ENTRY_WINDOW_START <= t < ENTRY_CUTOFF
+    return is_launch_hour_window(dt)
 
 
 def _as_et(now: datetime | None) -> datetime:
@@ -134,27 +133,39 @@ def evaluate_launch_gates(
     now: datetime | None = None,
     polygon_key: str | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """Strict HTF LAUNCH gates — no scan_score floor, no SPY veto."""
+    """1H LAUNCH gates — 3H buy_signal is NOT required."""
     row = enrich_launch_fields(candidate)
     sym = str(row.get("symbol", "")).upper()
-    phase = row.get("phase", "NEUTRAL")
+    htf_1h_ok, launch_row = evaluate_1h_buy_signal(row, polygon_key=polygon_key, now=now)
+    row.update({k: v for k, v in launch_row.items() if v is not None})
+    phase_3h = row.get("phase_3h") or row.get("phase") or "NEUTRAL"
+    if htf_1h_ok:
+        # 1H is the buy; 3H buy_signal must not block launch scoring
+        row["buy_signal"] = True
+        row = enrich_launch_fields(row)
 
     htf_pass, htf_gates, htf_reasons, htf_score = evaluate_htf_daily_gates(
         row, polygon_key=polygon_key,
     )
-    htf_1h_ok, _htf_1h_meta = evaluate_1h_buy_signal(row, polygon_key=polygon_key)
     row["htf_score"] = htf_score
     row["htf_1h_buy_signal"] = htf_1h_ok
 
+    bar_hour = row.get("htf_1h_bar_hour")
+    if bar_hour is None:
+        bar_hour = _as_et(now).hour
+    hour_ok = is_allowed_hour(int(bar_hour))
+
+    launch_ok = is_launch_candidate(row)
+    red_ok = bool(row.get("signal_bar_red"))
+
     gates: dict[str, bool] = {
-        "buy_signal": bool(row.get("buy_signal")),
         "htf_1h_buy": htf_1h_ok,
-        "launch_candidate": is_launch_candidate(row),
-        "signal_bar_red": bool(row.get("signal_bar_red")),
-        "not_extension": phase != "EXTENSION",
+        "launch_candidate": launch_ok,
+        "signal_bar_red": red_ok,
+        "not_extension": phase_3h != "EXTENSION",
         "htf_daily": htf_pass,
+        "hour_allowed": hour_ok,
         "dedup": sym not in occupied_symbols() if sym else False,
-        "entry_cutoff": _as_et(now).time() < ENTRY_CUTOFF,
         "rth_window": is_entry_window(now),
         **{f"htf_{k}": v for k, v in htf_gates.items()},
     }
@@ -164,33 +175,30 @@ def evaluate_launch_gates(
     gates["regime_context"] = True  # informational only; label in {regime_label}
 
     reasons: list[str] = []
-    if phase == "EXTENSION":
+    if phase_3h == "EXTENSION":
         reasons.append("extension_phase")
-    if not gates["buy_signal"]:
-        reasons.append("no_buy_signal")
     if not gates["htf_1h_buy"]:
         reasons.append("no_1h_buy_signal")
     if not gates["launch_candidate"]:
         reasons.append("not_launch_candidate")
     if not gates["signal_bar_red"]:
         reasons.append("signal_bar_not_red")
+    if not gates["hour_allowed"]:
+        reasons.append(f"hour_not_allowed:{bar_hour}")
     reasons.extend(htf_reasons)
     if not gates["dedup"]:
         reasons.append("cross_book_occupied")
-    if not gates["entry_cutoff"]:
-        reasons.append("after_15:00_cutoff")
     if require_rth_window and not gates["rth_window"]:
         reasons.append("outside_entry_window")
 
     core = (
-        "buy_signal",
         "htf_1h_buy",
         "launch_candidate",
         "signal_bar_red",
         "not_extension",
         "htf_daily",
+        "hour_allowed",
         "dedup",
-        "entry_cutoff",
     )
     passed = all(gates[k] for k in core)
     if require_rth_window:
@@ -235,7 +243,7 @@ def evaluate_entry_gates(
 
 
 def is_watch_timeout(now: datetime | None = None) -> bool:
-    """True when ET is at or past the 11:00 confirmation deadline."""
+    """True after last allowed 13:00 bar window (13:30 ET)."""
     dt = _as_et(now)
     if dt.weekday() >= 5 or not is_trading_day(dt.date()):
         return False

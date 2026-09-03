@@ -43,7 +43,7 @@ from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
     maybe_arm_be_lock_on_1r,
     maybe_ratchet_breakeven,
     poll_interval_sec,
-    should_thesis_fail_exit,
+    should_idle_no_1r,
     structure_stop_breached,
 )
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
@@ -194,11 +194,11 @@ def _process_leg(
     maybe_arm_be_lock_on_1r(leg, trail, quote_high=quote["high"])
     trail = leg.get("trail") or trail
 
-    if should_thesis_fail_exit(trail):
+    if should_idle_no_1r(trail, leg):
         results.extend(
             _exit_all_remaining(
                 ib, pos, leg_index, leg, sym,
-                reason="thesis_fail_day5",
+                reason="idle_no_1r",
                 quote=quote,
                 dry_run=dry_run,
             )
@@ -354,6 +354,7 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     print("=" * 64)
     print(f"Q-ALPHA TSD TRAIL MONITOR - {mode}")
+    print("Structure: KILL ONLY until +1R")
     print(f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} clientId={TWS_CLIENT_ID}")
     print("=" * 64)
 

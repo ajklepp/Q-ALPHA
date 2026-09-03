@@ -18,7 +18,6 @@ from typing import Any, Literal
 import pytz
 from ib_insync import IB, LimitOrder, MarketOrder, StopLimitOrder, Stock
 
-from position_sizer import compute_shares
 from tsd_scan_pipeline.tsd_pool import available_pool, deploy_on_entry, load_pool
 
 ET = pytz.timezone("America/New_York")
@@ -144,7 +143,21 @@ def place_tsd_entry(
     if px is None or px <= 0:
         return {"status": "REJECTED", "reason": "no_price", "symbol": sym}
 
-    shares = compute_shares(pool_val, px)
+    from tsd_scan_pipeline.tsd_capacity import (
+        deploy_budget,
+        full_slots_used,
+        load_state,
+        shares_for_budget,
+    )
+    from tsd_scan_pipeline.tsd_pool import load_pool
+
+    pool_doc = load_pool()
+    cash = float(pool_doc.get("pool") or 0.0)
+    deployed = float(pool_doc.get("deployed") or 0.0)
+    equity = cash + deployed
+    open_n = full_slots_used(load_state())
+    budget = deploy_budget(equity, cash, open_n)
+    shares = shares_for_budget(budget, px)
     if shares <= 0:
         return {"status": "REJECTED", "reason": "shares_zero", "symbol": sym, "price": px}
 

@@ -1,13 +1,13 @@
 """
-Q-ALPHA TSD pipeline — PASS 2 IBKR live scan.
+Q-ALPHA TSD pipeline — 3H context scan (UTS v2.6).
 
-Loads hunt list -> TWS 3H bars -> TSD BUY -> rank -> watch 10 / trade 3.
-Default dry-run; use --live to admit profiler-pass picks to the watch queue (no direct entries).
+LIVE --live dispatches to 1H LAUNCH hourly path (tsd_1h_launch_scan).
+This module's 3H scan is profiler / phase context only — 3H buy is not the trigger.
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_scan_ibkr.py
   py -3 candidates/tsd_scan_pipeline/tsd_scan_ibkr.py --live
-  py -3 candidates/tsd_scan_pipeline/tsd_scan_ibkr.py --symbols TSLA,NVDA,AMD
+  py -3 candidates/tsd_scan_pipeline/tsd_1h_launch_scan.py --live
 """
 from __future__ import annotations
 
@@ -280,29 +280,8 @@ def evaluate_symbol(
         row["wt_gap"] = abs(wt1 - wt2)
         row["near_cross"] = abs(wt1 - wt2) < NEAR_CROSS_THRESHOLD
 
-    if not summary.get("buy_signal"):
-        row["reject_reason"] = "no_buy_signal"
-        return row
-
-    if not signal_bar_red(row):
-        row["reject_reason"] = "signal_bar_not_red"
-        return row
-
-    if not is_launch_candidate(row):
-        row["reject_reason"] = "not_launch_candidate"
-        return row
-
     if row.get("phase") == "EXTENSION":
         row["reject_reason"] = "extension_phase"
-        return row
-
-    score = summary.get("scan_score") or 0
-    trend = summary.get("trend_strength") or -999
-    if score > LAUNCH_SCAN_MAX and not is_launch_candidate(row):
-        row["reject_reason"] = f"scan_score>{LAUNCH_SCAN_MAX}"
-        return row
-    if trend <= 0 and not summary.get("early_bull"):
-        row["reject_reason"] = "trend_strength<=0"
         return row
 
     if polygon_key:
@@ -318,8 +297,10 @@ def evaluate_symbol(
             row["reject_reason"] = "mcap_unknown"
             return row
 
-    row["pass"] = True
-    row["signal"] = "TSD_BUY"
+    row["pass"] = is_launch_candidate(row)
+    row["signal"] = "TSD_3H_CONTEXT"
+    if not row["pass"]:
+        row["reject_reason"] = "not_3h_launch_context"
     return row
 
 
@@ -381,12 +362,19 @@ def run_scan(
     live: bool = False,
 ) -> int:
     _guard_live(live)
+    if live:
+        from tsd_scan_pipeline.tsd_1h_launch_scan import run_1h_launch_scan
+
+        print("LIVE: 1H LAUNCH v2.6 hourly path (3H scan is not the buy trigger)")
+        return run_1h_launch_scan(live=True, max_symbols=max_symbols)
+
     util.startLoop()
     ib = IB()
     now_et = datetime.now(ET)
     mode = "LIVE" if live else "DRY_RUN"
 
     print("=" * 64)
+    print("1H LAUNCH v2.6 — 3H is context (phase / profiler), not the buy trigger")
     print(f"Q-ALPHA TSD SCAN - {mode}")
     print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} clientId={TWS_CLIENT_ID}")
     print("=" * 64)
@@ -422,7 +410,7 @@ def run_scan(
     print(f"Open book (TSD): {book_opens}")
     if cross_book != book_opens:
         print(f"Cross-book occupied: {cross_book}")
-    print(f"Filters: buy_signal + red bar + LAUNCH | scan<={LAUNCH_SCAN_MAX} | HTF daily | mcap>=${MCAP_MIN/1e6:.0f}M")
+    print(f"Filters: 1H LAUNCH (3H buy NOT required) | phase!=EXTENSION | hours 07/11/12/13")
     if not skip_profiler:
         print("Profiler: watch-10 gate, MIN 30 TSD analogs required")
     else:

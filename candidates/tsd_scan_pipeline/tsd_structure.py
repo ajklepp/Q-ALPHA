@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 ET = pytz.timezone("America/New_York")
 
 BE_LOCK_PCT = 0.003  # structure_stop = entry * (1 - BE_LOCK_PCT) after +1R
-THESIS_FAIL_DAY = 5
+THESIS_FAIL_DAY = 6  # idle_no_1r: never-+1R by day 6 (not day 2–5)
+IDLE_NO_1R_DAY = 6
 STRUCTURE_MAX_PCT = 0.03
 STRUCTURE_MIN_PCT = 0.015
 STRUCTURE_LOW_RVOL_MAX_PCT = 0.02
@@ -273,15 +274,37 @@ def apply_day_structure_rules(
     return
 
 
-def should_thesis_fail_exit(trail_doc: dict[str, Any]) -> bool:
-    """Day 5+ with no tranche trailing → thesis failed."""
+def should_idle_no_1r(
+    trail_doc: dict[str, Any],
+    leg: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Flatten at close if trading_day >= 6, never hit +1R, and no tranche trailing.
+
+    Do NOT exit merely underwater. one_r_locked means +1R was touched.
+    """
     day = int(trail_doc.get("trading_day") or 1)
-    return day >= THESIS_FAIL_DAY and not any_tranche_trailing(trail_doc)
+    if day < IDLE_NO_1R_DAY:
+        return False
+    locked = bool(trail_doc.get("one_r_locked"))
+    if leg is not None:
+        locked = locked or bool(leg.get("one_r_locked"))
+    if locked:
+        return False
+    return not any_tranche_trailing(trail_doc)
+
+
+def should_thesis_fail_exit(
+    trail_doc: dict[str, Any],
+    leg: dict[str, Any] | None = None,
+) -> bool:
+    """v2.6 alias for idle_no_1r (day 6, never +1R)."""
+    return should_idle_no_1r(trail_doc, leg)
 
 
 def should_day3_force_exit(trail_doc: dict[str, Any]) -> bool:
-    """Backward-compatible alias — now uses day-5 thesis fail."""
-    return should_thesis_fail_exit(trail_doc)
+    """Disabled — day 2–5 no-1R cuts destroy P&L. Use idle_no_1r at day 6."""
+    return False
 
 
 def structure_stop_breached(quote_low: float, structure_stop: float | None) -> bool:
