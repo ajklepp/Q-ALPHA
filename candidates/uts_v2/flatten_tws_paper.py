@@ -117,13 +117,16 @@ def _open_order_rows(ib: IB) -> list[dict[str, Any]]:
     return rows
 
 
-def _cancel_open_on_connection(ib: IB) -> int:
+def _cancel_open_on_connection(ib: IB, *, skip_oids: set[int] | None = None) -> int:
     """Cancel every open trade on this connection. Returns attempts."""
+    skip_oids = skip_oids or set()
     ib.reqAllOpenOrders()
     ib.sleep(0.5)
     n = 0
     for trade in list(ib.openTrades()):
         oid = int(trade.order.orderId or 0)
+        if oid in skip_oids:
+            continue
         sym = str(getattr(trade.contract, "symbol", "") or "").upper()
         try:
             ib.cancelOrder(trade.order)
@@ -140,28 +143,34 @@ def _cancel_open_on_connection(ib: IB) -> int:
     return n
 
 
-def cancel_all_working(ib: IB, *, dry_run: bool, port: int) -> int:
+def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | None = None) -> int:
     """Cancel every open trade across bot clientIds. Returns cancels attempted."""
+    keep = keep or set()
     ib.reqAllOpenOrders()
     ib.sleep(0.5)
     rows = _open_order_rows(ib)
     print(f"Open orders: {len(rows)}")
+    kept_oids: set[int] = set()
     for r in rows:
+        sym = r["symbol"].upper()
+        tag = " [KEPT]" if sym in keep else ""
         print(
             f"  oid={r['orderId']} client={r['clientId']} {r['symbol']:<6} "
-            f"{r['action']} {r['type']} qty={r['qty']} status={r['status']}"
+            f"{r['action']} {r['type']} qty={r['qty']} status={r['status']}{tag}"
         )
-        if dry_run:
+        if sym in keep:
+            kept_oids.add(r["orderId"])
+        elif dry_run:
             print(f"    DRY_RUN cancel oid={r['orderId']}")
 
     if dry_run:
-        return len(rows)
+        return len(rows) - len(kept_oids)
 
-    attempted = _cancel_open_on_connection(ib)
+    attempted = _cancel_open_on_connection(ib, skip_oids=kept_oids)
 
-    # Also cancel via cancel_order_safe (same pattern as tsd_exit).
     for r in rows:
-        cancel_order_safe(ib, r["orderId"])
+        if r["orderId"] not in kept_oids:
+            cancel_order_safe(ib, r["orderId"])
 
     deadline = time.time() + ORDER_SETTLE_SEC
     while time.time() < deadline:
@@ -269,8 +278,9 @@ def _wait_fill(ib: IB, trade: Any, need: int, wait_sec: float) -> tuple[float, s
     return filled, st
 
 
-def flatten_positions(ib: IB, *, dry_run: bool) -> list[dict[str, Any]]:
+def flatten_positions(ib: IB, *, dry_run: bool, keep: set[str] | None = None) -> list[dict[str, Any]]:
     """Flat every non-zero STK position. Returns result rows."""
+    keep = keep or set()
     session = classify_session()
     positions = _stock_positions(ib)
     print(f"Stock positions: {len(positions)}  session={session}")
@@ -279,6 +289,10 @@ def flatten_positions(ib: IB, *, dry_run: bool) -> list[dict[str, Any]]:
     for raw_contract, qty in positions:
         sym = str(getattr(raw_contract, "symbol", "") or "").upper()
         abs_qty = abs(int(qty))
+        if sym in keep:
+            print(f"  {sym}: qty={qty} -> KEPT (protected)")
+            results.append({"symbol": sym, "qty": qty, "status": "KEPT"})
+            continue
         action = "SELL" if qty > 0 else "BUY"
         print(f"  {sym}: qty={qty} -> {action} {abs_qty} to flat")
 
@@ -360,7 +374,7 @@ def flatten_positions(ib: IB, *, dry_run: bool) -> list[dict[str, Any]]:
     return results
 
 
-def run(*, live: bool, port: int, allow_live_port: bool) -> int:
+def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None = None) -> int:
     _prefer_venv_hint()
     _guard_port(port, allow_live_port=allow_live_port)
     mode = "LIVE" if live else "DRY_RUN"
@@ -368,6 +382,8 @@ def run(*, live: bool, port: int, allow_live_port: bool) -> int:
     print(f"Peak Hour Performers - TWS paper flatten ({mode})")
     print(f"host={TWS_HOST}:{port} clientId={TWS_CLIENT_ID}")
     print("LONG-ONLY strategy: short covers are cleanup only.")
+    if keep:
+        print(f"KEEP (protected): {', '.join(sorted(keep))}")
     print("=" * 64)
 
     util.startLoop()
@@ -380,9 +396,9 @@ def run(*, live: bool, port: int, allow_live_port: bool) -> int:
 
     dry_run = not live
     try:
-        cancel_all_working(ib, dry_run=dry_run, port=port)
+        cancel_all_working(ib, dry_run=dry_run, port=port, keep=keep or set())
         print("")
-        flatten_positions(ib, dry_run=dry_run)
+        flatten_positions(ib, dry_run=dry_run, keep=keep or set())
         print("")
 
         ib.reqAllOpenOrders()
@@ -404,10 +420,13 @@ def run(*, live: bool, port: int, allow_live_port: bool) -> int:
             print("DRY_RUN complete - re-run with --live to mutate.")
             return 0
 
-        if orders_left or pos_left:
-            print("FAIL: residuals remain")
+        # Filter out kept symbols from residual check
+        non_kept_orders = [r for r in orders_left if r["symbol"].upper() not in (keep or set())]
+        non_kept_pos = [(c, q) for c, q in pos_left if str(getattr(c, "symbol", "")).upper() not in (keep or set())]
+        if non_kept_orders or non_kept_pos:
+            print("FAIL: residuals remain (excluding kept symbols)")
             return 2
-        print("OK: broker paper flat (no open orders, no stock positions)")
+        print("OK: broker paper flat (kept symbols preserved, rest cleared)")
         return 0
     finally:
         try:
@@ -426,6 +445,12 @@ def main() -> int:
         action="store_true",
         help="Allow port 7496 (live). Default refuse.",
     )
+    parser.add_argument(
+        "--keep",
+        type=str,
+        default="",
+        help="Comma-separated symbols to KEEP (skip flatten + keep their orders).",
+    )
     args = parser.parse_args()
     if not args.dry_run and not args.live:
         print("Pass --dry-run or --live")
@@ -433,10 +458,12 @@ def main() -> int:
     if args.dry_run and args.live:
         print("Pass only one of --dry-run / --live")
         return 1
+    keep = {s.strip().upper() for s in args.keep.split(",") if s.strip()}
     return run(
         live=args.live,
         port=args.port,
         allow_live_port=args.i_really_mean_live_port,
+        keep=keep,
     )
 
 
