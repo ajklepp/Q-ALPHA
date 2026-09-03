@@ -20,6 +20,12 @@ Continuous HTF rank among passers; analogs soft-only (never veto).
 - Slot-then-size: S=$300 frozen until N=10, then S=equity/10
 - Paper gate: 20 closed legs / 45% WR before size-up beyond ladder
 
+## Live Paper schedule
+- **Sole entry:** `QAlpha TSD Scheduler` → `--tick --live` → 1H @ :15  
+- Trail + Live TWS Sync (07:00 / 30m)  
+- **Disabled / not Live:** Setup Watch, gap Autonomous Agent, Approval Runner  
+- Research-only (keep code): polygon hunt, 3H `tsd_scan_ibkr` dry, `setup_watch_agent.py`
+
 ## Reset
 ```bash
 .\venv\Scripts\python.exe candidates\uts_v2\reset_peak_hour_performers.py --also-reset-cloud

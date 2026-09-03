@@ -450,18 +450,8 @@ def run_scan(
 
     update_near_cross_cache(rows)
     update_watchlist_cache(watch)
-
-    try:
-        from tsd_supabase_sync import sync_tsd_watchlist_to_supabase
-
-        sync_tsd_watchlist_to_supabase(
-            watch,
-            scan_at=now_et.isoformat(),
-            open_symbols_set=set(open_symbols(book_state)),
-            trade_symbols={str(r.get("symbol") or "").upper() for r in trade},
-        )
-    except Exception as exc:
-        print(f"  TSD watchlist Supabase warn: {exc}")
+    # Do NOT sync 3H last_watchlist to Supabase — dashboard SoT is Peak Hour
+    # last_1h_launch.json via tws_intraday_sync / sync_tsd_watchlist_from_file.
 
     payload = {
         "mode": mode,

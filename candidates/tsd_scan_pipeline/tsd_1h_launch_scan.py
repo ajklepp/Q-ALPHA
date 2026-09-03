@@ -10,6 +10,7 @@ Hours: 07 / 11 / 12 / 13 ET (scan at :15 after bar close for delayed Polygon).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,69 @@ from tsd_scan_pipeline.universe_tsd import load_polygon_key
 ET = pytz.timezone("America/New_York")
 
 QUEUE_ADMIT_STATUSES = {"ADDED", "UPDATED", "WATCHING"}
+LAUNCH_CACHE_PATH = PIPELINE_DIR / "results" / "last_1h_launch.json"
+
+
+def _write_launch_artifact(
+    *,
+    now_et: datetime,
+    ranked: list[dict[str, Any]],
+    take: list[dict[str, Any]],
+    queue_results: list[dict[str, Any]] | None = None,
+    entry_results: list[dict[str, Any]] | None = None,
+) -> Path:
+    """Persist today's Peak Hour 1H board for dashboard / Supabase watchlist SoT."""
+    q_by_sym = {
+        str(r.get("symbol", "")).upper(): r for r in (queue_results or [])
+    }
+    e_by_sym = {
+        str(r.get("symbol", "")).upper(): r for r in (entry_results or [])
+    }
+    take_syms = {str(t.get("symbol", "")).upper() for t in take}
+    rows_out: list[dict[str, Any]] = []
+    for i, r in enumerate(ranked, 1):
+        sym = str(r.get("symbol", "")).upper()
+        qr = q_by_sym.get(sym) or {}
+        er = e_by_sym.get(sym) or {}
+        if er.get("status") == "FILLED":
+            status = "ENTERED"
+        elif str(qr.get("status", "")).upper() in QUEUE_ADMIT_STATUSES:
+            status = "QUEUED"
+        elif qr:
+            st = str(qr.get("status") or "SKIP").upper()
+            status = "SKIP" if st == "SKIPPED" else st
+        elif sym in take_syms:
+            status = "TAKE"
+        else:
+            status = "RANKED"
+        rows_out.append({
+            "rank": i,
+            "symbol": sym,
+            "htf_1h_bar_hour": r.get("htf_1h_bar_hour"),
+            "htf_score": r.get("htf_score") or r.get("htf_rank_score"),
+            "launch_score": r.get("launch_score"),
+            "combined_rank_score": r.get("combined_rank_score"),
+            "phase": r.get("phase_3h") or r.get("phase"),
+            "buy_signal": bool(r.get("buy_signal") or r.get("htf_1h_buy_signal")),
+            "htf_1h_close": r.get("htf_1h_close") or r.get("close"),
+            "status": status,
+            "queue_reason": qr.get("reason"),
+            "structure_mode": r.get("structure_mode"),
+        })
+    payload = {
+        "updated_at": now_et.isoformat(),
+        "strategy": "Peak Hour Performers",
+        "version": "3.0",
+        "bar_source": BAR_SOURCE,
+        "hours": sorted(ALLOWED_HOURS),
+        "ranked_count": len(ranked),
+        "take_count": len(take),
+        "rows": rows_out,
+    }
+    LAUNCH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCH_CACHE_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    print(f"  Wrote {LAUNCH_CACHE_PATH.relative_to(CANDIDATES_DIR.parent)}")
+    return LAUNCH_CACHE_PATH
 
 
 def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -156,6 +220,9 @@ def run_1h_launch_scan(
             f"mode={r.get('structure_mode')}"
         )
 
+    queue_results: list[dict[str, Any]] = []
+    entry_results: list[dict[str, Any]] = []
+
     if live and take:
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
         queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
@@ -183,6 +250,12 @@ def run_1h_launch_scan(
                     notify_tsd(format_queue_skip_summary(len(take), skipped))
                 except Exception:
                     pass
+            _write_launch_artifact(
+                now_et=now_et,
+                ranked=ranked,
+                take=take,
+                queue_results=queue_results,
+            )
             print("=" * 64)
             return 0
 
@@ -194,17 +267,31 @@ def run_1h_launch_scan(
             ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
         except Exception as exc:
             print(f"CONNECT FAILED: {exc}")
+            _write_launch_artifact(
+                now_et=now_et,
+                ranked=ranked,
+                take=take,
+                queue_results=queue_results,
+            )
             return 1
         book = load_state()
         reset_scan_counter(book)
-        results = execute_live_entries(ib, enter_rows, book)
+        entry_results = execute_live_entries(ib, enter_rows, book)
         save_state(book)
         try:
             ib.disconnect()
         except Exception:
             pass
-        for fill in results:
+        for fill in entry_results:
             print(f"  {fill.get('symbol')} {fill.get('status')} {fill.get('reason', '')}")
+
+    _write_launch_artifact(
+        now_et=now_et,
+        ranked=ranked,
+        take=take,
+        queue_results=queue_results,
+        entry_results=entry_results,
+    )
 
     print("=" * 64)
     return 0

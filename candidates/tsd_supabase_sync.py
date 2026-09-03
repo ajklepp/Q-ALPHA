@@ -44,6 +44,10 @@ TWS_MARK_TIMEOUT_SEC = 8.0
 WATCHLIST_CACHE = (
     CANDIDATES / "tsd_scan_pipeline" / "results" / "last_watchlist.json"
 )
+# Peak Hour Live Paper SoT for dashboard "launches" panel (not 3H last_watchlist).
+LAUNCH_CACHE = (
+    CANDIDATES / "tsd_scan_pipeline" / "results" / "last_1h_launch.json"
+)
 
 try:
     from state_paths import state_path
@@ -337,22 +341,66 @@ def sync_tsd_watchlist_from_file(
     trade_symbols: set[str] | None = None,
 ) -> int:
     """
-    Upsert current TSD watch-10 from last_watchlist.json (post-scan).
-  Returns row count or 0 if cache missing.
+    Upsert Peak Hour 1H launch board to tsd_watchlist (dashboard SoT).
+
+    Uses last_1h_launch.json — NOT the legacy 3H last_watchlist.json.
+    If no 1H artifact yet, clears cloud watchlist so stale Sep-2 names disappear.
     """
-    if not WATCHLIST_CACHE.exists():
+    open_set = open_symbols_set or set()
+    trade_set = trade_symbols or set()
+    if not LAUNCH_CACHE.exists():
+        print("  Peak Hour launch cache missing — clearing stale tsd_watchlist")
+        try:
+            from supabase_sync import SupabaseSync
+
+            SupabaseSync().replace_tsd_watchlist([])
+        except Exception as exc:
+            print(f"  clear watchlist warn: {exc}")
         return 0
     try:
-        payload = json.loads(WATCHLIST_CACHE.read_text(encoding="utf-8"))
-    except Exception:
+        payload = json.loads(LAUNCH_CACHE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"  launch cache read warn: {exc}")
         return 0
-    watch_rows = payload.get("rows") or []
+    launch_rows = payload.get("rows") or []
     scan_at = str(payload.get("updated_at") or datetime.now(ET).isoformat())
+    rows: list[dict[str, Any]] = []
+    for r in launch_rows:
+        sym = str(r.get("symbol") or "").upper()
+        if not sym:
+            continue
+        status = str(r.get("status") or "SIGNAL").upper()
+        if sym in open_set or status == "ENTERED":
+            status_label = "ENTERED"
+        elif status in ("QUEUED", "WATCHING", "ADDED", "UPDATED", "TAKE"):
+            status_label = "QUEUED"
+        elif status in ("SKIP", "SKIPPED"):
+            status_label = "SKIP"
+        else:
+            status_label = status
+        rows.append({
+            "symbol": sym,
+            "rank": int(r.get("rank") or 0),
+            "scan_score": _finite(r.get("htf_score")),
+            "launch_score": _finite(r.get("launch_score") or r.get("combined_rank_score")),
+            "phase": r.get("phase"),
+            "buy_signal": bool(r.get("buy_signal")),
+            "entry_price": _finite(r.get("htf_1h_close")),
+            "wt_gap": _finite(r.get("htf_1h_bar_hour")),  # reuse col as Hour for board
+            "early_bull": False,
+            "in_book": sym in open_set,
+            "trade_pick": sym in trade_set or status_label == "ENTERED",
+            "status_label": status_label,
+            "profiler_pass": True,
+            "tags": [f"hour={r.get('htf_1h_bar_hour')}", status_label],
+            "scan_at": scan_at,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
     return sync_tsd_watchlist_to_supabase(
-        watch_rows,
+        rows,
         scan_at=scan_at,
-        open_symbols_set=open_symbols_set or set(),
-        trade_symbols=trade_symbols or set(),
+        open_symbols_set=open_set,
+        trade_symbols=trade_set,
     )
 
 
@@ -363,65 +411,66 @@ def sync_tsd_watchlist_to_supabase(
     open_symbols_set: set[str] | None = None,
     trade_symbols: set[str] | None = None,
 ) -> int:
-    """Replace-all current TSD watchlist in Supabase."""
+    """Replace-all current TSD watchlist in Supabase (Peak Hour launch board)."""
     from supabase_sync import SupabaseSync
 
     opens = {s.upper() for s in (open_symbols_set or set())}
     trades = {s.upper() for s in (trade_symbols or set())}
     rows: list[dict[str, Any]] = []
-    for i, w in enumerate(watch_rows[:10], start=1):
+    for i, w in enumerate(watch_rows[:25], start=1):
         sym = str(w.get("symbol") or "").upper()
         if not sym:
             continue
         prof = w.get("profiler") or {}
         tsd_prof = w.get("tsd_profile") or prof.get("profile") or {}
-        in_book = sym in opens
-        trade_pick = sym in trades
-        if in_book:
-            status_label = "In Book"
-        elif trade_pick:
-            status_label = "Trade pick"
-        elif w.get("profiler_pass"):
-            status_label = "Profiler OK"
-        else:
-            status_label = "Watching"
+        in_book = bool(w.get("in_book")) or sym in opens
+        trade_pick = bool(w.get("trade_pick")) or sym in trades
+        # Prefer Peak Hour status from last_1h_launch; else legacy labels.
+        status_label = w.get("status_label")
+        if not status_label:
+            if in_book:
+                status_label = "ENTERED"
+            elif trade_pick:
+                status_label = "QUEUED"
+            else:
+                status_label = "SIGNAL"
+        close_px = (
+            _finite(w.get("entry_price"))
+            or _finite(w.get("htf_1h_close"))
+            or _finite(w.get("close"))
+        )
         tags = w.get("tags") or []
-        close_px = _finite(w.get("close"))
-        kill_pct = _finite((w.get("tsd_profile") or tsd_prof).get("kill_pct"))
-        kill_price = _finite(w.get("kill_price"))
-        if kill_price is None and close_px and kill_pct:
-            kill_price = round(close_px * (1.0 - kill_pct), 4)
         rows.append(
             {
                 "symbol": sym,
                 "rank": int(w.get("rank") or i),
-                "scan_score": _finite(w.get("scan_score")),
+                "scan_score": _finite(w.get("scan_score") or w.get("htf_score")),
                 "trend_strength": _finite(w.get("trend_strength")),
                 "mfi": _finite(w.get("mfi")),
                 "buy_signal": bool(w.get("buy_signal")),
-                "profiler_pass": bool(w.get("profiler_pass")),
+                "profiler_pass": bool(w.get("profiler_pass", True)),
                 "in_book": in_book,
                 "trade_pick": trade_pick,
                 "status_label": status_label,
                 "entry_price": close_px,
-                "kill_price": kill_price,
+                "kill_price": _finite(w.get("kill_price")),
                 "launch_score": _finite(w.get("launch_score")),
                 "phase": w.get("phase"),
-                "wt_gap": _finite(w.get("wt_gap")),
+                "wt_gap": _finite(w.get("wt_gap")),  # Peak Hour: bar hour
                 "early_bull": bool(w.get("early_bull")),
-                "analog_count": tsd_prof.get("analog_count"),
-                "analog_win_rate": _finite(tsd_prof.get("analog_win_rate")),
+                "analog_count": tsd_prof.get("analog_count") if tsd_prof else w.get("analog_count"),
+                "analog_win_rate": _finite(
+                    (tsd_prof or {}).get("analog_win_rate") or w.get("analog_win_rate")
+                ),
                 "pre_catalyst": bool(w.get("pre_catalyst")),
                 "tags": tags if tags else None,
                 "scan_at": scan_at,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
-    if not rows:
-        return 0
     sync = SupabaseSync()
     sync.replace_tsd_watchlist(rows)
-    print(f"  TSD watchlist upserted {len(rows)} rows")
+    print(f"  Peak Hour watchlist upserted {len(rows)} rows (cleared stale if empty)")
     return len(rows)
 
 

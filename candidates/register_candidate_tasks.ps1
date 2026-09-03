@@ -1,22 +1,19 @@
 # =============================================================================
 # Q-ALPHA - candidates/register_candidate_tasks.ps1
-# Register candidate Task Scheduler jobs (Approval Runner + Autonomous Agent + TWS Sync).
+# Register candidate Task Scheduler jobs (TWS Sync + gap leftovers).
 #
-# POLICY (2026-08-31): TSD 3HR swing is the PRIMARY live IBKR track.
-# Disable new gap-agent entries after registering:
+# POLICY (2026-09-03): Peak Hour Performers 1H @ :15 is the PRIMARY Live Paper track.
+# Gap Autonomous Agent + Approval Runner are NOT live — register then DISABLE.
+# Live TWS Sync stays ENABLED (TSD marks/closes/pool + residual gap runoff).
+#
 #   schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE
-#   schtasks /Change /TN "QAlpha Approval Runner" /DISABLE   (optional)
-# QALPHA_GAP_AGENT_LIVE=0 in .env is a second gate if the task is re-enabled.
-# TWS sync stays ENABLED — marks residual gap runoff (STLA/DPRO) + TSD book.
+#   schtasks /Change /TN "QAlpha Approval Runner" /DISABLE
+# QALPHA_GAP_AGENT_LIVE=0 in .env is a second gate if a gap task is re-enabled.
 #
 # Aaron runs this when tasks drift or after a machine rebuild / path move.
-# Agents do NOT auto-create schtasks.
 #
 # Usage (from repo root):
 #   .\candidates\register_candidate_tasks.ps1
-#
-# If "QAlpha Approval Runner" returns Access is denied, re-run PowerShell
-# as Administrator (that task was created with elevated permissions).
 # =============================================================================
 $ErrorActionPreference = "Continue"
 
@@ -42,13 +39,17 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 
 $results = @{}
 
+# Gap leftovers — create then DISABLE (not Live Paper)
 schtasks /Create /F /TN "QAlpha Approval Runner" /TR $trApproval /SC DAILY /ST 09:25 /RL LIMITED
 $results["QAlpha Approval Runner"] = ($LASTEXITCODE -eq 0)
+schtasks /Change /TN "QAlpha Approval Runner" /DISABLE 2>$null
 
 schtasks /Create /F /TN "QAlpha Autonomous Agent" /TR $trAgent /SC DAILY /ST 09:20 /RL LIMITED
 $results["QAlpha Autonomous Agent"] = ($LASTEXITCODE -eq 0)
+schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE 2>$null
 
-schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR $trTws /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 09:40 /RI 30 /DU 06:30 /RL LIMITED
+# Peak Hour marks — 07:00 start / 30m / through RTH (matches start_tws_intraday_scheduled.ps1)
+schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR $trTws /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 07:00 /RI 30 /DU 09:30 /RL LIMITED
 $results["QAlpha Live TWS Sync"] = ($LASTEXITCODE -eq 0)
 
 Write-Host ""
@@ -57,24 +58,21 @@ foreach ($name in @("QAlpha Approval Runner", "QAlpha Autonomous Agent", "QAlpha
     $status = if ($results[$name]) { "OK" } else { "FAILED" }
     Write-Host "  $name : $status"
 }
+Write-Host "  (Approval Runner + Autonomous Agent forced DISABLED — not Live Paper)"
 
 if ($results.Values -contains $false) {
     Write-Host ""
     if (-not $results["QAlpha Approval Runner"]) {
-        if ($isAdmin) {
-            Write-Host "Approval Runner still failed even as Administrator."
-            Write-Host "Try: .\candidates\register_approval_runner_admin.ps1"
-        } else {
-            Write-Host "Approval Runner is locked (legacy OneDrive task). Open PowerShell as Administrator and run:"
-            Write-Host "  cd C:\Users\ajkle\Documents\Q-ALPHA"
-            Write-Host "  .\candidates\register_approval_runner_admin.ps1"
+        if (-not $isAdmin) {
+            Write-Host "Approval Runner may need Admin: .\candidates\register_approval_runner_admin.ps1"
         }
     }
     exit 1
 }
 
 Write-Host ""
+Write-Host "POLICY: Live Paper = TSD Scheduler + Trail + Live TWS Sync only."
 Write-Host "Verify:"
-Write-Host "  schtasks /Query /TN `"QAlpha Approval Runner`" /XML"
-Write-Host "  schtasks /Query /TN `"QAlpha Autonomous Agent`" /XML"
-Write-Host "  schtasks /Query /TN `"QAlpha Live TWS Sync`" /XML"
+Write-Host "  schtasks /Query /TN `"QAlpha Live TWS Sync`" /FO LIST /V"
+Write-Host "  schtasks /Query /TN `"QAlpha Autonomous Agent`" /FO LIST /V"
+Write-Host "  schtasks /Query /TN `"QAlpha Approval Runner`" /FO LIST /V"

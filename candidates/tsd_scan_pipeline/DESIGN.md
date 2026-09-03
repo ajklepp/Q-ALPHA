@@ -1,22 +1,39 @@
-# TSD 3HR Swing Scanner — Design (locked)
+# Peak Hour Performers — Live Paper design
 
-**Status:** Phase 6 complete (weekly scorecard + options study, Friday 5 PM task).  
-**Track:** PRIMARY live IBKR paper track (3HR swing). Gap morning agent disabled for new entries; Strategy Lab runs gap SIM only.  
+**Status:** Live Paper primary = **1H LAUNCH @ :15** (hours 07/11/12/13 ET).  
+**Product:** Peak Hour Performers v3.0 · $3k paper pool · LONG-ONLY.  
 **Workspace:** Q-ALPHA only.
+
+### Live Paper stack (KEEP)
+
+| Job | Role |
+|-----|------|
+| `scheduler.py --tick --live` | Sole entry authority → `tsd_1h_launch_scan` |
+| HTF universe @ 04:30 | Daily pass set for hourly scan |
+| `tsd_watch_queue` + `execute_live_entries` | Admit + BUY |
+| `tsd_trail_monitor` | Kill until +1R → BE → trail |
+| `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
+| Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
+
+### Not Live Paper (research / disabled)
+
+- `setup_watch_agent` / **QAlpha TSD Setup Watch** — DISABLED (second entry bot)
+- Gap **Autonomous Agent** / **Approval Runner** — DISABLED
+- `polygon_hunt_list`, `tsd_scan_ibkr` dry 3H, profiler — research/context only
+- `--polygon` / `--tws` without redirect — research; `--tws --live` → 1H LAUNCH
+
+Dashboard **Peak Hour launches** board SoT = `last_1h_launch.json` → `tsd_watchlist`  
+(legacy 3H `last_watchlist.json` must not overwrite Supabase).
 
 ---
 
-## Three-pass pipeline
+## Legacy 3HR research notes (not live trigger)
 
 ```
-3H bar closes (:00 ET) → TWS LIVE (:03) → Polygon pre-filter (:20)
-
-PASS 1  polygon_hunt_list.py @ H:20  (after each 3H bar close H)
-PASS 2  tsd_scan_ibkr.py       @ (H+3):03  (IBKR live — signal SoT)
-PASS 3  tsd_trail_monitor.py    (60s loop — software trail exits)
+3H bar closes (:00 ET) → TWS context (:03) → Polygon hunt (:20)   # RESEARCH
 ```
 
-Orchestrated by `scheduler.py --tick` (Windows Task Scheduler every 5 min).
+Orchestrated historically by `scheduler.py --tick`; live tick now fires **1H @ :15** only.
 
 ## IBKR bar alignment (probed 2026-08-30)
 
@@ -40,7 +57,7 @@ Pacing: **~2.5s/symbol** for historical pulls.
 |--------|------|
 | `scheduler.py` | ET slot dispatcher (:20 Polygon, :03 TWS, trail fallback) |
 | `tsd_scorecard.py` | Weekly 5-trading-day rollup |
-| `register_tsd_tasks.ps1` | Windows tasks: Scheduler (5m) + Trail (daily 04:00) + Weekly Reports (Fri 17:00) |
+| `register_tsd_tasks.ps1` | Scheduler (5m) + Trail (04:00) + Weekly Reports — **no Setup Watch** |
 | `results/results.md` | Pipeline results log |
 
 **Register (Aaron, once):**

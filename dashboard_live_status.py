@@ -460,43 +460,56 @@ def render_live_status_tab(
 
     with st.container(border=True):
         section_header(
-            "Watchlist",
-            "Last scan context — Launch score primary; Ext = extension risk",
+            "Peak Hour launches",
+            "Today's 1H @ :15 board — not the legacy 3H watchlist",
         )
         if tsd_err:
             st.caption(tsd_err)
-        elif not tsd_watch:
-            st.info("No watchlist yet — runs after next 1H launch scan.")
+        elif not tsd_watch and not tsd_queue:
+            st.info("No Peak Hour launches yet — next scan at 07/11/12/13:15 ET.")
         else:
+            # Prefer Supabase watchlist when it is Peak Hour–shaped; else queue.
+            src = tsd_watch if tsd_watch else tsd_queue
+            from_queue = not tsd_watch
             wl_rows = []
-            for r in tsd_watch:
-                analog_n = r.get("analog_count")
-                analog_wr = r.get("analog_win_rate")
-                prof_cell = "—"
-                if analog_n is not None:
-                    wr_s = f" / {float(analog_wr):.0f}%" if analog_wr is not None else ""
-                    prof_cell = f"n={analog_n}{wr_s}"
-                launch = r.get("launch_score")
-                ext = r.get("scan_score")
+            for i, r in enumerate(src, 1):
+                hour = r.get("wt_gap") if not from_queue else r.get("htf_1h_bar_hour")
+                if hour is None and from_queue:
+                    hour = r.get("htf_1h_bar_hour")
+                htf = r.get("scan_score") if not from_queue else (
+                    r.get("htf_score") or r.get("combined_rank_score")
+                )
+                launch = r.get("launch_score") or r.get("launch_score_display")
+                status = (
+                    r.get("status_label")
+                    or r.get("status")
+                    or ("QUEUED" if from_queue else "—")
+                )
+                buy = r.get("buy_signal") or r.get("htf_1h_buy_signal")
+                hour_s = "—"
+                if hour is not None:
+                    try:
+                        hour_s = str(int(float(hour)))
+                    except (TypeError, ValueError):
+                        hour_s = str(hour)
                 wl_rows.append({
-                    "Rank": int(r.get("rank") or 0),
+                    "Rank": int(r.get("rank") or i),
                     "Symbol": str(r.get("symbol") or ""),
+                    "Hour": hour_s,
+                    "HTF": f"{_safe_float(htf, 0):.0f}" if htf is not None else "—",
                     "Launch": f"{_safe_float(launch, 0):.0f}" if launch is not None else "—",
-                    "Ext": f"{_safe_float(ext, 0):.0f}" if ext is not None else "—",
                     "Phase": r.get("phase") or "—",
-                    "WT gap": f"{_safe_float(r.get('wt_gap'), 0):.1f}",
-                    "Early": "Y" if r.get("early_bull") else "—",
-                    "Analogs": prof_cell,
-                    "Signal": "BUY" if r.get("buy_signal") else "—",
-                    "Status": r.get("status_label") or "Watching",
-                    "Pre-cat": "Y" if r.get("pre_catalyst") else "—",
+                    "1H buy": "Y" if buy else "—",
+                    "Status": str(status).upper(),
                 })
-            st.caption("Ext = scan_score — high values mean extended move (bad for new longs)")
+            st.caption(
+                "Status: QUEUED / ENTERED / SKIP / RANKED · sole live entry = Scheduler 1H LAUNCH"
+            )
             st.dataframe(pd.DataFrame(wl_rows), hide_index=True, use_container_width=True)
 
     st.caption(
-        "Auto-refresh ~90s · TWS marks :10/:40 · TSD trail ~60s local · "
-        "Modal skips IBKR_PAPER marks"
+        "Auto-refresh ~90s · TWS marks every 30m from 07:00 · trail local · "
+        "Peak Hour Live Paper only (gap / Setup Watch disabled)"
     )
 
 

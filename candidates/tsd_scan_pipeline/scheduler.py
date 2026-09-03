@@ -229,13 +229,25 @@ def heartbeat_trail_loop() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="TSD pipeline ET scheduler")
-    parser.add_argument("--tick", action="store_true", help="Run schedule tick (default)")
-    parser.add_argument("--polygon", action="store_true", help="Force Polygon hunt-list pass")
-    parser.add_argument("--tws", action="store_true", help="Force TWS 3H context scan")
-    parser.add_argument("--launch", action="store_true", help="Force 1H LAUNCH v2.6 scan")
+    parser.add_argument("--tick", action="store_true", help="Run schedule tick (default) — Live Paper")
+    parser.add_argument(
+        "--polygon",
+        action="store_true",
+        help="RESEARCH ONLY: force Polygon 3H hunt-list (not Live Paper entry)",
+    )
+    parser.add_argument(
+        "--tws",
+        action="store_true",
+        help="RESEARCH ONLY: force 3H context scan; --live redirects to 1H LAUNCH",
+    )
+    parser.add_argument("--launch", action="store_true", help="Force 1H LAUNCH Peak Hour scan")
     parser.add_argument("--htf-universe", action="store_true", help="Force HTF-pass universe rebuild")
     parser.add_argument("--trail", action="store_true", help="Force one trail monitor pass")
-    parser.add_argument("--live", action="store_true", help="Launch/TWS pass places paper entries")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Live Paper entries (1H LAUNCH / tick). Not for research --polygon",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Log due slots only")
     args = parser.parse_args()
 

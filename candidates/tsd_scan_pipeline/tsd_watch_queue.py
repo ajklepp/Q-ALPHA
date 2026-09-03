@@ -1,8 +1,10 @@
 """
-Q-ALPHA UTS v2 — TSD watch queue (Phase 1).
+Q-ALPHA UTS v2 — Peak Hour watch queue.
 
-Scan adds profiler-pass candidates to the queue instead of placing orders.
-setup_watch_agent (Phase 3) will poll WATCHING rows and execute entries.
+Live Paper: 1H LAUNCH scan admits names here, then execute_live_entries places
+BUY orders (sole live entry authority via TSD Scheduler --tick --live).
+
+setup_watch_agent.py is research/legacy — not on the Live Paper schedule.
 """
 from __future__ import annotations
 
@@ -65,11 +67,10 @@ def add_to_watch_queue(
     polygon_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Admit profiler-pass scan picks to the watch queue (no IBKR orders).
+    Admit Peak Hour launch picks to the watch queue, then live path enters.
 
-    Applies LAUNCH gates then Phase 2 quality_history_gate (analog depth/win rate,
-    liquidity floors). News fetched AFTER pass — context tags only, never vetoes.
-    PM/extended queue admission OK — executor handles session (Phase 3).
+    Applies LAUNCH gates then quality_history_gate (analogs soft-only).
+    News is context only. Caller (1H launch) runs execute_live_entries on admits.
     """
     state = load_queue()
     when = scan_at or datetime.now(ET).isoformat()
