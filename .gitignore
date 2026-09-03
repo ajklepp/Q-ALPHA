@@ -23,6 +23,8 @@ models/*.joblib
 .DS_Store
 Thumbs.db
 .cursor/
+!.cursor/rules/
+!.cursor/rules/**/*.mdc
 write_exp6.py
 
 candidates/entry_study/*.jsonl
