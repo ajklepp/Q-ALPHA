@@ -423,6 +423,97 @@ def flatten_positions(ib: IB, *, dry_run: bool, keep: set[str] | None = None) ->
     return results
 
 
+def cancel_orders_on_flat_symbols(ib: IB, *, dry_run: bool, port: int) -> list[int]:
+    """
+    ALWAYS cancel working orders for symbols with position qty == 0.
+
+    Runs after flatten/cover so STP/LMT orphans never linger on flat names,
+    even if an earlier --keep pass skipped them.
+    """
+    pos = {str(getattr(c, "symbol", "")).upper(): int(q) for c, q in _stock_positions(ib)}
+    # Include explicit zeros from full position list
+    for p in ib.positions():
+        sec = str(getattr(p.contract, "secType", "") or "").upper()
+        if sec and sec != "STK":
+            continue
+        sym = str(p.contract.symbol).upper()
+        if sym not in pos:
+            pos[sym] = int(p.position or 0)
+
+    ib.reqAllOpenOrders()
+    ib.sleep(0.5)
+    rows = _open_order_rows(ib)
+    flat_oids: list[int] = []
+    for r in rows:
+        sym = r["symbol"].upper()
+        qty = int(pos.get(sym, 0))
+        if qty == 0:
+            flat_oids.append(int(r["orderId"]))
+            tag = "DRY_RUN " if dry_run else ""
+            print(
+                f"  {tag}FLAT-ORPHAN cancel oid={r['orderId']} {sym} "
+                f"{r['action']} {r['type']} (pos=0)"
+            )
+
+    if dry_run or not flat_oids:
+        return flat_oids
+
+    skip_keep: set[int] = set()  # nothing protected when pos==0
+    for oid in flat_oids:
+        cancel_order_safe(ib, oid)
+
+    deadline = time.time() + ORDER_SETTLE_SEC
+    while time.time() < deadline:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.5)
+        pos = {str(getattr(c, "symbol", "")).upper(): int(q) for c, q in _stock_positions(ib)}
+        left = [
+            r for r in _open_order_rows(ib)
+            if int(pos.get(r["symbol"].upper(), 0)) == 0
+        ]
+        if not left:
+            print("Flat-symbol orphan orders cleared.")
+            return flat_oids
+        ib.sleep(1.0)
+
+    left = [
+        r for r in _open_order_rows(ib)
+        if int({str(getattr(c, "symbol", "")).upper(): int(q) for c, q in _stock_positions(ib)}.get(
+            r["symbol"].upper(), 0
+        )) == 0
+    ]
+    if left:
+        owner_ids = sorted({int(r["clientId"]) for r in left} | set(OWNER_CLIENT_IDS))
+        print(f"WARN: {len(left)} flat-orphan order(s) — retry owners {owner_ids}")
+        left_oids = {int(r["orderId"]) for r in left}
+        host = TWS_HOST
+        for cid in owner_ids:
+            try:
+                if int(ib.client.clientId) != cid:
+                    ib.disconnect()
+                    ib.sleep(0.5)
+                    ib.connect(host, port, clientId=cid, timeout=12)
+            except Exception as exc:
+                print(f"  reconnect clientId={cid} failed: {exc}")
+                continue
+            _cancel_open_on_connection(
+                ib, skip_oids=set(), allow_global_cancel=False,
+            )
+            for oid in left_oids:
+                cancel_order_safe(ib, oid)
+            ib.sleep(1.0)
+
+        if int(ib.client.clientId) != TWS_CLIENT_ID:
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
+            ib.sleep(0.5)
+            ib.connect(host, port, clientId=TWS_CLIENT_ID, timeout=12)
+
+    return flat_oids
+
+
 def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None = None) -> int:
     _prefer_venv_hint()
     _guard_port(port, allow_live_port=allow_live_port)
@@ -450,11 +541,15 @@ def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None =
         print("")
         flatten_positions(ib, dry_run=dry_run, keep=keep or set())
         print("")
+        print("--- Cancel orders on flat symbols (always) ---")
+        cancel_orders_on_flat_symbols(ib, dry_run=dry_run, port=port)
+        print("")
 
         ib.reqAllOpenOrders()
         ib.sleep(0.5)
         orders_left = _open_order_rows(ib)
         pos_left = _stock_positions(ib)
+        pos_map = {str(getattr(c, "symbol", "")).upper(): int(q) for c, q in pos_left}
         print("--- FINAL ---")
         print(f"Open orders: {len(orders_left)}")
         for r in orders_left:
@@ -470,23 +565,27 @@ def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None =
             print("DRY_RUN complete - re-run with --live to mutate.")
             return 0
 
-        # Residual: shorts never allowed; longs in protect may remain.
+        # Residual: shorts never allowed; longs in protect may remain;
+        # ANY order on a flat (qty==0) symbol is always a failure.
         protect = _long_keep_set(ib, keep or set())
-        bad_orders = [
-            r for r in orders_left
-            if r["symbol"].upper() not in protect
-        ]
+        bad_orders = []
+        for r in orders_left:
+            sym = r["symbol"].upper()
+            if int(pos_map.get(sym, 0)) == 0:
+                bad_orders.append(r)  # orphan on flat — never OK
+            elif sym not in protect:
+                bad_orders.append(r)
         bad_pos = []
         for c, q in pos_left:
             sym = str(getattr(c, "symbol", "")).upper()
             if int(q) < 0:
-                bad_pos.append((c, q))  # orphan short always residual
+                bad_pos.append((c, q))
             elif sym not in protect:
                 bad_pos.append((c, q))
         if bad_orders or bad_pos:
-            print("FAIL: residuals remain (excluding protected longs)")
+            print("FAIL: residuals remain (flat-orphan orders or unprotected pos)")
             return 2
-        print("OK: broker paper flat (protected longs preserved; shorts covered)")
+        print("OK: broker paper flat (protected longs preserved; flat orphans cleared)")
         return 0
     finally:
         try:
