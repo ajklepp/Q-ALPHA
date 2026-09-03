@@ -152,9 +152,35 @@ def _cancel_open_on_connection(
     return n
 
 
+def _long_keep_set(ib: IB, keep: set[str]) -> set[str]:
+    """
+    Symbols from --keep that may be protected.
+
+    LONG-ONLY: only qty > 0 positions are protected. Orphan shorts (qty < 0)
+    are always covered even if the symbol is listed in --keep.
+    """
+    if not keep:
+        return set()
+    protected: set[str] = set()
+    for contract, qty in _stock_positions(ib):
+        sym = str(getattr(contract, "symbol", "") or "").upper()
+        if sym in keep and int(qty) > 0:
+            protected.add(sym)
+        elif sym in keep and int(qty) < 0:
+            print(
+                f"  KEEP ignore {sym}: qty={qty} is orphan SHORT — will cover "
+                "(--keep only protects long qty>0)"
+            )
+    # Also protect keep symbols with no position yet? No — nothing to protect.
+    # Orders for keep symbols that are long elsewhere: handled via protected set.
+    return protected
+
+
 def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | None = None) -> int:
     """Cancel every open trade across bot clientIds. Returns cancels attempted."""
     keep = keep or set()
+    # Resolve keep against live qty: shorts never protected.
+    protect = _long_keep_set(ib, keep)
     ib.reqAllOpenOrders()
     ib.sleep(0.5)
     rows = _open_order_rows(ib)
@@ -162,12 +188,16 @@ def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | Non
     kept_oids: set[int] = set()
     for r in rows:
         sym = r["symbol"].upper()
-        tag = " [KEPT]" if sym in keep else ""
+        # Protect working exits only for long-kept names (not orphan shorts).
+        protected = sym in protect
+        tag = " [KEPT]" if protected else ""
+        if sym in keep and not protected:
+            tag = " [KEEP-ignored-short-or-flat]"
         print(
             f"  oid={r['orderId']} client={r['clientId']} {r['symbol']:<6} "
             f"{r['action']} {r['type']} qty={r['qty']} status={r['status']}{tag}"
         )
-        if sym in keep:
+        if protected:
             kept_oids.add(r["orderId"])
         elif dry_run:
             print(f"    DRY_RUN cancel oid={r['orderId']}")
@@ -296,6 +326,8 @@ def _wait_fill(ib: IB, trade: Any, need: int, wait_sec: float) -> tuple[float, s
 def flatten_positions(ib: IB, *, dry_run: bool, keep: set[str] | None = None) -> list[dict[str, Any]]:
     """Flat every non-zero STK position. Returns result rows."""
     keep = keep or set()
+    # --keep only protects long qty>0; orphan shorts always covered.
+    protect = _long_keep_set(ib, keep)
     session = classify_session()
     positions = _stock_positions(ib)
     print(f"Stock positions: {len(positions)}  session={session}")
@@ -304,10 +336,12 @@ def flatten_positions(ib: IB, *, dry_run: bool, keep: set[str] | None = None) ->
     for raw_contract, qty in positions:
         sym = str(getattr(raw_contract, "symbol", "") or "").upper()
         abs_qty = abs(int(qty))
-        if sym in keep:
-            print(f"  {sym}: qty={qty} -> KEPT (protected)")
+        if sym in protect and int(qty) > 0:
+            print(f"  {sym}: qty={qty} -> KEPT (protected long)")
             results.append({"symbol": sym, "qty": qty, "status": "KEPT"})
             continue
+        if sym in keep and int(qty) < 0:
+            print(f"  {sym}: qty={qty} -> COVER orphan short (keep ignored for shorts)")
         action = "SELL" if qty > 0 else "BUY"
         print(f"  {sym}: qty={qty} -> {action} {abs_qty} to flat")
 
@@ -398,7 +432,7 @@ def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None =
     print(f"host={TWS_HOST}:{port} clientId={TWS_CLIENT_ID}")
     print("LONG-ONLY strategy: short covers are cleanup only.")
     if keep:
-        print(f"KEEP (protected): {', '.join(sorted(keep))}")
+        print(f"KEEP requested: {', '.join(sorted(keep))} (longs only; shorts always covered)")
     print("=" * 64)
 
     util.startLoop()
@@ -411,6 +445,7 @@ def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None =
 
     dry_run = not live
     try:
+        protect = _long_keep_set(ib, keep or set())
         cancel_all_working(ib, dry_run=dry_run, port=port, keep=keep or set())
         print("")
         flatten_positions(ib, dry_run=dry_run, keep=keep or set())
@@ -435,13 +470,23 @@ def run(*, live: bool, port: int, allow_live_port: bool, keep: set[str] | None =
             print("DRY_RUN complete - re-run with --live to mutate.")
             return 0
 
-        # Filter out kept symbols from residual check
-        non_kept_orders = [r for r in orders_left if r["symbol"].upper() not in (keep or set())]
-        non_kept_pos = [(c, q) for c, q in pos_left if str(getattr(c, "symbol", "")).upper() not in (keep or set())]
-        if non_kept_orders or non_kept_pos:
-            print("FAIL: residuals remain (excluding kept symbols)")
+        # Residual: shorts never allowed; longs in protect may remain.
+        protect = _long_keep_set(ib, keep or set())
+        bad_orders = [
+            r for r in orders_left
+            if r["symbol"].upper() not in protect
+        ]
+        bad_pos = []
+        for c, q in pos_left:
+            sym = str(getattr(c, "symbol", "")).upper()
+            if int(q) < 0:
+                bad_pos.append((c, q))  # orphan short always residual
+            elif sym not in protect:
+                bad_pos.append((c, q))
+        if bad_orders or bad_pos:
+            print("FAIL: residuals remain (excluding protected longs)")
             return 2
-        print("OK: broker paper flat (kept symbols preserved, rest cleared)")
+        print("OK: broker paper flat (protected longs preserved; shorts covered)")
         return 0
     finally:
         try:
@@ -464,7 +509,8 @@ def main() -> int:
         "--keep",
         type=str,
         default="",
-        help="Comma-separated symbols to KEEP (skip flatten + keep their orders).",
+        help="Comma-separated symbols to KEEP as LONGS only (qty>0). "
+             "Orphan shorts (qty<0) are always covered even if listed.",
     )
     args = parser.parse_args()
     if not args.dry_run and not args.live:
