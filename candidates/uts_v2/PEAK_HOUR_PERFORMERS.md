@@ -22,9 +22,10 @@ Continuous HTF rank among passers; analogs soft-only (never veto).
 
 ## Reset
 ```bash
-py -3 candidates/uts_v2/reset_peak_hour_performers.py
+.\venv\Scripts\python.exe candidates\uts_v2\reset_peak_hour_performers.py --also-reset-cloud
 ```
-Archives book/pool/queue/scheduler under `candidates/archive/` (never commit).
+Archives book/pool/queue/scheduler under `candidates/archive/` (never commit).  
+`--also-reset-cloud` clears Supabase TSD tables and seeds pool=$3000 so dashboard KPIs match.
 
 ## Lineage (code)
 - UTS v2.6 operating system (`bc7b9bb` / lag `:15` `c11000b`)

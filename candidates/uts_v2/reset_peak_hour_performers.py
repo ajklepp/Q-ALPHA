@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-Peak Hour Performers v3.0 — archive + reset local paper state.
+Peak Hour Performers v3.0 — archive + reset local paper state (+ optional cloud).
 
 Archives runtime JSON under candidates/archive/pre_php_v3_YYYYMMDD_HHMM/,
 then writes fresh book / pool / watch queue / scheduler last_runs.
 
+Dashboard KPIs read Supabase (tsd_pool_snapshots / tsd_positions / tsd_closed_legs).
+Use --also-reset-cloud so Session KPIs show a clean $3000 slate.
+
 Usage (repo root):
-  py -3 candidates/uts_v2/reset_peak_hour_performers.py
-  py -3 candidates/uts_v2/reset_peak_hour_performers.py --dry-run
+  .\\venv\\Scripts\\python.exe candidates\\uts_v2\\reset_peak_hour_performers.py
+  .\\venv\\Scripts\\python.exe candidates\\uts_v2\\reset_peak_hour_performers.py --also-reset-cloud
+  .\\venv\\Scripts\\python.exe candidates\\uts_v2\\reset_peak_hour_performers.py --dry-run
 
 NEVER git-commit archived or reset state files.
 """
@@ -17,7 +21,7 @@ import argparse
 import json
 import shutil
 import sys
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytz
@@ -25,6 +29,8 @@ import pytz
 ROOT = Path(__file__).resolve().parents[2]
 CANDIDATES = ROOT / "candidates"
 sys.path.insert(0, str(CANDIDATES))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from state_paths import state_path  # noqa: E402
 from tsd_scan_pipeline.tsd_pool import DEFAULT_STARTING_POOL  # noqa: E402
@@ -32,6 +38,16 @@ from tsd_scan_pipeline.tsd_pool import DEFAULT_STARTING_POOL  # noqa: E402
 ET = pytz.timezone("America/New_York")
 SCHEDULER_STATE = CANDIDATES / "tsd_scan_pipeline" / "results" / "tsd_scheduler_state.json"
 ARCHIVE_ROOT = CANDIDATES / "archive"
+
+# Cloud tables that feed Peak Hour Performers dashboard KPIs / trade log.
+CLOUD_CLEAR_TABLES = (
+    "tsd_closed_legs",
+    "tsd_positions",
+    "tsd_watchlist",
+    "tsd_pool_snapshots",
+)
+# Optional (may be missing until tsd_cloud.sql re-run):
+CLOUD_OPTIONAL_TABLES = ("tsd_watch_queue",)
 
 
 def _default_book() -> dict:
@@ -74,6 +90,89 @@ def _default_scheduler() -> dict:
         "strategy": "Peak Hour Performers",
         "version": "3.0",
     }
+
+
+def _delete_all_rows(client: object, table: str) -> None:
+    """Best-effort delete-all via PostgREST filter (Supabase requires a filter)."""
+    attempts = (
+        ("symbol", ""),
+        ("snapshot_date", ""),
+        ("leg_opened_at", ""),
+    )
+    last_exc: Exception | None = None
+    for col, val in attempts:
+        try:
+            client.table(table).delete().neq(col, val).execute()
+            return
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc:
+        raise last_exc
+
+
+def reset_cloud_dashboard(*, dry_run: bool = False) -> None:
+    """
+    Clear Peak Hour Performers Supabase tables and seed pool=$3000.
+
+    Dashboard Live Status reads cloud, not local JSON — local-only reset
+    leaves stale cash/P&L/closed legs on the UI.
+    """
+    from supabase_sync import SupabaseSync
+
+    print("")
+    print("Cloud dashboard reset (Supabase TSD tables)")
+    if dry_run:
+        for t in CLOUD_CLEAR_TABLES:
+            print(f"  DRY_RUN clear {t}")
+        print(f"  DRY_RUN upsert tsd_pool_snapshots pool={DEFAULT_STARTING_POOL}")
+        return
+
+    sync = SupabaseSync()
+    for table in CLOUD_CLEAR_TABLES:
+        try:
+            _delete_all_rows(sync.client, table)
+            print(f"  CLEARED {table}")
+        except Exception as exc:
+            print(f"  CLEAR FAIL {table}: {exc}")
+    for table in CLOUD_OPTIONAL_TABLES:
+        try:
+            _delete_all_rows(sync.client, table)
+            print(f"  CLEARED {table}")
+        except Exception as exc:
+            print(f"  SKIP {table}: {exc}")
+
+    seed = {
+        "snapshot_date": date.today().isoformat(),
+        "pool": float(DEFAULT_STARTING_POOL),
+        "deployed": 0.0,
+        "open_positions": 0,
+        "open_names": 0,
+        "starting_pool": float(DEFAULT_STARTING_POOL),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+    # Prefer full snapshot (regime cols); fall back if cloud schema lags.
+    try:
+        sync.upsert_tsd_pool_snapshot({
+            **seed,
+            "spy_regime": "UNKNOWN",
+            "vix_regime": "NORMAL",
+            "sizing_pct": "100%",
+        })
+    except Exception as exc:
+        print(f"  FULL seed failed ({exc}); retrying core columns only")
+        sync.client.table("tsd_pool_snapshots").upsert(
+            seed, on_conflict="snapshot_date"
+        ).execute()
+    print(f"  SEEDED tsd_pool_snapshots pool=${DEFAULT_STARTING_POOL:,.0f} deployed=$0")
+
+    latest = sync.get_latest_tsd_pool() or {}
+    closed_n = len(sync.get_tsd_closed_legs())
+    open_n = len(sync.get_tsd_positions(status="OPEN"))
+    print(
+        f"  VERIFY pool={latest.get('pool')} deployed={latest.get('deployed')} "
+        f"open={open_n} closed_legs={closed_n}"
+    )
 
 
 def archive_and_reset(*, dry_run: bool = False) -> Path:
@@ -133,8 +232,15 @@ def main() -> int:
         action="store_true",
         help="After JSON reset, run flatten_tws_paper.py --live",
     )
+    parser.add_argument(
+        "--also-reset-cloud",
+        action="store_true",
+        help="Clear Supabase TSD tables + seed pool=$3000 (dashboard KPIs)",
+    )
     args = parser.parse_args()
     archive_and_reset(dry_run=args.dry_run)
+    if args.also_reset_cloud:
+        reset_cloud_dashboard(dry_run=args.dry_run)
     if args.also_flatten_tws and not args.dry_run:
         import importlib.util
 
