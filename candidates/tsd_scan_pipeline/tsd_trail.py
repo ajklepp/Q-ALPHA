@@ -33,7 +33,8 @@ from strategy_a import (  # noqa: E402
 
 ET = pytz.timezone("America/New_York")
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
-FALLBACK_KILL_PCT = 0.07
+
+from tsd_scan_pipeline.tsd_kill import FALLBACK_KILL_PCT, resolve_kill_pct  # noqa: E402
 
 
 def tsd_profile_to_strategy_profile(tsd_profile: dict[str, Any]) -> dict[str, Any]:
@@ -42,12 +43,17 @@ def tsd_profile_to_strategy_profile(tsd_profile: dict[str, Any]) -> dict[str, An
     meaningful = status == "OK" and int(tsd_profile.get("analog_count") or 0) >= 30
     mae = tsd_profile.get("mae") or {}
     mfe = tsd_profile.get("mfe") or {}
-    kill = float(tsd_profile.get("kill_pct") or mae.get("p75") or FALLBACK_KILL_PCT)
+    kill, kill_source = resolve_kill_pct(
+        tsd_profile.get("kill_pct") or mae.get("p75"),
+        profile=tsd_profile,
+    )
     return {
         "confidence": "OK" if meaningful else "INSUFFICIENT",
         "stats_meaningful": meaningful,
         "percentiles": {"mae": mae, "mfe": mfe},
         "bracket": {"safe_max_stop_pct": kill},
+        "kill_source": kill_source,
+        "fallback_kill_pct": FALLBACK_KILL_PCT,
     }
 
 
@@ -166,6 +172,7 @@ def init_trail_state(
     )
     doc = sim_state_to_dict(state)
     doc["levels_source"] = levels.get("source")
+    doc["kill_source"] = strat_profile.get("kill_source") or "fallback_5pct"
     doc["kill_stop_cancelled"] = False
     doc["opened_at"] = datetime.now(ET).isoformat()
     doc["last_session_date"] = datetime.now(ET).date().isoformat()

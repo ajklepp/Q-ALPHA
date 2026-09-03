@@ -117,7 +117,12 @@ def _open_order_rows(ib: IB) -> list[dict[str, Any]]:
     return rows
 
 
-def _cancel_open_on_connection(ib: IB, *, skip_oids: set[int] | None = None) -> int:
+def _cancel_open_on_connection(
+    ib: IB,
+    *,
+    skip_oids: set[int] | None = None,
+    allow_global_cancel: bool = True,
+) -> int:
     """Cancel every open trade on this connection. Returns attempts."""
     skip_oids = skip_oids or set()
     ib.reqAllOpenOrders()
@@ -134,11 +139,15 @@ def _cancel_open_on_connection(ib: IB, *, skip_oids: set[int] | None = None) -> 
             print(f"    CANCEL req oid={oid} {sym} (conn clientId={ib.client.clientId})")
         except Exception as exc:
             print(f"    CANCEL FAIL oid={oid}: {exc}")
-    try:
-        ib.reqGlobalCancel()
-        print(f"  reqGlobalCancel() via clientId={ib.client.clientId}")
-    except Exception as exc:
-        print(f"  reqGlobalCancel skipped: {exc}")
+    # Global cancel would also wipe KEPT symbols — skip when protecting any oids.
+    if allow_global_cancel and not skip_oids:
+        try:
+            ib.reqGlobalCancel()
+            print(f"  reqGlobalCancel() via clientId={ib.client.clientId}")
+        except Exception as exc:
+            print(f"  reqGlobalCancel skipped: {exc}")
+    elif skip_oids:
+        print(f"  reqGlobalCancel skipped (protecting {len(skip_oids)} kept oid(s))")
     ib.sleep(1.0)
     return n
 
@@ -166,7 +175,9 @@ def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | Non
     if dry_run:
         return len(rows) - len(kept_oids)
 
-    attempted = _cancel_open_on_connection(ib, skip_oids=kept_oids)
+    attempted = _cancel_open_on_connection(
+        ib, skip_oids=kept_oids, allow_global_cancel=not kept_oids,
+    )
 
     for r in rows:
         if r["orderId"] not in kept_oids:
@@ -190,7 +201,9 @@ def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | Non
         host = TWS_HOST
         for cid in owner_ids:
             if cid == int(ib.client.clientId):
-                _cancel_open_on_connection(ib)
+                _cancel_open_on_connection(
+                    ib, skip_oids=kept_oids, allow_global_cancel=not kept_oids,
+                )
                 continue
             try:
                 ib.disconnect()
@@ -202,7 +215,9 @@ def cancel_all_working(ib: IB, *, dry_run: bool, port: int, keep: set[str] | Non
             except Exception as exc:
                 print(f"  reconnect clientId={cid} failed: {exc}")
                 continue
-            _cancel_open_on_connection(ib)
+            _cancel_open_on_connection(
+                ib, skip_oids=kept_oids, allow_global_cancel=not kept_oids,
+            )
             ib.sleep(1.0)
 
         # Restore master connection for flatten legs.

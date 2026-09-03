@@ -8,7 +8,8 @@ Session rules:
   - Pre-market / after-hours: LimitOrder BUY, outsideRth=True
   - Overnight (20:00-04:00 ET): LimitOrder BUY only, outsideRth=True
 
-Emergency T1 kill: StopLimitOrder SELL at kill_pct (fallback 7%) until Phase 4.
+Emergency T1 kill: StopLimitOrder SELL at kill_pct (fallback 5%) until Phase 4.
+Never place broker kill at structure/area-low (Chat A bakeoff failed).
 """
 from __future__ import annotations
 
@@ -18,12 +19,12 @@ from typing import Any, Literal
 import pytz
 from ib_insync import IB, LimitOrder, MarketOrder, StopLimitOrder, Stock
 
+from tsd_scan_pipeline.tsd_kill import FALLBACK_KILL_PCT, resolve_kill_pct
 from tsd_scan_pipeline.tsd_pool import available_pool, deploy_on_entry, load_pool
 
 ET = pytz.timezone("America/New_York")
 SessionKind = Literal["RTH", "EXTENDED", "OVERNIGHT"]
 
-FALLBACK_KILL_PCT = 0.07
 FILL_WAIT_SEC = 45
 POLL_SEC = 0.5
 KILL_LIMIT_SLIP = 0.995
@@ -192,7 +193,7 @@ def place_tsd_entry(
             pass
         return {"status": "REJECTED", "reason": "no_fill_timeout", "symbol": sym, "session": session}
 
-    kill = kill_pct if kill_pct is not None else FALLBACK_KILL_PCT
+    kill, kill_source = resolve_kill_pct(kill_pct)
     kill_meta = place_kill_stop(ib, contract, int(filled), avg_fill, session, kill_pct=kill)
     deploy_on_entry(int(filled), avg_fill)
 
@@ -204,5 +205,6 @@ def place_tsd_entry(
         "session": session,
         "order_id": trade.order.orderId,
         "kill_pct": kill,
+        "kill_source": kill_source,
         **kill_meta,
     }

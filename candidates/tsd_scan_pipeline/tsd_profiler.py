@@ -42,7 +42,7 @@ LOOKBACK_2Y_DAYS = 365 * 2
 LOOKBACK_3Y_DAYS = 365 * 3
 IBKR_MAX_DAYS = 730
 HOLD_DAYS_PRIMARY = 5
-FALLBACK_KILL_PCT = 0.07
+FALLBACK_KILL_PCT = 0.05  # Chat A winners MAE p75 ≈ 4.6%; band-clamp via resolve_kill_pct
 
 
 def _analog_outcome_label(
@@ -383,12 +383,15 @@ def build_tsd_profile(
         "p75": round(_percentile(mfe_vals, 75) or 0.0, 6),
         "p90": round(_percentile(mfe_vals, 90) or 0.0, 6),
     }
-    kill_pct = mae["p75"] if mae["p75"] > 0 else FALLBACK_KILL_PCT
+    kill_raw = mae["p75"] if mae["p75"] > 0 else FALLBACK_KILL_PCT
+    from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
+
+    kill_pct, kill_source = resolve_kill_pct(kill_raw)
     target_pct = mfe["p50"]
 
     wins = losses = flats = 0
     for m in measured:
-        label = _analog_outcome_label(m["mfe_pct"], m["mae_pct"], kill_pct)
+        label = _analog_outcome_label(m["mfe_pct"], m["mae_pct"], kill_raw)
         if label == "WIN":
             wins += 1
         elif label == "LOSS":
@@ -412,6 +415,8 @@ def build_tsd_profile(
         "lookback_extended": analog_doc.get("lookback_extended", False),
         "bar_source": analog_doc.get("bar_source"),
         "kill_pct": round(kill_pct, 6),
+        "kill_source": kill_source,
+        "kill_pct_raw_mae_p75": round(kill_raw, 6),
         "target_pct": round(target_pct, 6) if target_pct else None,
         "mae": mae,
         "mfe": mfe,

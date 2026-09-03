@@ -201,10 +201,18 @@ def record_entry(
     order_id: int | None = None,
     kill_order_id: int | None = None,
     kill_pct: float | None = None,
+    kill_source: str | None = None,
     tsd_profile: dict[str, Any] | None = None,
     session_at_entry: SessionKind | str | None = None,
+    bar_state: str | None = None,
+    bar_hour: Any = None,
+    continuation_score: float | None = None,
+    print_tag: str | None = None,
+    outlook: str | None = None,
+    structure_level: float | None = None,
 ) -> dict[str, Any]:
     """Book a filled entry into TSD state."""
+    from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
     from tsd_scan_pipeline.tsd_trail import init_trail_state
 
     sym = symbol.upper()
@@ -212,6 +220,11 @@ def record_entry(
     now = datetime.now(ET).isoformat()
     session = session_at_entry or classify_session()
     trail = init_trail_state(entry_price, shares, tsd_profile)
+    resolved_kill, resolved_src = resolve_kill_pct(kill_pct, profile=tsd_profile)
+    # Keep trail kill in sync with broker kill band
+    trail["kill_pct"] = resolved_kill
+    trail["kill_price"] = float(entry_price) * (1.0 - resolved_kill)
+    trail["kill_source"] = kill_source or resolved_src or trail.get("kill_source")
     leg = {
         "time": now,
         "price": entry_price,
@@ -220,7 +233,14 @@ def record_entry(
         "is_addon": is_addon,
         "order_id": order_id,
         "kill_order_id": kill_order_id,
-        "kill_pct": kill_pct,
+        "kill_pct": resolved_kill,
+        "kill_source": kill_source or resolved_src,
+        "bar_state": bar_state,
+        "bar_hour": bar_hour,
+        "continuation_score": continuation_score,
+        "print": print_tag,
+        "outlook": outlook,
+        "structure_level": structure_level,  # research only — not broker kill
         "status": "OPEN",
         "trail": trail,
         "exits": [],

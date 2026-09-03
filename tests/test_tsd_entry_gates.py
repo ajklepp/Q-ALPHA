@@ -88,7 +88,7 @@ class TestEvaluateGates(unittest.TestCase):
         self.assertTrue(passed, msg=reasons)
         self.assertTrue(gates["htf_1h_buy"])
         self.assertTrue(gates["launch_candidate"])
-        self.assertTrue(gates["signal_bar_red"])
+        self.assertTrue(gates["trigger"])
         self.assertTrue(gates["htf_daily"])
         self.assertEqual(reasons, [])
 
@@ -110,12 +110,13 @@ class TestEvaluateGates(unittest.TestCase):
         self.assertTrue(gates["regime_context"])
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_rejects_green_signal_bar(self, _occ):
-        cand = {**ZIP_LAUNCH, "open": 5.0, "close": 5.5, "htf_1h_close": 5.5}
+    def test_green_signal_bar_still_passes(self, _occ):
+        """Color is soft — yellow/green no longer hard-veto."""
+        cand = {**ZIP_LAUNCH, "open": 5.0, "close": 5.5, "high": 5.6, "low": 4.9, "htf_1h_close": 5.5}
         passed, gates, reasons = evaluate_entry_gates(cand, regime_bull=True, now=ENTRY_NOW)
-        self.assertFalse(passed)
+        self.assertTrue(passed, msg=reasons)
         self.assertFalse(gates["signal_bar_red"])
-        self.assertIn("signal_bar_not_red", reasons)
+        self.assertNotIn("signal_bar_not_red", reasons)
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_rejects_htf_fail(self, _occ):

@@ -503,6 +503,18 @@ def _render_tsd_open_card(row: dict) -> None:
             else:
                 k_delta = distance_from_current(kill_price, current_price, label="kill")
             st.metric("Kill", k_primary, k_delta)
+            kp = _safe_float(row.get("kill_pct"), 0.0)
+            ks = str(row.get("kill_source") or "")
+            bs = str(row.get("bar_state") or "")
+            cap_bits = []
+            if kp > 0:
+                cap_bits.append(f"{kp:.1%}")
+            if ks:
+                cap_bits.append(ks)
+            if bs:
+                cap_bits.append(f"bar={bs}")
+            if cap_bits:
+                st.caption(" · ".join(cap_bits))
         else:
             st.metric("Kill", "—", "—")
     with s2:

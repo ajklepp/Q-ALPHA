@@ -5,8 +5,9 @@ Bar source: Polygon 1H aggregates (timestamp = bar START / left-labeled).
 Close hour ET = start.hour + 1, matching Chat A 1h label=right closed=right.
 
 Last COMPLETED 1H bar must have:
-  TSD buy_signal + is_launch_candidate + signal_bar_red
-and close hour in ALLOWED_HOURS {7, 11, 12, 13}.
+  (buy_signal OR early_bull) + is_launch_candidate
+  and close hour in ALLOWED_HOURS {7, 11, 12, 13}.
+Color does NOT veto — bar_state is rank/telemetry only.
 """
 from __future__ import annotations
 
@@ -17,7 +18,13 @@ from typing import Any
 import pandas as pd
 import pytz
 
+from tsd_scan_pipeline.tsd_kill import (
+    structure_area_low,
+    structure_risk_pct,
+    structure_too_wide,
+)
 from tsd_scan_pipeline.tsd_launch_score import (
+    classify_bar_state,
     enrich_launch_fields,
     is_launch_candidate,
     signal_bar_red,
@@ -132,31 +139,35 @@ def evaluate_1h_buy_signal(
     """
     Evaluate last completed 1H bar as the LAUNCH trigger.
 
-    Returns (passed, launch_row). launch_row includes OHLC, buy/launch fields,
-    bar close hour, and entry_price = 1H close.
-
-    Pre-enriched rows (tests / scan) skip Polygon when htf_1h_buy_signal is set.
+    Returns (passed, launch_row). Color does NOT veto; bar_state is telemetry/rank.
+    Soft skip when structure risk > 5% (structure_too_wide) — not used as kill.
     """
     if row.get("htf_1h_buy_signal") is not None and row.get("htf_1h_close") is None:
         ok = bool(row.get("htf_1h_buy_signal"))
         hour = row.get("htf_1h_bar_hour")
-        meta = {
+        meta = enrich_launch_fields({
             **row,
             "htf_1h_buy_signal": ok,
-            "buy_signal": bool(ok or row.get("buy_signal")),
+            "buy_signal": bool(ok or row.get("buy_signal") or row.get("early_bull")),
             "source": "row",
             "htf_1h_bar_hour": hour,
             "hour_allowed": is_allowed_hour(int(hour)) if hour is not None else True,
-        }
+        })
         return ok and meta["hour_allowed"], meta
 
     if row.get("htf_1h_close") is not None and row.get("htf_1h_buy_signal") is not None:
         ok = bool(row.get("htf_1h_buy_signal"))
         hour = int(row.get("htf_1h_bar_hour") or 0)
         hour_ok = is_allowed_hour(hour) if row.get("htf_1h_bar_hour") is not None else True
-        out = dict(row)
+        out = enrich_launch_fields(dict(row))
         out["hour_allowed"] = hour_ok
         out["source"] = out.get("source") or "row"
+        if out.get("structure_level") and structure_too_wide(
+            float(out.get("htf_1h_close") or out.get("close") or 0),
+            out.get("structure_level"),
+        ):
+            out["reject_reason"] = "structure_too_wide"
+            return False, out
         return ok and hour_ok, out
 
     sym = str(row.get("symbol", "")).upper()
@@ -182,9 +193,16 @@ def evaluate_1h_buy_signal(
     summary = last_bar_summary(enriched)
     launch = enrich_launch_fields({**row, **summary, "symbol": sym})
     close_hour = bar_close_hour_et(pd.Timestamp(summary["time"]))
-    ok_launch = is_launch_candidate(launch) and bool(launch.get("buy_signal")) and signal_bar_red(launch)
+    trigger = bool(launch.get("buy_signal")) or bool(launch.get("early_bull"))
+    ok_launch = is_launch_candidate(launch) and trigger
     hour_ok = is_allowed_hour(close_hour)
     phase_3h = _phase_3h_from_hourly(completed)
+    bar_state = classify_bar_state(launch)
+
+    lows = [float(x) for x in completed["low"].tolist() if x is not None]
+    area_low = structure_area_low(lows)
+    entry_px = float(summary.get("close") or 0)
+    struct_risk = structure_risk_pct(entry_px, area_low)
 
     launch_row: dict[str, Any] = {
         **launch,
@@ -201,10 +219,21 @@ def evaluate_1h_buy_signal(
         "high": summary.get("high"),
         "low": summary.get("low"),
         "buy_signal": bool(launch.get("buy_signal")),
+        "early_bull": bool(launch.get("early_bull")),
         "signal_bar_red": signal_bar_red(launch),
+        "bar_state": bar_state,
         "phase_3h": phase_3h,
+        "structure_level": area_low,
+        "structure_risk_pct": struct_risk,
         "source": BAR_SOURCE,
         "structure_mode": "KILL ONLY until +1R",
     }
+    launch_row = enrich_launch_fields(launch_row)
+
+    if structure_too_wide(entry_px, area_low):
+        launch_row["htf_1h_buy_signal"] = False
+        launch_row["reject_reason"] = "structure_too_wide"
+        return False, launch_row
+
     passed = ok_launch and hour_ok
     return passed, launch_row

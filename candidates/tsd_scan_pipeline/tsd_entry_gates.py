@@ -1,8 +1,8 @@
 """
 Q-ALPHA UTS v2.6 — 1H LAUNCH entry gates.
 
-Trigger is last completed 1H bar (buy + launch + red), not 3H buy_signal.
-3H phase != EXTENSION is context only. Hours {7, 11, 12, 13} ET.
+Trigger is last completed 1H bar (buy/early_bull + launch), not 3H buy_signal.
+Color does NOT veto. 3H phase != EXTENSION is context. Hours {7, 11, 12, 13} ET.
 SPY regime is dashboard context only — never vetoes entry.
 """
 from __future__ import annotations
@@ -133,7 +133,7 @@ def evaluate_launch_gates(
     now: datetime | None = None,
     polygon_key: str | None = None,
 ) -> tuple[bool, dict[str, bool], list[str]]:
-    """1H LAUNCH gates — 3H buy_signal is NOT required."""
+    """1H LAUNCH gates — color does NOT veto; bar_state is rank-only."""
     row = enrich_launch_fields(candidate)
     sym = str(row.get("symbol", "")).upper()
     htf_1h_ok, launch_row = evaluate_1h_buy_signal(row, polygon_key=polygon_key, now=now)
@@ -141,7 +141,8 @@ def evaluate_launch_gates(
     phase_3h = row.get("phase_3h") or row.get("phase") or "NEUTRAL"
     if htf_1h_ok:
         # 1H is the buy; 3H buy_signal must not block launch scoring
-        row["buy_signal"] = True
+        if not row.get("buy_signal") and not row.get("early_bull"):
+            row["buy_signal"] = True
         row = enrich_launch_fields(row)
 
     htf_pass, htf_gates, htf_reasons, htf_score = evaluate_htf_daily_gates(
@@ -149,6 +150,7 @@ def evaluate_launch_gates(
     )
     row["htf_score"] = htf_score
     row["htf_1h_buy_signal"] = htf_1h_ok
+    row = enrich_launch_fields(row)
 
     bar_hour = row.get("htf_1h_bar_hour")
     if bar_hour is None:
@@ -156,13 +158,17 @@ def evaluate_launch_gates(
     hour_ok = is_allowed_hour(int(bar_hour))
 
     launch_ok = is_launch_candidate(row)
-    red_ok = bool(row.get("signal_bar_red"))
+    trigger_ok = bool(row.get("buy_signal")) or bool(row.get("early_bull"))
+    red_ok = bool(row.get("signal_bar_red"))  # soft / telemetry only
+    structure_ok = str(launch_row.get("reject_reason") or "") != "structure_too_wide"
 
     gates: dict[str, bool] = {
         "htf_1h_buy": htf_1h_ok,
         "launch_candidate": launch_ok,
-        "signal_bar_red": red_ok,
+        "trigger": trigger_ok,
+        "signal_bar_red": red_ok,  # informational — not in core
         "not_extension": phase_3h != "EXTENSION",
+        "structure_ok": structure_ok,
         "htf_daily": htf_pass,
         "hour_allowed": hour_ok,
         "dedup": sym not in occupied_symbols() if sym else False,
@@ -178,11 +184,16 @@ def evaluate_launch_gates(
     if phase_3h == "EXTENSION":
         reasons.append("extension_phase")
     if not gates["htf_1h_buy"]:
-        reasons.append("no_1h_buy_signal")
+        if launch_row.get("reject_reason") == "structure_too_wide":
+            reasons.append("structure_too_wide")
+        else:
+            reasons.append("no_1h_buy_signal")
     if not gates["launch_candidate"]:
         reasons.append("not_launch_candidate")
-    if not gates["signal_bar_red"]:
-        reasons.append("signal_bar_not_red")
+    if not gates["trigger"]:
+        reasons.append("no_buy_or_early_bull")
+    if not gates["structure_ok"]:
+        reasons.append("structure_too_wide")
     if not gates["hour_allowed"]:
         reasons.append(f"hour_not_allowed:{bar_hour}")
     reasons.extend(htf_reasons)
@@ -194,8 +205,9 @@ def evaluate_launch_gates(
     core = (
         "htf_1h_buy",
         "launch_candidate",
-        "signal_bar_red",
+        "trigger",
         "not_extension",
+        "structure_ok",
         "htf_daily",
         "hour_allowed",
         "dedup",

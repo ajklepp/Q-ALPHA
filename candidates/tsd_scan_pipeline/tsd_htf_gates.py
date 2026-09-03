@@ -179,10 +179,11 @@ def evaluate_htf_daily_gates(
 
 
 def compute_combined_rank_score(row: dict[str, Any]) -> float:
-    """Combined HTF + launch score for slot ranking."""
-    launch = float(row.get("launch_score") or 0)
-    htf = float(row.get("htf_score") or 0)
-    return round(launch + htf, 1)
+    """Combined continuation rank (HTF + launch + bar_state + hour soft demote)."""
+    from tsd_scan_pipeline.tsd_launch_score import compute_continuation_score_v0, enrich_launch_fields
+
+    enriched = enrich_launch_fields(row)
+    return float(enriched.get("continuation_score") or compute_continuation_score_v0(enriched))
 
 
 def _fetch_htf_metrics(symbol: str, *, polygon_key: str | None = None) -> dict[str, Any]:

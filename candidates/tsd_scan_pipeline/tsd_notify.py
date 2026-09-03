@@ -27,19 +27,37 @@ def format_entered(
     shares: int,
     fill_price: float,
     kill_pct: float | None = None,
+    kill_source: str | None = None,
     bar_hour: Any = None,
+    bar_state: str | None = None,
     rank: Any = None,
+    continuation_score: Any = None,
+    print_tag: str | None = None,
+    outlook: str | None = None,
     kind: str = "NEW",
 ) -> str:
-    """Peak Hour entry alert text."""
+    """Peak Hour entry alert text with kill/bar/outlook telemetry."""
     kill = f"{float(kill_pct):.1%}" if kill_pct is not None else "?"
+    src = f" ({kill_source})" if kill_source else ""
     lines = [
         f"Peak Hour ENTERED {str(symbol).upper()} ({kind})",
         f"{int(shares)} @ ${float(fill_price):.2f}",
-        f"kill={kill}  mode=KILL ONLY until +1R",
+        f"kill={kill}{src}  mode=KILL ONLY until +1R",
     ]
-    if bar_hour is not None or rank is not None:
-        lines.append(f"hour={bar_hour} rank={rank}")
+    meta_bits = []
+    if bar_hour is not None:
+        meta_bits.append(f"hour={bar_hour}")
+    if bar_state:
+        meta_bits.append(f"bar={bar_state}")
+    score = continuation_score if continuation_score is not None else rank
+    if score is not None:
+        meta_bits.append(f"cont={score}")
+    if print_tag:
+        meta_bits.append(f"PRINT={print_tag}")
+    if outlook:
+        meta_bits.append(f"OUTLOOK={outlook}")
+    if meta_bits:
+        lines.append(" ".join(meta_bits))
     return "\n".join(lines)
 
 

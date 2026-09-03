@@ -108,7 +108,11 @@ def _ensure_trail_on_leg(leg: dict[str, Any], symbol: str) -> dict[str, Any]:
     leg = dict(leg)
     leg["trail"] = trail
     if profile and not leg.get("kill_pct"):
-        leg["kill_pct"] = profile.get("kill_pct")
+        from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
+
+        kill, src = resolve_kill_pct(profile.get("kill_pct"), profile=profile)
+        leg["kill_pct"] = kill
+        leg["kill_source"] = src
     return leg
 
 

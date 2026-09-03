@@ -102,6 +102,8 @@ TSD_POSITION_FIELDS = (
     "phase",
     "pre_catalyst",
     "mfe_r",
+    "kill_source",
+    "bar_state",
     "last_updated",
 )
 

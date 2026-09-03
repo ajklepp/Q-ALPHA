@@ -227,7 +227,35 @@ def apply_soft_tags(
     out["catalyst_tier"] = catalyst_tier
     out["sentiment_score"] = round(sentiment, 2)
     out["news_summary"] = ctx.get("news_summary") or out.get("news_summary") or ""
+    out["print"] = ctx.get("print") or out.get("print") or "unknown"
+    out["outlook"] = ctx.get("outlook") or out.get("outlook") or "unknown"
+    if ctx.get("guidance_cut") or out["outlook"] in ("lowered", "withdrawn"):
+        if "guidance_cut" not in tags:
+            tags.append("guidance_cut")
+        out["tags"] = tags
+        out["guidance_cut"] = True
+    else:
+        out["guidance_cut"] = False
+    # Re-rank after outlook so guidance_cut penalty lands on continuation_score
+    from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
+
+    out = enrich_launch_fields(out)
+    out["launch_score_display"] = round(
+        float(out.get("launch_score") or 0) + display_bonus, 1
+    )
     return out
+
+
+def _parse_print_outlook(summary: str) -> tuple[str, str]:
+    """Extract PRINT / OUTLOOK tags from catalyst summary (thin parser)."""
+    import re
+
+    text = summary or ""
+    print_m = re.search(r"PRINT:\s*(beat|miss|inline|unknown)", text, re.I)
+    out_m = re.search(r"OUTLOOK:\s*(raised|maintained|lowered|withdrawn|unknown)", text, re.I)
+    print_v = (print_m.group(1).lower() if print_m else "unknown")
+    outlook_v = (out_m.group(1).lower() if out_m else "unknown")
+    return print_v, outlook_v
 
 
 def _classify_catalyst_tier(headlines: list[str], summary: str) -> int:
@@ -313,6 +341,10 @@ def fetch_news_context(
 
     tier = _classify_catalyst_tier(headlines, summary)
     sentiment = _sentiment_from_text(summary)
+    print_tag, outlook_tag = _parse_print_outlook(summary)
+    tags_extra: list[str] = []
+    if outlook_tag in ("lowered", "withdrawn"):
+        tags_extra.append("guidance_cut")
 
     return {
         "news_summary": summary,
@@ -320,6 +352,10 @@ def fetch_news_context(
         "sentiment_score": sentiment,
         "pre_catalyst": pre_catalyst,
         "headline_count": len(headlines),
+        "print": print_tag,
+        "outlook": outlook_tag,
+        "guidance_cut": outlook_tag in ("lowered", "withdrawn"),
+        "news_tags": tags_extra,
     }
 
 

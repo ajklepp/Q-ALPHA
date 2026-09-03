@@ -90,13 +90,18 @@ def _write_launch_artifact(
             "htf_1h_bar_hour": r.get("htf_1h_bar_hour"),
             "htf_score": r.get("htf_score") or r.get("htf_rank_score"),
             "launch_score": r.get("launch_score"),
+            "continuation_score": r.get("continuation_score") or r.get("combined_rank_score"),
             "combined_rank_score": r.get("combined_rank_score"),
+            "bar_state": r.get("bar_state"),
+            "hour_mult": r.get("hour_mult"),
             "phase": r.get("phase_3h") or r.get("phase"),
             "buy_signal": bool(r.get("buy_signal") or r.get("htf_1h_buy_signal")),
             "htf_1h_close": r.get("htf_1h_close") or r.get("close"),
             "status": status,
             "queue_reason": qr.get("reason"),
             "structure_mode": r.get("structure_mode"),
+            "print": r.get("print"),
+            "outlook": r.get("outlook"),
         })
     payload = {
         "updated_at": now_et.isoformat(),
@@ -115,7 +120,7 @@ def _write_launch_artifact(
 
 
 def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Rank by continuous HTF+launch; tie-break lower scan_score."""
+    """Rank by continuation_score_v0 (bar_state + hour soft demote + HTF)."""
     passed = [r for r in rows if r.get("pass")]
     for row in passed:
         enriched = enrich_launch_fields(row)
@@ -123,10 +128,13 @@ def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["htf_score"] = compute_htf_rank_score(row)
         elif row.get("htf_score") is None:
             row["htf_score"] = 0.0
-        row["launch_score"] = enriched.get("launch_score")
-        row["combined_rank_score"] = compute_combined_rank_score(
-            {**enriched, "htf_score": row["htf_score"]},
-        )
+        merged = {**enriched, "htf_score": row["htf_score"]}
+        enriched2 = enrich_launch_fields(merged)
+        row["launch_score"] = enriched2.get("launch_score")
+        row["bar_state"] = enriched2.get("bar_state")
+        row["hour_mult"] = enriched2.get("hour_mult")
+        row["continuation_score"] = enriched2.get("continuation_score")
+        row["combined_rank_score"] = enriched2.get("combined_rank_score")
     passed.sort(
         key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
     )
@@ -252,9 +260,9 @@ def run_1h_launch_scan(
     for r in take:
         print(
             f"  {r['symbol']:<6} 1H_close={r.get('htf_1h_close')} "
-            f"hour={r.get('htf_1h_bar_hour')} bar={r.get('htf_1h_bar_time')} "
+            f"hour={r.get('htf_1h_bar_hour')} bar={r.get('bar_state')} "
             f"HTF={r.get('htf_score')} launch={r.get('launch_score')} "
-            f"rank={r.get('combined_rank_score')} "
+            f"cont={r.get('continuation_score')} mult={r.get('hour_mult')} "
             f"mode={r.get('structure_mode')}"
         )
 

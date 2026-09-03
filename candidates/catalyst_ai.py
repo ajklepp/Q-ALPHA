@@ -49,6 +49,9 @@ Here are the news headlines from today:
 {headlines_text}
 
 In ONE short sentence (max 12 words), explain the PRIMARY catalyst.
+Also append exactly these two tags at the end of the same line:
+  PRINT: beat|miss|inline|unknown
+  OUTLOOK: raised|maintained|lowered|withdrawn|unknown
 Start with one of these emojis based on catalyst type:
 📈 for earnings/revenue beat
 💊 for FDA/drug approval
@@ -59,8 +62,8 @@ Start with one of these emojis based on catalyst type:
 ⚡ for product launch or major announcement
 ❓ for unclear catalyst
 
-Reply with ONLY the emoji, catalyst type, colon, and reason.
-Example: "📈 Earnings Beat: Q2 revenue surged 45%, guidance raised"
+Reply with ONLY: emoji Type: reason | PRINT: x | OUTLOOK: y
+Example: "📈 Earnings Beat: Q2 revenue surged 45% | PRINT: beat | OUTLOOK: raised"
 """
 
     try:
@@ -74,7 +77,7 @@ Example: "📈 Earnings Beat: Q2 revenue surged 45%, guidance raised"
             json={
                 "model": "anthropic/claude-3-haiku",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 60,
+                "max_tokens": 80,
                 "temperature": 0.1,
             },
             timeout=10,

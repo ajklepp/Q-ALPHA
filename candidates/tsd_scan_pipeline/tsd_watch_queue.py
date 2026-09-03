@@ -140,8 +140,20 @@ def add_to_watch_queue(
             "launch_score_display": float(qh_row.get("launch_score_display") or qh_row.get("launch_score") or 0),
             "phase": qh_row.get("phase"),
             "signal_bar_red": bool(qh_row.get("signal_bar_red")),
+            "bar_state": qh_row.get("bar_state") or cand.get("bar_state"),
+            "hour_mult": qh_row.get("hour_mult") or cand.get("hour_mult"),
+            "continuation_score": float(
+                qh_row.get("continuation_score")
+                or qh_row.get("combined_rank_score")
+                or 0
+            ),
             "early_bull": bool(qh_row.get("early_bull")),
             "buy_signal": bool(qh_row.get("buy_signal")),
+            "print": qh_row.get("print") or "unknown",
+            "outlook": qh_row.get("outlook") or "unknown",
+            "guidance_cut": bool(qh_row.get("guidance_cut")),
+            "structure_level": qh_row.get("structure_level") or cand.get("structure_level"),
+            "structure_risk_pct": qh_row.get("structure_risk_pct") or cand.get("structure_risk_pct"),
             "cross_level": round(float(qh_row.get("close") or 0), 4),
             "scan_score": float(qh_row.get("scan_score") or 0),
             "wt_gap": float(qh_row.get("wt_gap") or 0),
@@ -236,6 +248,11 @@ def execute_live_entries(
         print(f"  {entry_kind} {sym}: capacity_ok reason={reason}")
 
         kill_pct = cand.get("kill_pct")
+        from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
+
+        kill_pct, kill_source = resolve_kill_pct(
+            kill_pct, profile=cand.get("tsd_profile"),
+        )
         fill = place_tsd_entry(
             ib, sym,
             entry_price=cand.get("htf_1h_close") or cand.get("close"),
@@ -246,6 +263,7 @@ def execute_live_entries(
             print(f"  ENTRY FAIL {sym} ({entry_kind}): {fill.get('reason')}")
             continue
 
+        fill_kill_source = fill.get("kill_source") or kill_source
         record_entry(
             book_state,
             sym,
@@ -256,14 +274,22 @@ def execute_live_entries(
             order_id=fill.get("order_id"),
             kill_order_id=fill.get("kill_order_id"),
             kill_pct=fill.get("kill_pct"),
+            kill_source=fill_kill_source,
             tsd_profile=cand.get("tsd_profile"),
             session_at_entry=fill.get("session"),
+            bar_state=cand.get("bar_state"),
+            bar_hour=cand.get("htf_1h_bar_hour"),
+            continuation_score=cand.get("continuation_score") or cand.get("combined_rank_score"),
+            print_tag=cand.get("print"),
+            outlook=cand.get("outlook"),
+            structure_level=cand.get("structure_level"),
         )
         any_fill = True
-        results.append({**fill, "kind": entry_kind})
+        results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})
         print(
             f"  ENTRY FILLED {sym} ({entry_kind}): {fill['shares']} @ {fill['fill_price']:.2f} "
             f"session={fill.get('session')} kill={fill.get('kill_pct'):.1%} "
+            f"src={fill_kill_source} bar={cand.get('bar_state')} "
             f"kill_oid={fill.get('kill_order_id')}"
         )
         notify_tsd(
@@ -272,8 +298,13 @@ def execute_live_entries(
                 shares=int(fill["shares"]),
                 fill_price=float(fill["fill_price"]),
                 kill_pct=fill.get("kill_pct"),
+                kill_source=fill_kill_source,
                 bar_hour=cand.get("htf_1h_bar_hour"),
+                bar_state=cand.get("bar_state"),
                 rank=cand.get("combined_rank_score") or cand.get("launch_score"),
+                continuation_score=cand.get("continuation_score"),
+                print_tag=cand.get("print"),
+                outlook=cand.get("outlook"),
                 kind=entry_kind,
             )
         )
@@ -319,6 +350,11 @@ def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "buy_signal": bool(row.get("buy_signal") or row.get("htf_1h_buy_signal")),
         "early_bull": bool(row.get("early_bull")),
         "signal_bar_red": bool(row.get("signal_bar_red")),
+        "bar_state": row.get("bar_state"),
+        "continuation_score": row.get("continuation_score") or row.get("combined_rank_score"),
+        "print": row.get("print"),
+        "outlook": row.get("outlook"),
+        "structure_level": row.get("structure_level"),
         "wt_gap": float(row.get("wt_gap") or 0),
         "close": float(
             row.get("htf_1h_close") or row.get("entry_price") or row.get("close") or row.get("cross_level") or 0
