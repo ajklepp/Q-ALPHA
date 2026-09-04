@@ -44,6 +44,10 @@ HTF_REFRESH_AT = time(4, 30)
 POLYGON_LAG_MIN = 20
 TWS_LAG = timedelta(hours=3, minutes=3)
 TICK_WINDOW_MIN = 8
+# Backup trail from --tick only in this window if dedicated loop is down
+TRAIL_BACKUP_HOUR_START = 4   # 04:00 ET (matches trail task start)
+TRAIL_BACKUP_HOUR_END = 20    # stop overnight spam after extended
+TRAIL_BACKUP_MIN_GAP_SEC = 240  # at most one backup trail per ~4 min
 
 
 def _load_state() -> dict[str, Any]:
@@ -163,6 +167,35 @@ def _due_clock(now: datetime, at: datetime, kind: str, hour_key: int) -> bool:
     return _slot_key(kind, hour_key, at) not in last
 
 
+def _trail_backup_allowed(now: datetime) -> bool:
+    """
+    Run a one-shot trail from scheduler tick only as a safety net.
+
+    Dedicated QAlpha TSD Trail Monitor owns the loop. Tick backup:
+      - only 04:00–20:00 ET (not all-night every 5 min)
+      - only if loop heartbeat is stale
+      - throttled so we do not stack trail jobs every tick
+    """
+    if now.hour < TRAIL_BACKUP_HOUR_START or now.hour >= TRAIL_BACKUP_HOUR_END:
+        return False
+    if _trail_loop_active():
+        return False
+    state = _load_state()
+    last = state.get("trail_backup_at")
+    if last:
+        try:
+            ts = datetime.fromisoformat(str(last))
+            if ts.tzinfo is None:
+                ts = ET.localize(ts)
+            else:
+                ts = ts.astimezone(ET)
+            if (now - ts).total_seconds() < TRAIL_BACKUP_MIN_GAP_SEC:
+                return False
+        except Exception:
+            pass
+    return True
+
+
 def tick(*, dry_run: bool = False, live: bool = True) -> int:
     """Evaluate ET schedule and run any due passes."""
     now = datetime.now(ET)
@@ -195,8 +228,16 @@ def tick(*, dry_run: bool = False, live: bool = True) -> int:
         _mark_ran("htf", hour_key, sched)
 
     if not dry_run:
-        if not _trail_loop_active():
+        if _trail_backup_allowed(now):
+            print("Trail backup (dedicated loop idle) — one-shot monitor")
             run_trail_pass(dry_run=False)
+            state = _load_state()
+            state["trail_backup_at"] = now.isoformat()
+            _save_state(state)
+        elif _trail_loop_active():
+            print("Trail loop heartbeat OK — tick skips trail")
+        else:
+            print("Trail backup skipped (outside 04-20 ET or throttled)")
 
     if dry_run:
         launch = _due_slots(now, kind="launch")

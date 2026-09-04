@@ -21,9 +21,10 @@ Continuous HTF rank among passers; analogs soft-only (never veto).
 - Paper gate: 20 closed legs / 45% WR before size-up beyond ladder
 
 ## Live Paper schedule
-- **Sole entry:** `QAlpha TSD Scheduler` → `--tick --live` → 1H @ :15  
-- Trail + Live TWS Sync (07:00 / 30m)  
-- **Disabled / not Live:** Setup Watch, gap Autonomous Agent, Approval Runner  
+- **Sole entry:** `QAlpha TSD Scheduler` → `--tick --live` → 1H @ :15 (hours **05–15**)
+- Trail + Live TWS Sync (07:00 / 30m)
+- **Disabled / not Live:** Setup Watch, gap Autonomous Agent, Approval Runner
+- Readonly mirror: every **30 min** (Chat A) — not on critical path
 - Research-only (keep code): polygon hunt, 3H `tsd_scan_ibkr` dry, `setup_watch_agent.py`
 - **Scan funnel (research):** each 1H scan writes `results/peak_hour_scans/php_scan_*.json`  
   Weekly: `.\venv\Scripts\python.exe candidates\uts_v2\php_weekly_funnel.py --days 7 --write`
