@@ -24,13 +24,9 @@
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
 #
-# MULTI-PAGE NOTE: single-file app. Tabs in st.tabs include Ticker Profiles,
-# Strategy Lab, and Glossary (not pages/ sidebar routes). Profiler reads
-# Supabase ticker_profiles (anon) then profiles/*.json; "Refresh profile" is
-# on-demand only — never on load/autorefresh. Strategy Lab prefers Supabase
-# strategy_lab_state (anon); local fallback is strategy_lab/results/forward_state.json
-# (SIM paper only). Cadence: strategy_lab/DASHBOARD_FRESHNESS.md (marks ~30m;
-# settle ~16:20 ET).
+# MULTI-PAGE NOTE: single-file app. Tabs include Live Status, Weekly Research,
+# Ticker Profiles, Glossary. Gap Strategy Lab SIM is mothballed — Weekly Research
+# lists Peak Hour funnel + EXP-0021 hitch notes. Profiler is on-demand only.
 # =============================================================================
 from __future__ import annotations
 
@@ -106,7 +102,7 @@ st.set_page_config(
 )
 inject_theme()
 
-# Autorefresh so Live Status + Strategy Lab pick up Supabase marks without
+# Autorefresh so Live Status picks up Supabase marks without manual refresh.
 # manual rerun / redeploy. 90s sits in the 60–120s band; Lab marks push ~30m.
 st_autorefresh(interval=90 * 1000, key="main_refresh")
 
@@ -1825,12 +1821,12 @@ def _render_strategy_lab_r2_panel(state: dict) -> None:
 
 
 def tab_strategy_lab() -> None:
-    """
-    SIM / Polygon-paper A-vs-B forward test.
+    """Mothballed gap SIM — show Weekly Research instead."""
+    from dashboard_weekly_research import tab_weekly_research
 
-    Binds to real fields written by strategy_lab/live_forward.py →
-    strategy_lab/results/forward_state.json. Does not touch live agent state.
-    """
+    tab_weekly_research()
+    return
+    # --- archived Strategy Lab UI below (unreachable; kept for git history) ---
     state = _load_forward_state()
     if state is None:
         st.info(
@@ -2091,10 +2087,15 @@ def tab_strategy_lab() -> None:
 
 
 def tab_lab_trade_log() -> None:
-    """
-    Dedicated Strategy Lab trade review (SIM / Polygon).
-    Never mixes agent paper_trades / IBKR fills.
-    """
+    """Mothballed — gap Lab trade log no longer Live Paper."""
+    st.subheader("Lab Trade Log (archived)")
+    st.info(
+        "Gap Strategy Lab SIM is **Disabled**. Use **Trade Log** for Peak Hour IBKR paper "
+        "and **Weekly Research** for funnel / hitch studies."
+    )
+    st.caption("Code archive: `strategy_lab/` · Entry/Mark/Settle tasks Disabled.")
+    return
+    # --- archived ---
     state = _load_forward_state()
     with st.container(border=True):
         section_header(
@@ -2224,15 +2225,14 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
         "📓 Daily Reviews",
         "🔬 Ticker Profiles",
-        "🧪 Strategy Lab",
-        "🧪 Lab Trade Log",
+        "📚 Weekly Research",
         "📖 Glossary",
     ])
 
@@ -2249,10 +2249,10 @@ def main() -> None:
     with tab6:
         tab_ticker_profiles()
     with tab7:
-        tab_strategy_lab()
+        from dashboard_weekly_research import tab_weekly_research
+
+        tab_weekly_research()
     with tab8:
-        tab_lab_trade_log()
-    with tab9:
         tab_glossary()
 
     render_footer()

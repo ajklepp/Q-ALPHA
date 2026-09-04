@@ -31,7 +31,8 @@ from dashboard_tsd_helpers import (
 TSD_STARTING_POOL = 3000.0
 TSD_MAX_FULL_SLOTS = 10
 # Peak Hour Performers: 1H launch scan slots (bar close + 15 min)
-PHP_LAUNCH_HOURS_ET = (7, 11, 12, 13)
+# Live PHP v3.1 — continuation ranker hours (bar close ET); scan at :15
+PHP_LAUNCH_HOURS_ET = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 PHP_LAUNCH_LAG_MIN = 15
 ET = pytz.timezone("America/New_York")
 
@@ -684,7 +685,7 @@ def render_live_status_tab(
     with st.container(border=True):
         section_header(
             "Entry Pipeline",
-            "HTF + 1H LAUNCH · hours 07/11/12/13 @ :15 · analogs soft-only (never veto)",
+            "HTF + 1H LAUNCH · hours 05–15 @ :15 · continuation_score_v1 · 2 slots",
         )
         pipe_queue = list(tsd_queue)
         pipe_fallback = False
@@ -781,7 +782,7 @@ def render_live_status_tab(
         if tsd_err and not board_rows:
             st.caption(tsd_err)
         elif not board_rows:
-            st.info("No Peak Hour launches yet — next scan at 07/11/12/13:15 ET.")
+            st.info("No Peak Hour launches yet — next scan at 05–15:15 ET.")
         else:
             if fallback_cap:
                 st.caption(fallback_cap)
@@ -847,7 +848,7 @@ def render_tsd_trade_log(
         if err:
             st.caption(f"Closed legs unavailable: {err}")
         elif not closed:
-            st.info("No closed legs yet — Peak Hour Performers v3.0 clean slate.")
+            st.info("No closed legs yet — Peak Hour Performers v3.1 clean slate.")
         else:
             log = pd.DataFrame(closed)
             log["Ticker"] = log["symbol"]

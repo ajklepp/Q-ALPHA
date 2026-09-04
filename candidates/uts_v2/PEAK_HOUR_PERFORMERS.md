@@ -1,13 +1,13 @@
-# Peak Hour Performers — v3.0
+# Peak Hour Performers — v3.1
 
 **Product name:** Peak Hour Performers  
-**System version:** 3.0 (dashboard)  
+**System version:** 3.1 (dashboard)  
 **Track:** Live IBKR paper · $3,000 starting pool
 
 ## Edge
-1H LAUNCH at bar-close hours **07 / 11 / 12 / 13 ET**, scan at **:15** (delayed Polygon — no front-run).  
+1H LAUNCH at bar-close hours **05–15 ET**, scan at **:15** (delayed Polygon — no front-run).  
 Daily HTF pre-filter (range ≥25%, close > SMA50, SMA20 rising, price ≥ $5).  
-Continuous HTF rank among passers; analogs soft-only (never veto).
+**Continuation ranker** (`continuation_score_v1`) — peak hours are score bonus only; 2 slots/scan.  
 
 ## Exits
 - Kill only until +1R, then BE lock `entry×0.997`
@@ -23,9 +23,10 @@ Continuous HTF rank among passers; analogs soft-only (never veto).
 ## Live Paper schedule
 - **Sole entry:** `QAlpha TSD Scheduler` → `--tick --live` → 1H @ :15 (hours **05–15**)
 - Trail + Live TWS Sync (07:00 / 30m)
-- **Disabled / not Live:** Setup Watch, gap Autonomous Agent, Approval Runner
+- **Disabled / not Live:** Setup Watch, gap Autonomous Agent, Approval Runner, **Strategy Lab**
 - Readonly mirror: every **30 min** (Chat A) — not on critical path
-- Research-only (keep code): polygon hunt, 3H `tsd_scan_ibkr` dry, `setup_watch_agent.py`
+- Dashboard **Weekly Research** tab = Peak Hour funnel + EXP-0021 hitch notes
+- Research-only (keep code): polygon hunt, 3H `tsd_scan_ibkr` dry, `setup_watch_agent.py`, `strategy_lab\` archive
 - **Scan funnel (research):** each 1H scan writes `results/peak_hour_scans/php_scan_*.json`  
   Weekly: `.\venv\Scripts\python.exe candidates\uts_v2\php_weekly_funnel.py --days 7 --write`
 

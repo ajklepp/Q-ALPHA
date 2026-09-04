@@ -1,18 +1,19 @@
 # Q-ALPHA SYSTEM HANDOFF
 ## Operational state — hand this to a fresh assistant with zero prior context
 
-**Version focus:** Strategy Lab live forward + agent paper path  
-**Calendar note:** First Strategy Lab **live** session target = **Monday 2026-08-24**  
+**Version focus:** Peak Hour Performers (Live Paper) · dashboard v3.1  
+**MOTHBALLED (2026-09-04):** Gap Strategy Lab SIM — tasks Disabled; dashboard **Weekly Research** tab instead  
 **Companion architecture doc:** `Q_ALPHA_MASTER_CONTEXT.md`  
 **Glossary:** `GLOSSARY.md` (also **📖 Glossary** dashboard tab)  
-**Last updated:** 2026-08-24
+**Canonical product card:** `candidates/uts_v2/PEAK_HOUR_PERFORMERS.md`  
+**Last updated:** 2026-09-04
 
 ---
 
 ## WHO / WHAT
 
-Aaron Klepp — Ontario. Building Q-Alpha: autonomous momentum system + **Strategy Lab** exit research.  
-Starting SIM capital per lab pool: **$3,000** (compounds). Broker: IBKR Canada paper (agent); Polygon for lab.
+Aaron Klepp — Ontario. Building Q-Alpha: **Peak Hour Performers** live IBKR paper (1H LAUNCH hours 05–15 ET @:15, continuation ranker, 2 slots/scan).  
+Gap Strategy Lab SIM and gap Autonomous Agent are **not Live** (code archived / Disabled).
 
 **Dashboard:** https://q-alpha-lshnrvza2radqpkjrkf52m.streamlit.app  
 **Repo:** `ajklepp/Q-ALPHA` · branch `main` · entry `dashboard.py`  
@@ -20,81 +21,80 @@ Starting SIM capital per lab pool: **$3,000** (compounds). Broker: IBKR Canada p
 
 ---
 
-## THREE TRACKS (do not mix state)
+## LIVE PAPER (PRIMARY) — Peak Hour / TSD
 
-| | TSD live (PRIMARY) | Gap agent (RUNOFF) | Strategy Lab (SIM) |
-|--|--------------------|--------------------|--------------------|
-| Code | `candidates/tsd_scan_pipeline/` + `tsd_trail_monitor.py` | `candidates/autonomous_agent.py` | `strategy_lab/live_forward.py` |
-| Money | IBKR paper + `tsd_pool_state.json` / `tsd_book_state.json` | IBKR paper + `pool_state.json` (residual opens only) | SIM dual pools — no IBKR |
-| Schedule | **QAlpha TSD Scheduler** (:03 after 3H bars) + **QAlpha TSD Trail Monitor** | **DISABLED** — was 9:20 ET (`QALPHA_GAP_AGENT_LIVE=0` gate) | **QAlpha Strategy Lab** · 9:35 ET |
-| Supabase | `tsd_positions`, `tsd_pool_snapshots`, `tsd_watchlist` | `trades`, `pool_snapshots` (legacy runoff) | `strategy_lab_state` |
-| Dashboard | **Live Status PRIMARY** — KPIs, opens, watch-10 | Small "Gap runoff" section if opens remain | **Strategy Lab** tab unchanged |
+| | Peak Hour Performers |
+|--|----------------------|
+| Code | `candidates/tsd_scan_pipeline/` + `tsd_trail_monitor.py` + continuation ranker |
+| Money | IBKR paper + `tsd_pool_state.json` / `tsd_book_state.json` |
+| Schedule | **QAlpha TSD Scheduler** (`--tick --live`, 1H @:15 hours **05–15**) + **Trail Monitor** + **Live TWS Sync** |
+| Supabase | `tsd_positions`, `tsd_pool_snapshots`, `tsd_watchlist` |
+| Dashboard | **Live Status** + **Weekly Research** (funnel / EXP-0021 hitch) |
 
-**Disable gap new entries (Aaron, once):**
+**Keep Disabled:**
 ```powershell
 schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE
-schtasks /Change /TN "QAlpha Approval Runner" /DISABLE   # optional
+schtasks /Change /TN "QAlpha Approval Runner" /DISABLE
+schtasks /Change /TN "QAlpha Strategy Lab" /DISABLE
+schtasks /Change /TN "QAlpha Strategy Lab Mark" /DISABLE
+schtasks /Change /TN "QAlpha Strategy Lab Settle" /DISABLE
 ```
+Re-register Lab (stays Disabled): `.\strategy_lab\register_lab_tasks.ps1`
 
-**TSD cloud schema (run once in Supabase SQL editor):** `candidates/sql/tsd_cloud.sql`  
+**TSD cloud schema:** `candidates/sql/tsd_cloud.sql`  
 **Force TSD push (TWS open):** `.\venv\Scripts\python.exe candidates\tws_intraday_sync.py --repair`
+
+---
+
+## ARCHIVE — THREE TRACKS (historical; Lab mothballed)
+
+| | TSD live (PRIMARY) | Gap agent (RUNOFF) | Strategy Lab (SIM, Disabled) |
+|--|--------------------|--------------------|------------------------------|
+| Code | `candidates/tsd_scan_pipeline/` | `candidates/autonomous_agent.py` | `strategy_lab/live_forward.py` |
+| Money | IBKR paper + tsd_* state | residual `pool_state.json` | SIM dual pools — no IBKR |
+| Schedule | TSD Scheduler + Trail | DISABLED | DISABLED (was 9:35 ET) |
+| Dashboard | Live Status PRIMARY | Gap runoff if opens | **Weekly Research** (not Lab tabs) |
 
 ---
 
 ## LEGACY TWO-SYSTEM TABLE (gap agent was live — now runoff only)
 
-| | Live agent (runoff) | Strategy Lab |
-|--|---------------------|--------------|
+| | Live agent (runoff) | Strategy Lab (mothballed) |
+|--|---------------------|---------------------------|
 | Code | `candidates/autonomous_agent.py` | `strategy_lab/live_forward.py` |
-| Money | IBKR paper + `candidates/pool_state.json` | SIM dual pools in `forward_state.json` / Supabase |
-| Schedule | Task **QAlpha Autonomous Agent** · **DISABLED** (was 9:20 ET) | Task **QAlpha Strategy Lab** · **9:35 ET** weekdays |
-| Telegram | Q-ALPHA agent messages | Prefixed **🧪 Strategy Lab** |
-| Data | Needs TWS; **IBKR paper MD usable** | Polygon 1-min (15-min delayed OK) |
+| Money | IBKR paper + `candidates/pool_state.json` | SIM dual pools (archive only) |
+| Schedule | **DISABLED** | **DISABLED** — do not re-enable for Live Paper |
+| Telegram | Q-ALPHA agent messages | Prefixed Strategy Lab (idle) |
+| Data | Needs TWS | Polygon 1-min (research / replay only) |
 
 ---
 
-## CURRENT LAB STATE (as of handoff prep, evening 2026-08-23)
+## CURRENT LAB STATE (MOTHBALLED 2026-09-04)
 
 ```
-status:              awaiting_first_live_run
-pools:               A = $3000.00 · B = $3000.00
-closed trades:       0 / 0
-forward OOS R² N:    0  (dashboard shows "collecting data" until N≥20)
-predictions file:    empty
-backtest OOS R²:     preserved in results/oos_r2_backtest.json  (~ −0.2367, N=35)
-next scheduled run:  Monday 2026-08-24 9:35 AM ET
+status:              mothballed — tasks Disabled
+policy:              Peak Hour covers movers; no gap Live Paper
+dashboard:           Weekly Research tab (php_weekly funnel + EXP-0021)
+code:                strategy_lab/ kept for exit A/B replay only
 ```
 
-After Monday’s first live trades, pools **compound** — do **not** call `reset_forward.py`.
+Do **not** call `reset_forward.py` or re-enable Lab tasks unless Aaron explicitly starts gap research again.
 
 ---
 
-## MONDAY — HOW TO RUN STRATEGY LAB
+## HOW TO RUN STRATEGY LAB (archive — Disabled)
 
-### A) Automatic (preferred)
-Windows Task Scheduler task **`QAlpha Strategy Lab`**:
-- Trigger: **Mon–Fri 09:35** local (= **9:35 ET** on this PC)
-- Action: `powershell.exe … -File "…\strategy_lab\start_lab_scheduled.ps1"`
-- Launcher: **`venv\Scripts\python.exe strategy_lab\live_forward.py`** (ENTRY only — opens positions, no phantom same-morning settle)
-
-**Settle task** (register similarly): **`QAlpha Strategy Lab Settle`** · **Mon–Fri ~16:20 ET** ·
-`start_lab_settle_scheduled.ps1` → `live_forward.py --settle`  
-**No 16:40 backup** — duplicate settle Telegram (removed Aug 2026). Register all three tasks: **`.\strategy_lab\register_lab_tasks.ps1`**
-
-**Intraday marks:** **`QAlpha Strategy Lab Mark`** · **Mon–Fri every 30m 10:00–16:00 ET** ·
-`start_lab_mark_scheduled.ps1` → `live_forward.py --mark` (quiet; force-upserts Supabase).
-
-Full cadence + schtasks examples: **`strategy_lab/DASHBOARD_FRESHNESS.md`**.  
-Register all Lab tasks (no 16:40 backup): **`.\strategy_lab\register_lab_tasks.ps1`**
-
-**Unattended needs:** PC on, awake, **logged in as ajkle**, network, `.env` present.
+### A) Automatic (kept Disabled)
+Windows Task Scheduler tasks **`QAlpha Strategy Lab` / Mark / Settle**:
+- Register script creates then **DISABLES**: `.\strategy_lab\register_lab_tasks.ps1`
+- Do not `/ENABLE` unless researching gaps off Live Paper path.
 
 Verify task:
 ```powershell
 schtasks /Query /TN "QAlpha Strategy Lab" /V /FO LIST
 ```
 
-### B) Manual live
+### B) Manual live (research only — not Live Paper)
 ```powershell
 cd C:\Users\ajkle\Documents\Q-ALPHA
 .\venv\Scripts\python.exe strategy_lab\live_forward.py
@@ -133,21 +133,17 @@ Replay adds **`[DRY-RUN]`** prefix. Holidays/weekends: ET `is_trading_day` → m
 
 ---
 
-## DAILY SCHEDULE (TSD-primary, Aug 2026)
+## DAILY SCHEDULE (Peak Hour Performers — Sep 2026)
 
 ```
-Open TWS paper (port 7497) — required for TSD scans + marks
-:03 after each IBKR 3H bar close  Task "QAlpha TSD Scheduler" → tsd_scan_ibkr.py
-H:20 after 3H close               Polygon pre-filter (polygon_hunt_list.py)
-~every 60s (market hours)         Task "QAlpha TSD Trail Monitor" → kill/tranche trail
-9:35                              Strategy Lab live_forward (gap SIM — no IBKR)
-9:40–16:10                        Live TWS sync every 30m at :10/:40 (gap runoff marks + TSD → Supabase)
-10:00–16:00                       Strategy Lab --mark every 30m (Polygon → Supabase SIM)
-~4:15                             Modal EOD monitor (legacy agent book)
-~4:20                             Strategy Lab --settle
+Open TWS paper (port 7497) — required for entries + marks
+:15 after each 1H bar close (hours 05–15 ET)
+                              Task "QAlpha TSD Scheduler" → --tick --live
+~every 60s (market hours)     Task "QAlpha TSD Trail Monitor" → kill/tranche trail
+~07:00 / every 30m            Live TWS Sync → Supabase
+every 30m                     Readonly Mirror (non-critical)
 
-DISABLED: QAlpha Autonomous Agent (9:20 gap entries) — runoff brackets only (STLA/DPRO etc.)
-Every 30m Modal intraday_monitor — Polygon FALLBACK; skips IBKR_PAPER (TWS sync owns marks)
+DISABLED: Autonomous Agent · Approval Runner · Strategy Lab Entry/Mark/Settle
 ```
 
 **Live marks/closes SoT:** local `candidates/tws_intraday_sync.py` (TWS clientId **96**).
@@ -167,6 +163,7 @@ Manual repair (TWS open): `.\venv\Scripts\python.exe candidates\tws_intraday_syn
 **TSD dashboard (PRIMARY Live Status):** run `candidates/sql/tsd_cloud.sql` once in Supabase SQL editor.
 Local `tsd_book_state.json` → `tsd_supabase_sync.py` (via TWS sync) → `tsd_positions` + pool + watchlist.
 Streamlit Live Status reads TSD tables first; gap runoff demoted to secondary section.
+Dashboard **Weekly Research** = Peak Hour funnel + EXP-0021 hitch (Lab tabs removed).
 
 ### Agent morning list (Phase 2 — TWS pipeline) — RUNOFF / DISABLED for new entries
 

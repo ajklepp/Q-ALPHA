@@ -28,7 +28,7 @@ from candidates.supabase_sync import (  # noqa: E402
 )
 
 PROFILES_DIR = ROOT / "profiles"
-SYSTEM_VERSION = "3.0"
+SYSTEM_VERSION = "3.1"
 _SUPABASE_SYNC_API = "watchlist-v2"
 # Match ticker_profiler.RR_WARN_THRESHOLD — target / safe_max_stop
 RR_WARN_THRESHOLD = 1.5
