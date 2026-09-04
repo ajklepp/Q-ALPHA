@@ -32,10 +32,44 @@ from features import PEAK_HOURS  # noqa: E402
 from tsd_scan_pipeline.universe_tsd import load_polygon_key  # noqa: E402
 
 ET = pytz.timezone("America/New_York")
-SLOTS_PER_SCAN = 2
+SLOTS_PER_SCAN = 2  # locked: top 2 per hourly :15 scan clock
 COST_PER_TRADE = 0.0015
 WR_COLLAPSE = 0.35
 EXPECTANCY_TOL = 0.20  # challenger may not lose >20% relative expectancy vs v0
+HTF_PASS_GLOB = (
+    ROOT / "candidates" / "tsd_scan_pipeline" / "results" / "htf_universe" / "htf_pass_*.json"
+)
+
+
+def load_htf_universe_symbols(path: Path | None = None) -> list[str]:
+    """Load full HTF daily-pass symbol list (latest htf_pass_*.json by default)."""
+    if path is None:
+        files = sorted(HTF_PASS_GLOB.parent.glob("htf_pass_*.json"))
+        if not files:
+            raise FileNotFoundError(f"No HTF pass files under {HTF_PASS_GLOB.parent}")
+        path = files[-1]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    syms = [str(s).upper() for s in (data.get("symbols") or [])]
+    print(f"  HTF universe: {path.name} n={len(syms)}", flush=True)
+    return syms
+
+
+def hour_bucket_report(corpus: pd.DataFrame) -> list[dict]:
+    """Expectancy / WR / n by close-hour — used to decide evening scans."""
+    if corpus.empty:
+        return []
+    rows = []
+    for hour, g in corpus.groupby("hour"):
+        rows.append({
+            "hour": int(hour),
+            "n": int(len(g)),
+            "wr": float(g["hit_1r"].mean()),
+            "exp": float(g["r_multiple"].mean()),
+            "med_mfe": float(g["mfe"].median()),
+            "day_mfe": float(g["day_mfe"].median()),
+            "peak": int(int(hour) in PEAK_HOURS),
+        })
+    return sorted(rows, key=lambda r: r["hour"])
 
 
 def _expectancy(r_mult: pd.Series) -> float:
@@ -53,7 +87,9 @@ def _win_rate(hit: pd.Series) -> float:
 def simulate_slots(df: pd.DataFrame, *, score_col: str, admit_col: str) -> pd.DataFrame:
     """
     Per (signal_date, hour) take top SLOTS_PER_SCAN by score among admit==1.
-    Mimics hourly scan clock with 2-slot cap.
+
+    Mimics live hourly scan at :15 after each completed 1H bar closes
+    (bar close hour H → scan H:15), hard cap = 2 slots.
     """
     if df.empty:
         return df.iloc[0:0]
@@ -192,8 +228,10 @@ def write_results(
         "",
         f"Generated: {meta.get('generated')}",
         f"Runtime: {meta.get('runtime_sec'):.1f}s",
-        f"Corpus: {meta.get('n_rows')} signals / {meta.get('n_symbols')} symbols / {meta.get('lookback_days')}d lookback",
-        f"Social: StockTwits + Polygon news velocity; X={'on' if meta.get('x_bearer') else 'off (no bearer)'}",
+        f"Corpus: {meta.get('n_rows')} signals / {meta.get('n_symbols')} symbols / "
+        f"{meta.get('lookback_days')}d lookback / universe={meta.get('universe', '?')}",
+        f"Scan clock: hourly :15 · slots={meta.get('slots_per_scan', SLOTS_PER_SCAN)} · "
+        f"Social: StockTwits+news; X={'on' if meta.get('x_bearer') else 'off'}",
         "",
         "## Gate checks",
         "",
@@ -238,12 +276,34 @@ def write_results(
             f"score_v1={c['score_v1']:.1f} day_mfe={c['day_mfe']:.1%} hit_1r={c['hit_1r']} "
             f"news24={c['news_24h']:.0f} st={c['st_msg']:.0f}"
         )
+    hours = meta.get("hour_buckets") or []
+    if hours:
+        lines += [
+            "",
+            "## Hour buckets (all HTF signals — evening decision)",
+            "",
+            "| Hour ET (bar close) | n | hit_1r | Exp R | med MFE | med day MFE | peak? |",
+            "|---|---:|---:|---:|---:|---:|---|",
+        ]
+        for h in hours:
+            lines.append(
+                f"| {h['hour']:02d} | {h['n']} | {h['wr']:.1%} | {h['exp']:.3f} | "
+                f"{h['med_mfe']:.2%} | {h['day_mfe']:.2%} | {'Y' if h['peak'] else ''} |"
+            )
+        lines += [
+            "",
+            "**Evening / after-hours:** do **not** run entry scans after the 14:15 "
+            "clock (last useful RTH bar close = 14:00). Hours ≥15 have little/no "
+            "same-day path left; post-16:00 / evening extended-hours :15 adds noise "
+            "and gap risk, not expander capture. Ops may still run trail/marks only.",
+            "",
+        ]
     lines += [
         "",
         "## Live promotion",
         "",
-        "Live Peak Hour entry path stays unchanged until this file shows **PASS** "
-        "and Chat B wires scan clock + ranker under the 2-slot cap.",
+        "Wire only after full-HTF **PASS**: hourly :15 through **14:15 ET**, "
+        "2-slot cap, continuation ranker. No evening entry clock.",
         "",
         "## Costs",
         "",
@@ -270,6 +330,8 @@ def summarize_policy(corpus: pd.DataFrame, taken: pd.DataFrame) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="EXP-0021 continuation ranker bakeoff")
     parser.add_argument("--pilot", action="store_true", help="Use DEFAULT_PILOT symbols")
+    parser.add_argument("--htf-universe", action="store_true", help="Full HTF daily-pass list")
+    parser.add_argument("--htf-file", type=str, default="", help="Explicit htf_pass_*.json path")
     parser.add_argument("--symbols", type=str, default="", help="Comma-separated tickers")
     parser.add_argument("--days", type=int, default=90, help="Lookback trading calendar days ~")
     parser.add_argument("--no-social", action="store_true", help="Skip StockTwits/X/news velocity")
@@ -279,33 +341,62 @@ def main() -> int:
     t0 = time.time()
     if args.symbols.strip():
         symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    else:
+        label = "custom"
+    elif args.htf_universe or args.htf_file:
+        htf_path = Path(args.htf_file) if args.htf_file else None
+        symbols = load_htf_universe_symbols(htf_path)
+        label = "htf_universe"
+    elif args.pilot:
         symbols = list(DEFAULT_PILOT)
+        label = "pilot"
+    else:
+        # Default: full HTF universe (not pilot)
+        symbols = load_htf_universe_symbols(None)
+        label = "htf_universe"
 
     print("=" * 64)
     print("EXP-0021 Continuation Ranker bakeoff")
-    print(f"  symbols={len(symbols)} days={args.days} social={not args.no_social}")
+    print(
+        f"  set={label} symbols={len(symbols)} days={args.days} "
+        f"social={not args.no_social} slots={SLOTS_PER_SCAN}/hour:15"
+    )
     print("=" * 64)
 
     key = load_polygon_key()
+    # Full HTF: skip social by default unless explicitly enabled (rate limits).
+    include_social = (not args.no_social) and (label != "htf_universe" or args.pilot)
+    if label == "htf_universe" and not args.no_social and not args.pilot:
+        # --htf-universe implies tape/MTF first; pass --pilot for social pilot
+        include_social = False
+        print("  social=off for full HTF (use pilot run for StockTwits/X)", flush=True)
+
     corpus = build_corpus(
         symbols,
         api_key=key,
         lookback_days=args.days,
-        include_social=not args.no_social,
+        include_social=include_social,
     )
-    out_path = Path(args.out) if args.out else EXP_DIR / "corpus_pilot.csv"
+    default_out = (
+        EXP_DIR / "corpus_htf_universe.csv"
+        if label == "htf_universe"
+        else EXP_DIR / "corpus_pilot.csv"
+    )
+    out_path = Path(args.out) if args.out else default_out
     if not corpus.empty:
         corpus.to_csv(out_path, index=False)
         print(f"  Wrote {out_path} ({len(corpus)} rows)")
 
+    empty_metrics = {
+        "n": 0, "wr": 0, "expectancy": 0, "med_mfe": 0,
+        "capture": 0, "n_caught": 0, "n_expanders": 0, "oos_wr": 0, "oos_exp": 0,
+    }
     if corpus.empty:
         write_results(
             EXP_DIR / "results.md",
             verdict="FAIL",
             reasons=["FAIL: empty corpus — check Polygon key / universe"],
-            v0={"n": 0, "wr": 0, "expectancy": 0, "med_mfe": 0, "capture": 0, "n_caught": 0, "n_expanders": 0, "oos_wr": 0, "oos_exp": 0},
-            v1={"n": 0, "wr": 0, "expectancy": 0, "med_mfe": 0, "capture": 0, "n_caught": 0, "n_expanders": 0, "oos_wr": 0, "oos_exp": 0},
+            v0=empty_metrics,
+            v1=empty_metrics,
             cases=[],
             meta={
                 "generated": datetime.now(ET).isoformat(),
@@ -313,10 +404,12 @@ def main() -> int:
                 "n_rows": 0,
                 "n_symbols": len(symbols),
                 "lookback_days": args.days,
+                "universe": label,
                 "x_bearer": bool(
                     __import__("os").environ.get("X_BEARER_TOKEN")
                     or __import__("os").environ.get("TWITTER_BEARER_TOKEN")
                 ),
+                "hour_buckets": [],
             },
         )
         print("EMPTY CORPUS — results.md FAIL")
@@ -328,6 +421,7 @@ def main() -> int:
     v1 = summarize_policy(corpus, taken_v1)
     verdict, reasons = judge(v0, v1)
     cases = case_study(corpus, ["IREN", "TARS", "CHPT", "ARX", "JANX"])
+    hours = hour_bucket_report(corpus)
 
     meta = {
         "generated": datetime.now(ET).isoformat(),
@@ -335,22 +429,35 @@ def main() -> int:
         "n_rows": int(len(corpus)),
         "n_symbols": int(corpus["symbol"].nunique()),
         "lookback_days": args.days,
+        "universe": label,
+        "slots_per_scan": SLOTS_PER_SCAN,
+        "scan_clock": "hourly_:15",
         "x_bearer": bool(
             __import__("os").environ.get("X_BEARER_TOKEN")
             or __import__("os").environ.get("TWITTER_BEARER_TOKEN")
         ),
+        "hour_buckets": hours,
     }
     write_results(EXP_DIR / "results.md", verdict=verdict, reasons=reasons, v0=v0, v1=v1, cases=cases, meta=meta)
 
     metrics_path = EXP_DIR / "bakeoff_metrics.json"
     metrics_path.write_text(
-        json.dumps({"verdict": verdict, "reasons": reasons, "v0": v0, "v1": v1, "cases": cases, "meta": meta}, indent=2),
+        json.dumps(
+            {"verdict": verdict, "reasons": reasons, "v0": v0, "v1": v1, "cases": cases, "meta": meta},
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
     print(f"\nVerdict: {verdict}")
     for r in reasons:
         print(f"  {r}")
+    print("Hour buckets (evening check):")
+    for h in hours:
+        print(
+            f"  h={h['hour']:02d} n={h['n']} wr={h['wr']:.1%} exp={h['exp']:.3f} "
+            f"mfe={h['med_mfe']:.2%} day_mfe={h['day_mfe']:.2%}"
+        )
     print(f"results.md written ({time.time() - t0:.1f}s)")
     return 0 if verdict == "PASS" else 2
 
