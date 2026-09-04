@@ -424,18 +424,23 @@ def sync_tsd_watchlist_from_file(
     """
     Upsert Peak Hour 1H launch board to tsd_watchlist (dashboard SoT).
 
-    Prefer last_1h_launch.json; else local queue + open book.
-    Never leave the board empty while local HPE is OPEN.
+    Prefer today's last_1h_launch.json even when empty (clears stale board).
+    Always merge current OPEN book legs as ENTERED.
+    Fall back to local queue only when launch cache is missing/stale (not today).
     """
     open_set = set(open_symbols_set or set())
     trade_set = set(trade_symbols or set())
     rows: list[dict[str, Any]] = []
     scan_at = datetime.now(ET).isoformat()
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    cache_is_today = False
 
     if LAUNCH_CACHE.exists():
         try:
             payload = json.loads(LAUNCH_CACHE.read_text(encoding="utf-8"))
-            scan_at = str(payload.get("updated_at") or scan_at)
+            updated = str(payload.get("updated_at") or "")
+            cache_is_today = updated.startswith(today)
+            scan_at = updated or scan_at
             for r in payload.get("rows") or []:
                 sym = str(r.get("symbol") or "").upper()
                 if not sym:
@@ -470,7 +475,46 @@ def sync_tsd_watchlist_from_file(
         except Exception as exc:
             print(f"  launch cache read warn: {exc}")
 
-    if not rows:
+    # Always surface open Peak Hour legs on the board.
+    seen = {str(r.get("symbol") or "").upper() for r in rows}
+    try:
+        from tsd_scan_pipeline.tsd_capacity import load_state
+
+        book = load_state()
+        for pos in book.get("positions") or []:
+            if str(pos.get("status") or "").upper() != "OPEN":
+                continue
+            sym = str(pos.get("symbol") or "").upper()
+            if not sym or sym in seen:
+                continue
+            open_set.add(sym)
+            for leg in pos.get("legs") or []:
+                if str(leg.get("status") or "").upper() != "OPEN":
+                    continue
+                rows.append({
+                    "symbol": sym,
+                    "rank": len(rows) + 1,
+                    "scan_score": _finite(leg.get("scan_score")),
+                    "launch_score": _finite(leg.get("launch_score") or leg.get("scan_score")),
+                    "phase": leg.get("phase"),
+                    "buy_signal": True,
+                    "entry_price": _finite(leg.get("price")),
+                    "wt_gap": _finite(leg.get("htf_1h_bar_hour") or leg.get("bar_hour")),
+                    "in_book": True,
+                    "trade_pick": True,
+                    "status_label": "ENTERED",
+                    "profiler_pass": True,
+                    "tags": ["ENTERED", "from_book"],
+                    "scan_at": scan_at,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                seen.add(sym)
+                break
+    except Exception as exc:
+        print(f"  board open-merge warn: {exc}")
+
+    # Only use stale queue/book synthesis when there is no fresh launch cache.
+    if not rows and not cache_is_today:
         rows = _board_rows_from_local_queue_and_book(open_symbols_set=open_set)
         if rows:
             print(f"  Peak Hour board from local queue/book: {len(rows)} row(s)")
@@ -566,27 +610,27 @@ def sync_tsd_watchlist_to_supabase(
 
 def sync_tsd_watch_queue_from_file() -> int:
     """Sync local tsd_watch_queue.json to Supabase entry pipeline table."""
-    if not WATCH_QUEUE_PATH.exists():
-        return 0
-    try:
-        payload = json.loads(WATCH_QUEUE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
-    queue_rows = payload.get("queue") or []
-    if not queue_rows:
-        return 0
     from supabase_sync import SupabaseSync
 
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    queue_rows: list[dict[str, Any]] = []
+    if WATCH_QUEUE_PATH.exists():
+        try:
+            payload = json.loads(WATCH_QUEUE_PATH.read_text(encoding="utf-8"))
+            queue_rows = payload.get("queue") or []
+        except Exception:
+            queue_rows = []
+
+    # Only today's queue rows — drop stale WATCHING names from prior days.
     rows: list[dict[str, Any]] = []
     for q in queue_rows:
         sym = str(q.get("symbol") or "").upper()
         if not sym:
             continue
+        added = str(q.get("added_at") or q.get("scan_at") or "")
+        if added and not added.startswith(today):
+            continue
         gates = q.get("gates")
-        if isinstance(gates, dict):
-            q_gates = {**gates, **(q.get("quality_gates") or {})}
-        else:
-            q_gates = q.get("quality_gates") or gates
         rows.append({
             "symbol": sym,
             "status": str(q.get("status") or "WATCHING").upper(),
@@ -618,7 +662,7 @@ def sync_tsd_watch_queue_from_file() -> int:
         })
     sync = SupabaseSync()
     sync.replace_tsd_watch_queue(rows)
-    print(f"  TSD watch queue upserted {len(rows)} rows")
+    print(f"  TSD watch queue upserted {len(rows)} rows (today-only; cleared stale)")
     return len(rows)
 
 

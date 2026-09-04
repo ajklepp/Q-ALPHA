@@ -183,7 +183,8 @@ def _build_peak_hour_launch_board(
             return True
         return False
 
-    cloud_queue = [r for r in tsd_queue if _is_today(r)] or list(tsd_queue)
+    cloud_queue = [r for r in tsd_queue if _is_today(r)]
+    # Do NOT fall back to stale prior-day queue — that masquerades as today's launches.
     cloud_opens = list(tsd_rows or [])
     use_watch = _is_peak_hour_watchlist(tsd_watch)
 

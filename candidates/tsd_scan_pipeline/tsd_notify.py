@@ -78,6 +78,35 @@ def format_exited(
     return "\n".join(lines)
 
 
+def format_scan_summary(
+    *,
+    hour: Any,
+    htf_pass: int,
+    launches_n: int,
+    take_n: int,
+    entered_n: int = 0,
+    reject_summary: dict[str, Any] | None = None,
+    take_symbols: list[str] | None = None,
+) -> str:
+    """Telegram summary for every live 1H launch scan (including 0 launches)."""
+    lines = [
+        f"Peak Hour SCAN hour={hour}",
+        f"HTF={htf_pass} launches={launches_n} take={take_n} entered={entered_n}",
+    ]
+    if take_symbols:
+        lines.append("take: " + ", ".join(take_symbols[:8]))
+    if reject_summary:
+        top = sorted(
+            ((str(k), int(v)) for k, v in reject_summary.items()),
+            key=lambda kv: -kv[1],
+        )[:4]
+        if top:
+            lines.append("rejects: " + ", ".join(f"{k}×{v}" for k, v in top))
+    if launches_n == 0:
+        lines.append("no 1H launches this slot")
+    return "\n".join(lines)
+
+
 def format_queue_skip_summary(
     taken: int,
     skipped: list[dict[str, Any]],

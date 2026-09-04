@@ -273,12 +273,6 @@ def run_1h_launch_scan(
     if live and take:
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
         queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
-        try:
-            from tsd_supabase_sync import push_dashboard_best_effort
-
-            push_dashboard_best_effort(telegram_on_fail=False)
-        except Exception as exc:
-            print(f"  post-queue dashboard sync warn: {exc}")
         admitted: set[str] = set()
         skipped: list[dict[str, Any]] = []
         for qr in queue_results:
@@ -333,7 +327,7 @@ def run_1h_launch_scan(
         queue_results=queue_results,
         entry_results=entry_results,
     )
-    _persist_funnel(
+    funnel_path = _persist_funnel(
         now_et=now_et,
         htf_pass_count=htf_pass_count,
         symbols_scanned=len(rows),
@@ -345,6 +339,48 @@ def run_1h_launch_scan(
         t0=t0,
         live=live,
     )
+
+    # Always refresh dashboard + Telegram after every live scan (incl. 0 launches).
+    if live:
+        try:
+            from tsd_supabase_sync import push_dashboard_best_effort
+
+            push_dashboard_best_effort(telegram_on_fail=True)
+        except Exception as exc:
+            print(f"  post-scan dashboard sync warn: {exc}")
+        try:
+            from tsd_scan_pipeline.tsd_notify import format_scan_summary, notify_tsd
+
+            reject_summary: dict[str, Any] = {}
+            try:
+                import json as _json
+                from pathlib import Path as _Path
+
+                if funnel_path and _Path(str(funnel_path)).exists():
+                    reject_summary = (
+                        _json.loads(_Path(str(funnel_path)).read_text(encoding="utf-8")).get(
+                            "reject_summary"
+                        )
+                        or {}
+                    )
+            except Exception:
+                reject_summary = {}
+            entered_n = sum(
+                1 for e in entry_results if str(e.get("status") or "").upper() == "FILLED"
+            )
+            notify_tsd(
+                format_scan_summary(
+                    hour=now_et.hour,
+                    htf_pass=htf_pass_count,
+                    launches_n=len(ranked),
+                    take_n=len(take),
+                    entered_n=entered_n,
+                    reject_summary=reject_summary if isinstance(reject_summary, dict) else None,
+                    take_symbols=[str(r.get("symbol") or "").upper() for r in take],
+                )
+            )
+        except Exception as exc:
+            print(f"  post-scan telegram warn: {exc}")
 
     print("=" * 64)
     return exit_code
