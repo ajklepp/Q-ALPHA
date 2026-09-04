@@ -5,7 +5,8 @@ Modal cannot reach 127.0.0.1:7497. This job must run on the PC with TWS open
 via Windows Task Scheduler (every ~30m RTH). Polygon Modal intraday_monitor is
 fallback marks only and must never reopen NEVER_FILLED / CLOSED.
 
-ClientId 96 — free of agent=5, connector=1, spike/scan=97, MD probes=98–99.
+ClientId 96 primary; on Error 326 retries 86 then 76.
+Never collide with trail=95 / entry=93 / flatten=97.
 
 Usage (TWS paper open):
   .\\venv\\Scripts\\python.exe candidates/tws_intraday_sync.py
@@ -38,8 +39,9 @@ load_dotenv(ROOT / ".env")
 
 TWS_HOST = "127.0.0.1"
 TWS_PORT = 7497
-# Documented free id — do not collide with agent(5) / connector(1) / spike(97).
+# Primary + fallbacks — do not collide with trail(95) / entry(93) / flatten(97).
 TWS_CLIENT_ID = 96
+TWS_CLIENT_ID_FALLBACKS = (96, 86, 76)
 ET = pytz.timezone("America/New_York")
 
 MANAGED_SOURCES = frozenset({"autonomous_agent", "telegram_yes"})
@@ -556,6 +558,57 @@ def _sync_trade_row(trade: dict, *, reason: str, retries: int = 2) -> bool:
     return False
 
 
+def _connect_ib(ib: Any) -> int:
+    """
+    Connect with clientId fallbacks on Error 326 (already in use).
+
+    Tries TWS_CLIENT_ID_FALLBACKS in order. Returns the clientId that worked.
+    Raises the last connect exception if all fail.
+    Always leaves a clean disconnect attempt between retries.
+    """
+    last_exc: Exception | None = None
+    for cid in TWS_CLIENT_ID_FALLBACKS:
+        try:
+            try:
+                if ib.isConnected():
+                    ib.disconnect()
+                    time.sleep(0.3)
+            except Exception:
+                pass
+            ib.connect(TWS_HOST, TWS_PORT, clientId=int(cid), timeout=12)
+            print(f"  CONNECTED clientId={cid}")
+            return int(cid)
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc).lower()
+            print(f"  CONNECT FAIL clientId={cid}: {exc}")
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
+            time.sleep(0.4)
+            # Only continue fallback chain for 326 / already-in-use; other errors still try next
+            if "326" not in err and "already in use" not in err and "timeout" not in err:
+                # still try next id — hung peer can surface as TimeoutError
+                continue
+            continue
+    assert last_exc is not None
+    raise last_exc
+
+
+def _notify_connect_failed(tried: tuple[int, ...] | list[int], exc: Exception) -> None:
+    """Telegram alert when MARK sync cannot connect."""
+    try:
+        from tsd_scan_pipeline.tsd_notify import notify_tsd
+
+        ids = ",".join(str(x) for x in tried)
+        notify_tsd(
+            f"Peak Hour MARK sync failed: clientId {ids}\n{exc}"
+        )
+    except Exception as notify_exc:
+        print(f"  telegram warn: {notify_exc}")
+
+
 def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
     """
     Connect TWS → mark opens still long → CLOSE filled-then-flat →
@@ -573,21 +626,28 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
         "errors": [],
         "sync_errors": [],
         "repair": repair,
+        "client_id": None,
     }
 
     print("=" * 64)
     print("Q-ALPHA LIVE TWS INTRADAY SYNC")
     print(f"  {datetime.now(ET).strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    print(f"  host={TWS_HOST}:{TWS_PORT} clientId={TWS_CLIENT_ID}")
+    print(f"  host={TWS_HOST}:{TWS_PORT} clientIds={list(TWS_CLIENT_ID_FALLBACKS)}")
     print(f"  repair={repair}")
     print("=" * 64)
 
     try:
-        ib.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID, timeout=12)
+        used_cid = _connect_ib(ib)
+        summary["client_id"] = used_cid
     except Exception as exc:
         msg = f"CONNECT FAILED: {exc}"
         print(msg)
         summary["errors"].append(msg)
+        _notify_connect_failed(TWS_CLIENT_ID_FALLBACKS, exc)
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
         return summary
 
     try:
@@ -678,6 +738,18 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                     )
                 continue
 
+            # Skip historical CLOSED under --repair before expensive reqExecutions.
+            if (
+                status == "CLOSED"
+                and repair
+                and entry_date
+                and entry_date != today_et
+            ):
+                continue
+            if status == "NEVER_FILLED":
+                continue
+
+            print(f"  gap-ledger check {ticker} status={status} entry={entry_date}")
             # TWS flat — pull executions (SoT for exit px).
             buys, sells = _collect_symbol_fills(ib, ticker, entry_date)
             sell_vwap = _vwap(sells)

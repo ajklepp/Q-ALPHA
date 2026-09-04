@@ -424,22 +424,43 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     if not dry_run:
         save_state(state)
-        # Full exits only — if any action closed a leg / exited remaining, push cloud.
-        exit_like = [
-            a for a in actions
-            if a.get("reason")
-            or str((a.get("fill") or {}).get("status") or "").upper() == "FILLED"
-            or a.get("tranche_id")
-        ]
-        if exit_like:
-            try:
-                from tsd_supabase_sync import push_dashboard_best_effort
 
-                push_dashboard_best_effort(
-                    ib, mark_fn=None, book=state, telegram_on_fail=False,
-                )
-            except Exception as exc:
-                print(f"  on-exit dashboard sync warn: {exc}")
+        def _trail_mark_fn(ib_conn, symbol: str, *, timeout_sec: float = 8.0) -> float | None:
+            """Mark from live quote; fall back to trail last_close on the book leg."""
+            q = _fetch_quote(ib_conn, symbol)
+            if q and q.get("close"):
+                return float(q["close"])
+            for pos in state.get("positions") or []:
+                if str(pos.get("symbol") or "").upper() != str(symbol).upper():
+                    continue
+                for leg in pos.get("legs") or []:
+                    if str(leg.get("status") or "").upper() != "OPEN":
+                        continue
+                    trail = leg.get("trail") or {}
+                    for key in ("last_close", "peak_high"):
+                        try:
+                            v = float(trail.get(key) or 0)
+                            if v > 0:
+                                return v
+                        except (TypeError, ValueError):
+                            pass
+                    try:
+                        v = float(leg.get("price") or 0)
+                        if v > 0:
+                            return v
+                    except (TypeError, ValueError):
+                        pass
+            return None
+
+        # Always refresh cloud MTM when connected — do not depend solely on clientId 96 sync.
+        try:
+            from tsd_supabase_sync import push_dashboard_best_effort
+
+            push_dashboard_best_effort(
+                ib, mark_fn=_trail_mark_fn, book=state, telegram_on_fail=False,
+            )
+        except Exception as exc:
+            print(f"  trail dashboard sync warn: {exc}")
 
     try:
         ib.disconnect()
