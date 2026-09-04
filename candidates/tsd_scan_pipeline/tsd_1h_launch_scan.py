@@ -5,7 +5,7 @@ HTF-pass names → last completed 1H launch eval → rank by HTF+launch →
 queue / enter at most 2 NEW names if slots free.
 
 Bar source: Polygon 1H aggs (see tsd_1h_signal.BAR_SOURCE).
-Hours: 07 / 10 / 11 / 12 / 13 / 14 / 15 ET (scan at :15 after bar close).
+Hours: 05–15 ET (scan at :15 after bar close; hitch study + RTH).
 Rank: continuation_score_v1 (EXP-0021). Cap: 2 new names per scan.
 """
 from __future__ import annotations

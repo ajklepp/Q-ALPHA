@@ -6,8 +6,9 @@ Close hour ET = start.hour + 1, matching Chat A 1h label=right closed=right.
 
 Last COMPLETED 1H bar must have:
   (buy_signal OR early_bull) + is_continuation_list_candidate
-  and close hour in ALLOWED_HOURS {7, 10, 11, 12, 13, 14, 15}.
+  and close hour in ALLOWED_HOURS {5–15}.
 Peak hours {7,11,12,13} are score bonus only (EXP-0021).
+Premarket 05/06/08/09 admitted for hitch (HOURS_04_15_WINNERS study).
 Color does NOT veto — bar_state is rank/telemetry only.
 """
 from __future__ import annotations
@@ -36,8 +37,8 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 
 ET = pytz.timezone("America/New_York")
 HTF_1H_BARS_MIN = 80
-# Through 15:00 bar close → 15:15 scan; no evening entries
-ALLOWED_HOURS = {7, 10, 11, 12, 13, 14, 15}
+# Through 15:00 bar close → 15:15 scan; premarket 05/06/08/09 from EXP-0021 hitch study
+ALLOWED_HOURS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 BAR_SOURCE = "polygon_1h_aggs_start_labeled"
 
 

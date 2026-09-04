@@ -292,7 +292,7 @@ def write_results(
             )
         lines += [
             "",
-            "**Evening / after-hours:** do **not** run entry scans after the **15:15**
+            "**Evening / after-hours:** do **not** run entry scans after the **15:15** "
             "clock (last RTH bar close = 15:00). Hour 16 and post-close / evening "
             "extended-hours :15 adds noise and gap risk, not expander capture. "
             "Ops may still run trail/marks only.",

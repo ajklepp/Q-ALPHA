@@ -3,7 +3,7 @@ Q-ALPHA UTS v2.6 — 1H LAUNCH entry gates.
 
 Trigger is last completed 1H bar (buy/early_bull + continuation list), not 3H buy_signal.
 Color does NOT veto. Soft EXTENSION demoted by score; hard-block scan>=75 only.
-Hours {7, 10, 11, 12, 13, 14, 15} ET. Peak {7,11,12,13} = score bonus.
+Hours {5–15} ET. Peak {7,11,12,13} = score bonus. Premarket 05/06/08/09 from hitch study.
 SPY regime is dashboard context only — never vetoes entry.
 """
 from __future__ import annotations

@@ -66,9 +66,13 @@ class TestEntryWindow(unittest.TestCase):
         dt = ET.localize(datetime(2026, 9, 1, 7, 0))
         self.assertTrue(is_entry_window(dt))
 
-    def test_0800_blocked(self):
-        dt = ET.localize(datetime(2026, 9, 1, 8, 0))
-        self.assertFalse(is_entry_window(dt))
+    def test_0800_allowed(self):
+        dt = ET.localize(datetime(2026, 9, 1, 8, 15))
+        self.assertTrue(is_entry_window(dt))
+
+    def test_0500_allowed(self):
+        dt = ET.localize(datetime(2026, 9, 1, 5, 15))
+        self.assertTrue(is_entry_window(dt))
 
     def test_at_1500_allowed(self):
         dt = ET.localize(datetime(2026, 9, 1, 15, 0))
@@ -80,6 +84,10 @@ class TestEntryWindow(unittest.TestCase):
 
     def test_1600_blocked(self):
         dt = ET.localize(datetime(2026, 9, 1, 16, 0))
+        self.assertFalse(is_entry_window(dt))
+
+    def test_0400_blocked(self):
+        dt = ET.localize(datetime(2026, 9, 1, 4, 0))
         self.assertFalse(is_entry_window(dt))
 
 

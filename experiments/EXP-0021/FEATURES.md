@@ -114,6 +114,6 @@ score =
   - 20 * soft EXTENSION (scan>55)
 ```
 
-**Challenger admit floors:** buy/early_bull; hour∈{7,10,11,12,13,14} (drop ≥15 — no rest-of-day path); hard-block scan≥75 / extended; require `launch_score≥40` OR `scan≤55`.
+**Challenger admit floors:** buy/early_bull; hour∈{5…15}; hard-block scan≥75 / extended; require `launch_score≥40` OR `scan≤55`.
 
 Baseline **Peak Hour v0:** hour∈{7,11,12,13} AND buy/early AND scan≤55 AND not EXTENDED; rank by `continuation_score_v0`.

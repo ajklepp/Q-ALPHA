@@ -69,10 +69,15 @@ class TestHoursAllowlist(unittest.TestCase):
         self.assertEqual(sched.minute, 15)
         self.assertNotEqual(sched.minute, 5)
 
-    def test_0800_not_in_allowlist(self):
-        self.assertFalse(is_allowed_hour(8))
-        dt = ET.localize(datetime(2026, 9, 1, 8, 5))
-        self.assertFalse(is_entry_window(dt))
+    def test_0800_allowed(self):
+        self.assertTrue(is_allowed_hour(8))
+        dt = ET.localize(datetime(2026, 9, 1, 8, 15))
+        self.assertTrue(is_entry_window(dt))
+
+    def test_0500_allowed(self):
+        self.assertTrue(is_allowed_hour(5))
+        dt = ET.localize(datetime(2026, 9, 1, 5, 15))
+        self.assertTrue(is_entry_window(dt))
 
     def test_1400_allowed(self):
         self.assertTrue(is_allowed_hour(14))
@@ -107,14 +112,13 @@ class TestOneHTriggerNoThreeHBuy(unittest.TestCase):
         self.assertNotIn("buy_signal", gates)
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_hour_08_rejected_at_gate(self, _occ):
+    def test_hour_08_allowed_at_gate(self, _occ):
         cand = {**LAUNCH_ROW, "htf_1h_bar_hour": 8}
         passed, gates, reasons = evaluate_entry_gates(
-            cand, regime_bull=False, now=ET.localize(datetime(2026, 9, 1, 8, 5)),
+            cand, regime_bull=False, now=ET.localize(datetime(2026, 9, 1, 8, 15)),
         )
-        self.assertFalse(passed)
-        self.assertFalse(gates["hour_allowed"])
-        self.assertTrue(any("hour_not_allowed" in r for r in reasons))
+        self.assertTrue(gates["hour_allowed"])
+        self.assertTrue(passed, msg=reasons)
 
 
 class TestKillUntil1R(unittest.TestCase):

@@ -71,7 +71,15 @@ class TestAdmit(unittest.TestCase):
             "bar_state": "green",
         }
         self.assertFalse(all_hours_admit(weak_ext))
-        # 15:00 is last entry hour
+        # 05–15 are live entry hours
+        h5 = {
+            "hour": 5,
+            "buy_signal": True,
+            "scan_score": 40,
+            "launch_score": 60,
+            "bar_state": "yellow",
+        }
+        self.assertTrue(all_hours_admit(h5))
         h15 = {
             "hour": 15,
             "buy_signal": True,

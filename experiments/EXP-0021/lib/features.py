@@ -295,10 +295,9 @@ def all_hours_admit(feat: dict[str, Any]) -> bool:
     Drop late-day bars with no path left (hour>=15) — labels are rest-of-day.
     """
     hour = int(feat.get("hour") or -1)
-    if hour >= 16:
+    if hour >= 16 or hour < 5:
         return False
-    if hour < 10 and hour not in PEAK_HOURS:
-        return False
+    # 05–15 inclusive (04 empty in Polygon labeling)
     if not (feat.get("buy_signal") or feat.get("early_bull")):
         return False
     scan = float(feat.get("scan_score") or 99.0)
