@@ -12,26 +12,13 @@ import pandas as pd
 import pytz
 import streamlit as st
 
-from dashboard_theme import MUTED, NEGATIVE, POSITIVE, ACCENT, BG, BORDER, TEXT, regime_banner, section_header
+from dashboard_theme import MUTED, NEGATIVE, POSITIVE, ACCENT, BG, BORDER, TEXT, section_header
 from dashboard_tsd_helpers import (
-    build_tranche_table_rows,
-    distance_from_current,
-    format_gate_summary,
-    format_level,
     hold_time_display,
-    map_exit_layer,
-    mfe_in_r,
-    next_trail_stop,
-    parse_tranche_json,
-    progress_fraction,
-    progress_milestones,
-    progress_tick_labels,
 )
 
 TSD_STARTING_POOL = 3000.0
-TSD_MAX_FULL_SLOTS = 10
-# Peak Hour Performers: 1H launch scan slots (bar close + 15 min)
-# Live PHP v3.1 — continuation ranker hours (bar close ET); scan at :15
+# Peak Hour Performers scan slots (bar close + lag) — used for countdown only
 PHP_LAUNCH_HOURS_ET = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 PHP_LAUNCH_LAG_MIN = 15
 ET = pytz.timezone("America/New_York")
@@ -116,17 +103,32 @@ def _load_local_open_board_rows() -> list[dict]:
                     "symbol": sym,
                     "status": "ENTERED",
                     "status_label": "ENTERED",
-                    "launch_score": leg.get("launch_score") or leg.get("scan_score"),
-                    "scan_score": leg.get("scan_score"),
-                    "phase": leg.get("phase"),
-                    "buy_signal": True,
-                    "htf_1h_bar_hour": leg.get("htf_1h_bar_hour"),
-                    "entry_price": leg.get("price"),
+                    "entry_price": leg.get("price") or leg.get("entry_price"),
+                    "peak_high": leg.get("peak_high") or leg.get("high_water"),
                 })
                 break
         return out
     except Exception:
         return []
+
+
+def _public_result_label(status: Any) -> str:
+    """Map internal status to non-strategy public labels."""
+    s = str(status or "").strip().upper()
+    if s in ("ENTERED", "OPEN", "IN BOOK", "TAKE"):
+        return "Taken"
+    if s in ("SKIP", "SKIPPED", "REJECTED", "PASSED"):
+        return "Skipped"
+    if s in ("QUEUED", "WATCHING", "SIGNAL", "RANKED", "ADDED", "UPDATED"):
+        return "Queued"
+    return s.title() if s and s != "—" else "—"
+
+
+def _ran_up_label(entry: float, peak: float) -> str:
+    """How far price ran from entry (public MFE %), no R / stop jargon."""
+    if entry <= 0 or not math.isfinite(peak) or peak <= 0:
+        return "—"
+    return f"{(peak / entry - 1.0) * 100.0:+.1f}%"
 
 
 def _board_row_from_sources(
@@ -139,22 +141,16 @@ def _board_row_from_sources(
     phase: Any,
     buy: Any,
     status: Any,
+    entry: Any = None,
+    peak: Any = None,
 ) -> dict[str, str | int]:
-    hour_s = "—"
-    if hour is not None:
-        try:
-            hour_s = str(int(float(hour)))
-        except (TypeError, ValueError):
-            hour_s = str(hour)
+    # hour/htf/launch/phase/buy kept in signature for call-site compatibility;
+    # intentionally omitted from the public board (no strategy leak).
+    _ = (hour, htf, launch, phase, buy)
     return {
-        "Rank": int(rank),
         "Symbol": str(symbol or "").upper(),
-        "Hour": hour_s,
-        "HTF": f"{_safe_float(htf, 0):.0f}" if htf is not None else "—",
-        "Launch": f"{_safe_float(launch, 0):.0f}" if launch is not None else "—",
-        "Phase": phase or "—",
-        "1H buy": "Y" if buy else "—",
-        "Status": str(status or "—").upper(),
+        "Result": _public_result_label(status),
+        "Ran up": _ran_up_label(_safe_float(entry, 0.0), _safe_float(peak, float("nan"))),
     }
 
 
@@ -196,7 +192,7 @@ def _build_peak_hour_launch_board(
         if not sym:
             return
         prev = merged.get(sym)
-        if prev and str(prev.get("Status")) == "ENTERED":
+        if prev and str(prev.get("Result")) == "Taken":
             return
         merged[sym] = row
 
@@ -207,12 +203,14 @@ def _build_peak_hour_launch_board(
             _put(sym, _board_row_from_sources(
                 rank=i,
                 symbol=sym,
-                hour=r.get("htf_1h_bar_hour") or r.get("wt_gap"),
-                htf=r.get("scan_score"),
-                launch=r.get("launch_score"),
-                phase=r.get("phase"),
+                hour=None,
+                htf=None,
+                launch=None,
+                phase=None,
                 buy=True,
                 status="ENTERED",
+                entry=r.get("entry_price"),
+                peak=r.get("peak_high"),
             ))
         for i, r in enumerate(cloud_queue, 1):
             sym = str(r.get("symbol") or "").upper()
@@ -221,11 +219,11 @@ def _build_peak_hour_launch_board(
             _put(sym, _board_row_from_sources(
                 rank=len(merged) + 1,
                 symbol=sym,
-                hour=r.get("htf_1h_bar_hour") or r.get("wt_gap"),
-                htf=r.get("htf_score") or r.get("scan_score") or r.get("combined_rank_score"),
-                launch=r.get("launch_score") or r.get("launch_score_display"),
-                phase=r.get("phase"),
-                buy=r.get("buy_signal") or r.get("htf_1h_buy_signal"),
+                hour=None,
+                htf=None,
+                launch=None,
+                phase=None,
+                buy=None,
                 status=r.get("status") or "QUEUED",
             ))
         if use_watch:
@@ -236,17 +234,15 @@ def _build_peak_hour_launch_board(
                 _put(sym, _board_row_from_sources(
                     rank=int(r.get("rank") or len(merged) + 1),
                     symbol=sym,
-                    hour=r.get("wt_gap"),
-                    htf=r.get("scan_score"),
-                    launch=r.get("launch_score"),
-                    phase=r.get("phase"),
-                    buy=r.get("buy_signal"),
+                    hour=None,
+                    htf=None,
+                    launch=None,
+                    phase=None,
+                    buy=None,
                     status=r.get("status_label") or r.get("status") or "—",
                 ))
         if merged:
-            rows = sorted(merged.values(), key=lambda x: int(x.get("Rank") or 0))
-            for i, row in enumerate(rows, 1):
-                row["Rank"] = i
+            rows = list(merged.values())
             return rows, None
 
     # 2) Local queue + local open book
@@ -257,40 +253,38 @@ def _build_peak_hour_launch_board(
         _put(sym, _board_row_from_sources(
             rank=i,
             symbol=sym,
-            hour=r.get("htf_1h_bar_hour"),
-            htf=r.get("scan_score"),
-            launch=r.get("launch_score"),
-            phase=r.get("phase"),
+            hour=None,
+            htf=None,
+            launch=None,
+            phase=None,
             buy=True,
             status="ENTERED",
+            entry=r.get("entry_price"),
+            peak=r.get("peak_high"),
         ))
     for r in local_q:
         sym = str(r.get("symbol") or "").upper()
-        if sym in merged and str(merged[sym].get("Status")) == "ENTERED":
+        if sym in merged and str(merged[sym].get("Result")) == "Taken":
             continue
         st = str(r.get("status") or "QUEUED").upper()
         if st in ("WATCHING", "ADDED", "UPDATED", "CONFIRMED"):
-            st = "QUEUED" if st != "CONFIRMED" else "QUEUED"
+            st = "QUEUED"
         if st == "SKIPPED":
             st = "SKIP"
-        # Promote to ENTERED if open in book
         if sym in {str(x.get("symbol") or "").upper() for x in local_o}:
             st = "ENTERED"
         _put(sym, _board_row_from_sources(
             rank=len(merged) + 1,
             symbol=sym,
-            hour=r.get("htf_1h_bar_hour"),
-            htf=r.get("htf_score") or r.get("scan_score") or r.get("combined_rank_score"),
-            launch=r.get("launch_score") or r.get("launch_score_display"),
-            phase=r.get("phase"),
-            buy=r.get("buy_signal") or r.get("htf_1h_buy_signal"),
+            hour=None,
+            htf=None,
+            launch=None,
+            phase=None,
+            buy=None,
             status=st,
         ))
     if merged:
-        rows = sorted(merged.values(), key=lambda x: int(x.get("Rank") or 0))
-        for i, row in enumerate(rows, 1):
-            row["Rank"] = i
-        return rows, "local fallback — Supabase lag"
+        return list(merged.values()), "local fallback — Supabase lag"
 
     return [], None
 
@@ -456,118 +450,29 @@ def _render_gap_open_card(
 
 
 def _render_tsd_open_card(row: dict) -> None:
-    """UTS v2 open leg — 3-layer stops (kill / structure / trail)."""
+    """Public open-leg card — price / P&L / ran-up only (no stop-layer detail)."""
     symbol = str(row.get("symbol") or "")
     entry_price = _safe_float(row.get("entry_price"), 0.0)
-    kill_price = _safe_float(row.get("kill_price"), 0.0)
-    structure_stop = _safe_float(row.get("structure_stop"), float("nan"))
-    next_trail = _safe_float(row.get("next_trail_stop"), float("nan"))
     peak_high = _safe_float(row.get("peak_high"), float("nan"))
     current_price = _safe_float(row.get("current_price"), entry_price)
     shares = int(_safe_float(row.get("shares"), 0.0))
     pnl_dollars = _safe_float(row.get("pnl_dollars"), 0.0)
     pnl_pct_val = _safe_float(row.get("pnl_pct"), 0.0)
-    phase = str(row.get("phase") or "")
-    mfe_r = row.get("mfe_r")
-    if mfe_r is None and entry_price > 0 and kill_price > 0:
-        mfe_r = mfe_in_r(entry_price, peak_high, kill_price)
+    ran = _ran_up_label(entry_price, peak_high)
 
-    badges: list[str] = []
-    if phase:
-        badges.append(phase)
-    if row.get("rth_armed"):
-        badges.append("RTH monitor")
-    if row.get("pre_catalyst"):
-        badges.append("pre_catalyst")
-    if row.get("one_r_locked") or row.get("breakeven_locked"):
-        badges.append("BE locked")
-    badge_line = " · ".join(badges) if badges else ""
-
-    # Row 1: symbol, price, P&L, badges
-    c1, c2, c3 = st.columns([2, 2, 3])
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
     with c1:
         st.markdown(f"**{symbol}**")
-        if badge_line:
-            st.caption(badge_line)
+        st.caption(f"{shares} sh · entry ${entry_price:.2f}" if entry_price else f"{shares} sh")
     with c2:
         st.metric("Price", f"${current_price:.2f}", f"{pnl_pct_val:+.1%}")
     with c3:
-        mfe_label = f"{_safe_float(mfe_r, 0):.1f}R MFE" if mfe_r is not None else "—"
-        st.metric("P&L", f"${pnl_dollars:+.2f}", f"{shares} sh · {mfe_label}")
+        st.metric("P&L", f"${pnl_dollars:+.2f}")
+    with c4:
+        st.metric("Ran up", ran)
 
-    # Row 2: three stop metrics — price + % from entry, delta from current
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        if kill_price > 0:
-            k_primary = format_level(kill_price, entry_price)
-            if current_price <= kill_price:
-                k_delta = "AT / below kill"
-            else:
-                k_delta = distance_from_current(kill_price, current_price, label="kill")
-            st.metric("Kill", k_primary, k_delta)
-            kp = _safe_float(row.get("kill_pct"), 0.0)
-            ks = str(row.get("kill_source") or "")
-            bs = str(row.get("bar_state") or "")
-            cap_bits = []
-            if kp > 0:
-                cap_bits.append(f"{kp:.1%}")
-            if ks:
-                cap_bits.append(ks)
-            if bs:
-                cap_bits.append(f"bar={bs}")
-            if cap_bits:
-                st.caption(" · ".join(cap_bits))
-        else:
-            st.metric("Kill", "—", "—")
-    with s2:
-        if math.isfinite(structure_stop) and structure_stop > 0:
-            s_primary = format_level(structure_stop, entry_price)
-            if current_price <= structure_stop:
-                st_delta = "BREACHED"
-            else:
-                st_delta = distance_from_current(
-                    structure_stop, current_price, label="structure",
-                )
-            reason = str(row.get("structure_stop_reason") or "")
-            if reason:
-                st_delta += f" ({reason})"
-            st.metric("Structure", s_primary, st_delta)
-        else:
-            st.metric("Structure", "—", "KILL ONLY until +1R")
-            if str(row.get("structure_stop_reason") or "") == "kill_only_until_1r":
-                st.caption("Layer 2 inactive until price touches +1R")
-    with s3:
-        raw_tranches = parse_tranche_json(row.get("tranche_json"))
-        nxt = next_trail_stop(raw_tranches) if raw_tranches else None
-        if nxt is None and math.isfinite(next_trail) and next_trail > 0:
-            nxt = next_trail
-        if nxt is not None and nxt > 0:
-            t_primary = format_level(nxt, entry_price)
-            t_delta = distance_from_current(nxt, current_price, label="trail")
-            st.metric("Trail stop", t_primary, t_delta)
-        else:
-            st.metric("Trail stop", "—", "no tranche armed")
-
-    # Row 3: T1–T4 mini table
-    tranches = parse_tranche_json(row.get("tranche_json"))
-    if tranches:
-        tbl = build_tranche_table_rows(
-            tranches, entry=entry_price, current=current_price,
-        )
-        st.dataframe(pd.DataFrame(tbl), hide_index=True, use_container_width=True)
-
-    # Progress: Kill → Structure → Entry → T1 → T2 tick labels
-    milestones = progress_milestones(row)
-    if milestones:
-        frac = progress_fraction(current_price, milestones)
-        ticks = progress_tick_labels(row)
-        st.progress(frac, text=f"{ticks} · now ${current_price:.2f}")
     hhmm = _updated_hhmm_et(row.get("last_updated"))
-    bar_ts = str(row.get("last_bar_time") or "")[:19]
-    cap = f"Updated: {hhmm} ET" if hhmm else "Updated: —"
-    if bar_ts:
-                cap += f" · 1H bar {bar_ts}"
-    st.caption(cap)
+    st.caption(f"Updated: {hhmm} ET" if hhmm else "Updated: —")
     st.divider()
 
 
@@ -605,11 +510,7 @@ def render_live_status_tab(
             )
 
     cash = _safe_float(tsd_pool.get("pool"), TSD_STARTING_POOL)
-    deployed = _safe_float(tsd_pool.get("deployed"), 0.0)
     starting = _safe_float(tsd_pool.get("starting_pool"), TSD_STARTING_POOL)
-    full_slots = int(tsd_pool.get("open_positions") or 0)
-    if not full_slots and tsd_rows:
-        full_slots = len({r.get("symbol") for r in tsd_rows if not r.get("t4_only")})
     open_names = int(tsd_pool.get("open_names") or len({r.get("symbol") for r in tsd_rows}))
 
     in_market_mtm = sum(
@@ -621,111 +522,54 @@ def render_live_status_tab(
     unrealized_pnl = sum(_safe_float(r.get("pnl_dollars"), 0.0) for r in tsd_rows)
     total_pnl = total_equity - starting
     total_pnl_pct = (total_pnl / starting * 100.0) if starting > 0 else 0.0
-    reconcile_gap = abs(realized_pnl + unrealized_pnl + starting - total_equity)
     closed_stats = tsd_closed_stats(tsd_closed)
 
     with st.container(border=True):
-        section_header(
-            "Session KPIs",
-            "Peak Hour Performers · $3k paper pool (slot ladder)",
-        )
-        cap = (
-            "Equity = cash + marked positions · realized from closed legs"
-        )
-        if not gap_open_df.empty:
-            gap_syms = ", ".join(
-                sorted(str(t) for t in gap_open_df.get("ticker", pd.Series(dtype=str)))
-            )
-            cap += f" · Gap runoff: {len(gap_open_df)} open ({gap_syms})"
-        st.caption(cap)
-        if reconcile_gap > 1.0:
-            st.caption(
-                f"⚠ Reconcile gap ${reconcile_gap:,.2f} — "
-                f"run candidates/tsd_scan_pipeline/reconcile_pool.py"
-            )
+        section_header("Scoreboard", "Wins · losses · equity")
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
-            st.metric("Cash", f"${cash:,.2f}")
+            st.metric("Equity", f"${total_equity:,.2f}")
         with col2:
-            st.metric("In market (MTM)", f"${in_market_mtm:,.2f}")
-        with col3:
-            st.metric("Total equity", f"${total_equity:,.2f}")
-        with col4:
             st.metric(
                 "Total P&L",
                 f"${total_pnl:+,.2f}",
                 f"{total_pnl_pct:+.1f}%",
             )
+        with col3:
+            st.metric("Wins", str(closed_stats["winners"]))
+        with col4:
+            st.metric("Losses", str(closed_stats["losers"]))
         with col5:
-            st.metric("Realized", f"${realized_pnl:+,.2f}")
+            if closed_stats["total"] and closed_stats["win_rate"] is not None:
+                st.metric("Win rate", f"{closed_stats['win_rate']:.0%}")
+            else:
+                st.metric("Win rate", "—")
         with col6:
-            st.metric("Unrealized", f"${unrealized_pnl:+,.2f}")
+            st.metric("Open", str(open_names))
         st.caption(
-            f"Deployed (cost basis) ${deployed:,.2f} · "
-            f"{full_slots}/{TSD_MAX_FULL_SLOTS} full slots (slot ladder 2–10) · "
-            f"{open_names} open names · "
-            f"{closed_stats['total']} closed legs"
-            + (
-                f" · {closed_stats['win_rate']:.0%} win"
-                if closed_stats["total"] and closed_stats["win_rate"] is not None
-                else ""
-            )
+            f"Cash ${cash:,.2f} · unrealized ${unrealized_pnl:+,.2f} · "
+            f"realized ${realized_pnl:+,.2f} · {closed_stats['total']} closed"
         )
-
-    spy_regime = str(tsd_pool.get("spy_regime") or "UNKNOWN").upper()
-    vix_regime = str(tsd_pool.get("vix_regime") or "NORMAL")
-    sizing_pct = str(tsd_pool.get("sizing_pct") or "100%")
-    if spy_regime == "UNKNOWN" and tsd_queue:
-        spy_regime = str(tsd_queue[0].get("regime") or "UNKNOWN").upper()
-    regime_banner(spy_regime, vix_regime, sizing_pct)
-    st.caption(
-        "Market context only — gap sizing unused while gap agent entries are disabled."
-    )
 
     with st.container(border=True):
-        section_header(
-            "Entry Pipeline",
-            "HTF + 1H LAUNCH · hours 05–15 @ :15 · continuation_score_v1 · 2 slots",
+        section_header("Today", "Taken vs skipped")
+        board_rows, fallback_cap = _build_peak_hour_launch_board(
+            tsd_queue, tsd_rows, tsd_watch,
         )
-        pipe_queue = list(tsd_queue)
-        pipe_fallback = False
-        if not pipe_queue:
-            pipe_queue = _load_local_queue_rows()
-            pipe_fallback = bool(pipe_queue)
-        if tsd_err and not pipe_queue:
+        if tsd_err and not board_rows:
             st.caption(tsd_err)
-        elif not pipe_queue:
-            st.info("Queue empty — next `--live` scan")
+        elif not board_rows:
+            st.info("No names yet today.")
         else:
-            if pipe_fallback:
-                st.caption("local fallback — Supabase lag")
-            q_rows = []
-            for r in pipe_queue:
-                gates = r.get("gates") or r.get("quality_gates")
-                st_label = str(r.get("status") or "")
-                if st_label.upper() in ("WATCHING", "ADDED", "UPDATED"):
-                    st_label = "QUEUED"
-                q_rows.append({
-                    "Symbol": str(r.get("symbol") or ""),
-                    "Status": st_label,
-                    "Launch": f"{_safe_float(r.get('launch_score_display') or r.get('launch_score'), 0):.0f}",
-                    "Phase": r.get("phase") or "—",
-                    "Cross": f"${_safe_float(r.get('cross_level') or r.get('htf_1h_close') or r.get('entry_price'), 0):.2f}",
-                    "Gates": format_gate_summary(gates),
-                    "Tags": ", ".join(r.get("tags") or []) or "—",
-                    "Added": str(r.get("added_at") or "")[:16],
-                })
-            st.dataframe(pd.DataFrame(q_rows), hide_index=True, use_container_width=True)
+            if fallback_cap:
+                st.caption(fallback_cap)
+            st.dataframe(pd.DataFrame(board_rows), hide_index=True, use_container_width=True)
 
     with st.container(border=True):
-        section_header(
-            "Open Positions",
-            "KILL ONLY until +1R · then BE lock · 4-tranche trail",
-        )
+        section_header("Open", "Live positions")
         open_rows = list(tsd_rows)
         open_fallback = False
         if not open_rows:
-            # Local book → minimal dicts for card renderer when cloud lags
             try:
                 import json
                 import sys
@@ -746,7 +590,7 @@ def render_live_status_tab(
         if tsd_err and not open_rows:
             st.error(tsd_err)
         elif not open_rows:
-            st.info("No open Peak Hour Performers positions.")
+            st.info("No open positions.")
         else:
             if open_fallback:
                 st.caption("local fallback — Supabase lag")
@@ -755,46 +599,11 @@ def render_live_status_tab(
 
     if not gap_open_df.empty:
         with st.container(border=True):
-            section_header(
-                "Gap runoff (legacy agent)",
-                "Runoff only — new gap entries disabled",
-            )
-            st.caption("Residual gap-agent brackets; not in TSD pool KPIs.")
+            section_header("Legacy runoff", "Closing only")
             for _, trade in gap_open_df.iterrows():
                 _render_gap_open_card(trade, oneshot_polygon_mark_fn)
 
-    with st.container(border=True):
-        section_header(
-            "Peak Hour launches",
-            "Today's 1H @ :15 board — queue + OPEN (not legacy 3H watchlist)",
-        )
-        try:
-            from tsd_scan_pipeline.php_scan_funnel import funnel_caption
-
-            cap_line = funnel_caption()
-            if cap_line:
-                st.caption(cap_line)
-        except Exception:
-            pass
-        board_rows, fallback_cap = _build_peak_hour_launch_board(
-            tsd_queue, tsd_rows, tsd_watch,
-        )
-        if tsd_err and not board_rows:
-            st.caption(tsd_err)
-        elif not board_rows:
-            st.info("No Peak Hour launches yet — next scan at 05–15:15 ET.")
-        else:
-            if fallback_cap:
-                st.caption(fallback_cap)
-            st.caption(
-                "Status: QUEUED / ENTERED / SKIP / RANKED · sole live entry = Scheduler 1H LAUNCH"
-            )
-            st.dataframe(pd.DataFrame(board_rows), hide_index=True, use_container_width=True)
-
-    st.caption(
-        "Auto-refresh ~90s · TWS marks every 30m from 07:00 · trail local · "
-        "Peak Hour Live Paper only (gap / Setup Watch disabled)"
-    )
+    st.caption("Auto-refresh ~90s")
 
 
 def render_live_header(
@@ -822,13 +631,13 @@ def render_live_header(
     except Exception:
         pass
     with col1:
-        brand_block(live_et, subtitle="Peak Hour Performers · Live Paper")
+        brand_block(live_et, subtitle="Live Paper")
     with col2:
         st.metric("Version", f"v{system_version}")
     with col3:
         st.metric("Days Running", f"{days_running}d")
     with col4:
-        st.metric("Next Scan", _next_tsd_scan_countdown())
+        st.metric("Next update", _next_tsd_scan_countdown())
 
 
 def render_tsd_trade_log(
@@ -844,11 +653,11 @@ def render_tsd_trade_log(
         err = str(exc)
 
     with st.container(border=True):
-        section_header("Trade Log", "Closed Peak Hour Performers legs")
+        section_header("Trade Log", "Closed trades")
         if err:
             st.caption(f"Closed legs unavailable: {err}")
         elif not closed:
-            st.info("No closed legs yet — Peak Hour Performers v3.1 clean slate.")
+            st.info("No closed trades yet.")
         else:
             log = pd.DataFrame(closed)
             log["Ticker"] = log["symbol"]
@@ -861,14 +670,8 @@ def render_tsd_trade_log(
             log["P&L%"] = log["pnl_pct"].apply(
                 lambda x: f"{_safe_float(x, 0):+.1%}" if x is not None else "—"
             )
-            log["Exit%"] = log.apply(
-                lambda r: (
-                    f"{((_safe_float(r['exit_price'], 0) - _safe_float(r['entry_price'], 0)) / _safe_float(r['entry_price'], 1)):+.1%}"
-                    if _safe_float(r.get("entry_price"), 0) > 0
-                    and r.get("exit_price") is not None
-                    else "—"
-                ),
-                axis=1,
+            log["Result"] = log["pnl_dollars"].apply(
+                lambda x: "Win" if _safe_float(x, 0) > 0 else "Loss"
             )
             log["Hold"] = log.apply(
                 lambda r: hold_time_display(
@@ -876,13 +679,9 @@ def render_tsd_trade_log(
                 ),
                 axis=1,
             )
-            log["Layer"] = log.apply(
-                lambda r: r.get("exit_layer") or map_exit_layer(r.get("exit_reason")),
-                axis=1,
-            )
-            cols = ["Ticker", "Entry", "Exit", "P&L%", "Exit%", "Hold", "Layer"]
+            cols = ["Ticker", "Entry", "Exit", "P&L%", "Result", "Hold"]
             show = log[[c for c in cols if c in log.columns]]
-            styled = show.style.map(style_pnl_fn, subset=["P&L%", "Exit%"])
+            styled = show.style.map(style_pnl_fn, subset=["P&L%"])
             st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
@@ -902,23 +701,23 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
         err = str(exc)
 
     with st.container(border=True):
-        section_header("Performance", "Peak Hour Performers book — closed legs + pool")
+        section_header("Performance", "Wins · losses · equity")
         if err:
-            st.caption(f"TSD performance unavailable: {err}")
+            st.caption(f"Performance unavailable: {err}")
             return
 
         stats = tsd_closed_stats(closed)
         s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Closed legs", stats["total"])
-        s2.metric("Winners", stats["winners"])
-        s3.metric("Losers", stats["losers"])
+        s1.metric("Closed", stats["total"])
+        s2.metric("Wins", stats["winners"])
+        s3.metric("Losses", stats["losers"])
         if stats["total"]:
-            s4.metric("Win Rate", f"{(stats['win_rate'] or 0):.0%}")
+            s4.metric("Win rate", f"{(stats['win_rate'] or 0):.0%}")
         else:
-            s4.metric("Win Rate", "—")
+            s4.metric("Win rate", "—")
 
     with st.container(border=True):
-        section_header("Equity Curve", "Pool cash + marked equity over time")
+        section_header("Equity", "Pool over time")
         if pool_history:
             hist_df = pd.DataFrame(pool_history)
             dates = pd.to_datetime(hist_df["snapshot_date"])
@@ -928,7 +727,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
                 x=dates,
                 y=equity,
                 mode="lines",
-                name="TSD MTM",
+                name="Equity",
                 line=dict(color=ACCENT, width=2.5),
                 fill="tozeroy",
                 fillcolor="rgba(45, 212, 191, 0.12)",
@@ -937,7 +736,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
                 y=TSD_STARTING_POOL,
                 line_dash="dash",
                 line_color=MUTED,
-                annotation_text=f"Starting ${TSD_STARTING_POOL:,.0f}",
+                annotation_text=f"Start ${TSD_STARTING_POOL:,.0f}",
             )
             fig.update_layout(
                 plot_bgcolor=BG,
@@ -950,10 +749,10 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No TSD pool history yet.")
+            st.info("No equity history yet.")
 
     with st.container(border=True):
-        section_header("P&L Per Trade", "Closed legs only")
+        section_header("P&L per trade", "Closed only")
         if closed:
             plot_df = pd.DataFrame(closed)
             plot_df["label"] = (
@@ -976,36 +775,4 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             )
             st.plotly_chart(fig2, use_container_width=True)
         else:
-            st.info("No closed TSD legs for P&L chart.")
-
-    with st.container(border=True):
-        section_header("P&L by Exit Layer", "Kill vs structure vs trail")
-        if closed:
-            layer_df = pd.DataFrame(closed)
-            layer_df["exit_layer"] = layer_df.apply(
-                lambda r: r.get("exit_layer") or map_exit_layer(r.get("exit_reason")),
-                axis=1,
-            )
-            by_layer = (
-                layer_df.groupby("exit_layer", as_index=False)["pnl_dollars"]
-                .sum()
-                .sort_values("pnl_dollars")
-            )
-            fig3 = px.bar(
-                by_layer,
-                x="exit_layer",
-                y="pnl_dollars",
-                color="pnl_dollars",
-                color_continuous_scale=[NEGATIVE, POSITIVE],
-            )
-            fig3.update_layout(
-                template="plotly_dark",
-                height=320,
-                showlegend=False,
-                plot_bgcolor=BG,
-                paper_bgcolor=BG,
-                font=dict(color=TEXT, family="Sora"),
-            )
-            st.plotly_chart(fig3, use_container_width=True)
-        else:
-            st.info("No closed legs for exit-layer breakdown.")
+            st.info("No closed trades for P&L chart.")

@@ -24,9 +24,8 @@
 # Do NOT run `streamlit run dashboard.py` as a foreground command you wait on —
 # Streamlit never exits and freezes the caller. Always use start_dashboard.ps1.
 #
-# MULTI-PAGE NOTE: single-file app. Tabs include Live Status, Weekly Research,
-# Ticker Profiles, Glossary. Gap Strategy Lab SIM is mothballed — Weekly Research
-# lists Peak Hour funnel + EXP-0021 hitch notes. Profiler is on-demand only.
+# MULTI-PAGE NOTE: public scoreboard only — wins/losses/taken/skipped/ran-up.
+# No strategy docs, scores, gates, or exit-layer detail on Streamlit Cloud.
 # =============================================================================
 from __future__ import annotations
 
@@ -712,9 +711,7 @@ def tab_trade_log(trades: list) -> None:
 
     render_tsd_trade_log(get_sync, _style_pnl)
 
-    st.caption(
-        "Gap-agent history (legacy). TSD closed legs shown above."
-    )
+    st.caption("Legacy gap history below (if any).")
 
     df = _trades_df(trades)
     closed = df[df["status"] == "CLOSED"] if not df.empty else pd.DataFrame()
@@ -960,7 +957,7 @@ def tab_system_health(health: list) -> None:
 def tab_daily_reviews() -> None:
     """Daily AI session reviews from Supabase."""
     with st.container(border=True):
-        section_header("Daily Trade Reviews", "AI analysis of each trading session")
+        section_header("Daily Reviews", "Session notes")
 
     try:
         reviews = get_sync().get_daily_reviews()
@@ -2206,15 +2203,11 @@ def render_footer() -> None:
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         st.caption(
-            "Auto-refresh ~90s · TWS marks :10/:40 · TSD trail ~60s local · "
-            "Modal skips IBKR_PAPER marks · "
-            f"Last updated: {now_et.strftime('%H:%M:%S ET')}"
+            f"Auto-refresh · Last updated: {now_et.strftime('%H:%M:%S ET')}"
         )
     with col2:
         st.caption(
-            f"v{SYSTEM_VERSION} · Peak Hour Performers · "
-            f"Running {DAYS_RUNNING} days · "
-            f"Q-ALPHA 2026"
+            f"v{SYSTEM_VERSION} · Live Paper · {DAYS_RUNNING}d"
         )
     with col3:
         if st.button("Refresh now"):
@@ -2225,15 +2218,13 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
         "📓 Daily Reviews",
-        "🔬 Ticker Profiles",
-        "📚 Weekly Research",
-        "📖 Glossary",
+        "📚 Weekly Review",
     ])
 
     with tab1:
@@ -2247,13 +2238,9 @@ def main() -> None:
     with tab5:
         tab_daily_reviews()
     with tab6:
-        tab_ticker_profiles()
-    with tab7:
         from dashboard_weekly_research import tab_weekly_research
 
         tab_weekly_research()
-    with tab8:
-        tab_glossary()
 
     render_footer()
 
