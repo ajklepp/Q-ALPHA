@@ -111,11 +111,14 @@ class TestRedNotRequired(unittest.TestCase):
         self.assertGreater(scores["red"], scores["green"])
         self.assertGreater(scores["green"], scores["orange"])
 
-    def test_hour_13_demotes(self):
+    def test_hour_13_demotes_v0(self):
+        """v0 still soft-demotes 13; v1 uses equal peak bonus for 11/13."""
         h11 = enrich_launch_fields({**BASE, "htf_1h_bar_hour": 11, "open": 10, "close": 9.5, "high": 10.2, "low": 9})
         h13 = enrich_launch_fields({**BASE, "htf_1h_bar_hour": 13, "open": 10, "close": 9.5, "high": 10.2, "low": 9})
-        self.assertGreater(h11["continuation_score"], h13["continuation_score"])
+        self.assertGreater(h11["continuation_score_v0"], h13["continuation_score_v0"])
         self.assertEqual(h13["hour_mult"], 0.85)
+        # Live ranker v1: both peak hours get the same peak bonus
+        self.assertEqual(h11["continuation_score"], h13["continuation_score"])
 
     def test_guidance_cut_penalty(self):
         base = enrich_launch_fields({**BASE, "open": 10, "close": 9.5, "high": 10.2, "low": 9})
@@ -125,7 +128,7 @@ class TestRedNotRequired(unittest.TestCase):
         self.assertGreater(base["continuation_score"], cut["continuation_score"])
         self.assertAlmostEqual(
             base["continuation_score"] - cut["continuation_score"],
-            25.0 * base["hour_mult"],
+            25.0,
             places=0,
         )
 

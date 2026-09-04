@@ -70,12 +70,16 @@ class TestEntryWindow(unittest.TestCase):
         dt = ET.localize(datetime(2026, 9, 1, 8, 0))
         self.assertFalse(is_entry_window(dt))
 
-    def test_at_1500_blocked(self):
+    def test_at_1500_allowed(self):
         dt = ET.localize(datetime(2026, 9, 1, 15, 0))
-        self.assertFalse(is_entry_window(dt))
+        self.assertTrue(is_entry_window(dt))
 
-    def test_1400_blocked(self):
+    def test_1400_allowed(self):
         dt = ET.localize(datetime(2026, 9, 1, 14, 0))
+        self.assertTrue(is_entry_window(dt))
+
+    def test_1600_blocked(self):
+        dt = ET.localize(datetime(2026, 9, 1, 16, 0))
         self.assertFalse(is_entry_window(dt))
 
 
@@ -99,7 +103,7 @@ class TestEvaluateGates(unittest.TestCase):
         )
         self.assertFalse(passed)
         self.assertFalse(gates["not_extension"])
-        self.assertIn("extension_phase", reasons)
+        self.assertIn("extension_hard", reasons)
 
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
     def test_bear_regime_does_not_veto(self, _occ):

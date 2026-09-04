@@ -5,7 +5,8 @@ HTF-pass names → last completed 1H launch eval → rank by HTF+launch →
 queue / enter at most 2 NEW names if slots free.
 
 Bar source: Polygon 1H aggs (see tsd_1h_signal.BAR_SOURCE).
-Hours: 07 / 11 / 12 / 13 ET (scan at :15 after bar close for delayed Polygon).
+Hours: 07 / 10 / 11 / 12 / 13 / 14 / 15 ET (scan at :15 after bar close).
+Rank: continuation_score_v1 (EXP-0021). Cap: 2 new names per scan.
 """
 from __future__ import annotations
 
@@ -40,9 +41,13 @@ from tsd_scan_pipeline.tsd_capacity import (
     reset_scan_counter,
     save_state,
 )
-from tsd_scan_pipeline.tsd_htf_gates import compute_combined_rank_score, compute_htf_rank_score
+from tsd_scan_pipeline.tsd_htf_gates import compute_htf_rank_score
 from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe, htf_pass_symbols
-from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
+from tsd_scan_pipeline.tsd_launch_score import (
+    CONTINUATION_SCORE_VERSION,
+    EXTENSION_SCAN_AUTO,
+    enrich_launch_fields,
+)
 from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue, execute_live_entries
 from tsd_scan_pipeline.universe_tsd import load_polygon_key
 
@@ -106,9 +111,11 @@ def _write_launch_artifact(
     payload = {
         "updated_at": now_et.isoformat(),
         "strategy": "Peak Hour Performers",
-        "version": "3.0",
+        "version": "3.1-continuation-ranker",
         "bar_source": BAR_SOURCE,
         "hours": sorted(ALLOWED_HOURS),
+        "continuation_score_version": CONTINUATION_SCORE_VERSION,
+        "slots_per_scan": MAX_NEW_ENTRIES_PER_SCAN,
         "ranked_count": len(ranked),
         "take_count": len(take),
         "rows": rows_out,
@@ -120,7 +127,7 @@ def _write_launch_artifact(
 
 
 def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Rank by continuation_score_v0 (bar_state + hour soft demote + HTF)."""
+    """Rank by continuation_score_v1 (EXP-0021); peak hour is bonus only."""
     passed = [r for r in rows if r.get("pass")]
     for row in passed:
         enriched = enrich_launch_fields(row)
@@ -134,6 +141,7 @@ def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["bar_state"] = enriched2.get("bar_state")
         row["hour_mult"] = enriched2.get("hour_mult")
         row["continuation_score"] = enriched2.get("continuation_score")
+        row["continuation_score_v0"] = enriched2.get("continuation_score_v0")
         row["combined_rank_score"] = enriched2.get("combined_rank_score")
     passed.sort(
         key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
@@ -148,20 +156,21 @@ def evaluate_1h_symbol(
     polygon_key: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """1H LAUNCH trigger. 3H buy_signal is NOT required."""
+    """1H LAUNCH trigger. 3H buy_signal is NOT required. Soft EXTENSION via score."""
     base = {"symbol": symbol.upper(), "pass": False, "reject_reason": None}
     if htf_row:
         base.update({k: v for k, v in htf_row.items() if k.startswith("htf_") or k == "close"})
     ok, launch_row = evaluate_1h_buy_signal(base, polygon_key=polygon_key, now=now)
     out = {**base, **launch_row, "symbol": symbol.upper()}
-    phase_3h = out.get("phase_3h") or out.get("phase")
-    if phase_3h == "EXTENSION":
+    scan = float(out.get("scan_score") or out.get("htf_1h_scan_score") or 0)
+    # Hard-block only auto-extended; softer EXTENSION demoted in continuation_score_v1
+    if scan >= EXTENSION_SCAN_AUTO or str(out.get("bar_state") or "") == "extended":
         out["pass"] = False
-        out["reject_reason"] = "extension_phase"
+        out["reject_reason"] = "extension_hard"
         return out
     if not ok:
         out["pass"] = False
-        out["reject_reason"] = out.get("source") or "not_1h_launch"
+        out["reject_reason"] = out.get("source") or out.get("reject_reason") or "not_1h_launch"
         if out.get("hour_allowed") is False:
             out["reject_reason"] = f"hour_not_allowed:{out.get('htf_1h_bar_hour')}"
         return out
@@ -217,9 +226,9 @@ def run_1h_launch_scan(
         now_et = now_et.astimezone(ET)
 
     print("=" * 64)
-    print("1H LAUNCH v2.6")
+    print("1H LAUNCH v3.1 continuation-ranker")
     print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}")
-    print(f"Bar source: {BAR_SOURCE}")
+    print(f"Bar source: {BAR_SOURCE}  score={CONTINUATION_SCORE_VERSION}  slots={MAX_NEW_ENTRIES_PER_SCAN}")
     print("Structure: KILL ONLY until +1R")
     print("=" * 64)
 

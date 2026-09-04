@@ -292,18 +292,18 @@ def write_results(
             )
         lines += [
             "",
-            "**Evening / after-hours:** do **not** run entry scans after the 14:15 "
-            "clock (last useful RTH bar close = 14:00). Hours ≥15 have little/no "
-            "same-day path left; post-16:00 / evening extended-hours :15 adds noise "
-            "and gap risk, not expander capture. Ops may still run trail/marks only.",
+            "**Evening / after-hours:** do **not** run entry scans after the **15:15**
+            "clock (last RTH bar close = 15:00). Hour 16 and post-close / evening "
+            "extended-hours :15 adds noise and gap risk, not expander capture. "
+            "Ops may still run trail/marks only.",
             "",
         ]
     lines += [
         "",
         "## Live promotion",
         "",
-        "Wire only after full-HTF **PASS**: hourly :15 through **14:15 ET**, "
-        "2-slot cap, continuation ranker. No evening entry clock.",
+        "Shipped: hourly :15 through **15:15 ET**, 2-slot cap, continuation_score_v1. "
+        "No evening entry clock.",
         "",
         "## Costs",
         "",

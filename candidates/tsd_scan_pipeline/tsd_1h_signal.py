@@ -5,8 +5,9 @@ Bar source: Polygon 1H aggregates (timestamp = bar START / left-labeled).
 Close hour ET = start.hour + 1, matching Chat A 1h label=right closed=right.
 
 Last COMPLETED 1H bar must have:
-  (buy_signal OR early_bull) + is_launch_candidate
-  and close hour in ALLOWED_HOURS {7, 11, 12, 13}.
+  (buy_signal OR early_bull) + is_continuation_list_candidate
+  and close hour in ALLOWED_HOURS {7, 10, 11, 12, 13, 14, 15}.
+Peak hours {7,11,12,13} are score bonus only (EXP-0021).
 Color does NOT veto — bar_state is rank/telemetry only.
 """
 from __future__ import annotations
@@ -24,9 +25,10 @@ from tsd_scan_pipeline.tsd_kill import (
     structure_too_wide,
 )
 from tsd_scan_pipeline.tsd_launch_score import (
+    EXTENSION_SCAN_AUTO,
     classify_bar_state,
     enrich_launch_fields,
-    is_launch_candidate,
+    is_continuation_list_candidate,
     signal_bar_red,
 )
 from tsd_scan_pipeline.tsd_signals import enrich_tsd, last_bar_summary
@@ -34,7 +36,8 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 
 ET = pytz.timezone("America/New_York")
 HTF_1H_BARS_MIN = 80
-ALLOWED_HOURS = {7, 11, 12, 13}
+# Through 15:00 bar close → 15:15 scan; no evening entries
+ALLOWED_HOURS = {7, 10, 11, 12, 13, 14, 15}
 BAR_SOURCE = "polygon_1h_aggs_start_labeled"
 
 
@@ -194,7 +197,8 @@ def evaluate_1h_buy_signal(
     launch = enrich_launch_fields({**row, **summary, "symbol": sym})
     close_hour = bar_close_hour_et(pd.Timestamp(summary["time"]))
     trigger = bool(launch.get("buy_signal")) or bool(launch.get("early_bull"))
-    ok_launch = is_launch_candidate(launch) and trigger
+    # EXP-0021: list = buy/early + quality floors; peak hour is score-only
+    ok_launch = is_continuation_list_candidate(launch) and trigger
     hour_ok = is_allowed_hour(close_hour)
     phase_3h = _phase_3h_from_hourly(completed)
     bar_state = classify_bar_state(launch)

@@ -59,7 +59,9 @@ Scan clock: hourly :15 · slots=2 · Social: StockTwits+news; X=off
 
 ## Live promotion
 
-Wire only after full-HTF **PASS**: hourly :15 through **14:15 ET**, 2-slot cap, continuation ranker. No evening entry clock.
+Wire only after full-HTF **PASS**: hourly :15 through **15:15 ET**, 2-slot cap, continuation ranker. No evening entry clock.
+
+**SHIPPED:** live paper uses `ALLOWED_HOURS={7,10,11,12,13,14,15}`, `continuation_score_v1`, 2 slots/scan.
 
 ## Costs
 

@@ -1,7 +1,7 @@
 # Peak Hour Performers — Live Paper design
 
-**Status:** Live Paper primary = **1H LAUNCH @ :15** (hours 07/11/12/13 ET).  
-**Product:** Peak Hour Performers v3.0 · $3k paper pool · LONG-ONLY.  
+**Status:** Live Paper primary = **1H LAUNCH @ :15** (hours 07/10/11/12/13/14/15 ET).  
+**Product:** Peak Hour Performers v3.1 · continuation_score_v1 · 2 slots/scan · LONG-ONLY.  
 **Workspace:** Q-ALPHA only.
 
 ### Live Paper stack (KEEP)

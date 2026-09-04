@@ -56,7 +56,7 @@ class TestAdmit(unittest.TestCase):
 
     def test_all_hours_blocks_late_and_weak_ext(self):
         late = {
-            "hour": 15,
+            "hour": 16,
             "buy_signal": True,
             "scan_score": 40,
             "launch_score": 60,
@@ -71,6 +71,15 @@ class TestAdmit(unittest.TestCase):
             "bar_state": "green",
         }
         self.assertFalse(all_hours_admit(weak_ext))
+        # 15:00 is last entry hour
+        h15 = {
+            "hour": 15,
+            "buy_signal": True,
+            "scan_score": 40,
+            "launch_score": 60,
+            "bar_state": "yellow",
+        }
+        self.assertTrue(all_hours_admit(h15))
 
 
 class TestScoreV1(unittest.TestCase):

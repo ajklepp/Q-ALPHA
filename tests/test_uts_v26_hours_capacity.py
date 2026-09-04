@@ -74,9 +74,19 @@ class TestHoursAllowlist(unittest.TestCase):
         dt = ET.localize(datetime(2026, 9, 1, 8, 5))
         self.assertFalse(is_entry_window(dt))
 
-    def test_1400_rejected(self):
-        self.assertFalse(is_allowed_hour(14))
-        dt = ET.localize(datetime(2026, 9, 1, 14, 0))
+    def test_1400_allowed(self):
+        self.assertTrue(is_allowed_hour(14))
+        dt = ET.localize(datetime(2026, 9, 1, 14, 15))
+        self.assertTrue(is_entry_window(dt))
+
+    def test_1500_allowed(self):
+        self.assertTrue(is_allowed_hour(15))
+        dt = ET.localize(datetime(2026, 9, 1, 15, 15))
+        self.assertTrue(is_entry_window(dt))
+
+    def test_1600_rejected(self):
+        self.assertFalse(is_allowed_hour(16))
+        dt = ET.localize(datetime(2026, 9, 1, 16, 15))
         self.assertFalse(is_entry_window(dt))
 
     def test_0400_rejected(self):

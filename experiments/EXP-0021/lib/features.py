@@ -295,7 +295,7 @@ def all_hours_admit(feat: dict[str, Any]) -> bool:
     Drop late-day bars with no path left (hour>=15) — labels are rest-of-day.
     """
     hour = int(feat.get("hour") or -1)
-    if hour >= 15:
+    if hour >= 16:
         return False
     if hour < 10 and hour not in PEAK_HOURS:
         return False

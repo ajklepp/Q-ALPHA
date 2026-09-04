@@ -1,7 +1,8 @@
 """
 Q-ALPHA TSD pipeline — ET slot scheduler (UTS v2.6).
 
-LAUNCH scans at 07:15 / 11:15 / 12:15 / 13:15 ET (1H bar close + 15 min).
+LAUNCH scans at 07:15 / 10:15 / 11:15 / 12:15 / 13:15 / 14:15 / 15:15 ET
+(1H bar close + 15 min). Continuation ranker (EXP-0021); 2 slots/scan.
 Delayed Polygon: wait so the completed hour is in the API (no front-run).
 HTF universe refresh at 04:30 ET (optional noon).
 Trail monitor unchanged (each tick unless dedicated loop is alive).
@@ -37,7 +38,7 @@ from tsd_scan_pipeline.build_3h_bars import IBKR_3H_CLOSE_HOURS_ET  # noqa: E402
 ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 STATE_PATH = RESULTS_DIR / "tsd_scheduler_state.json"
-LAUNCH_HOURS_ET = (7, 11, 12, 13)
+LAUNCH_HOURS_ET = (7, 10, 11, 12, 13, 14, 15)
 LAUNCH_LAG_MIN = 15  # delayed Polygon settle; do not front-run forming 1H bar
 HTF_REFRESH_AT = time(4, 30)
 POLYGON_LAG_MIN = 20

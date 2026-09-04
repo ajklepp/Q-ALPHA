@@ -1,7 +1,7 @@
 # EXP-0021 Design — Continuation Ranker
 
-**Status:** Pilot bakeoff **PASS** (28 symbols / 90d) — live paper unchanged until full-HTF confirm + wire PR  
-**App / path:** `experiments/EXP-0021/`
+**Status:** Full-HTF bakeoff **PASS** — **live shipped** (hourly :15 through 15:15, 2 slots, continuation_score_v1)  
+**App / path:** `experiments/EXP-0021/` + live wire in `candidates/tsd_scan_pipeline/`
 
 ## Problem
 

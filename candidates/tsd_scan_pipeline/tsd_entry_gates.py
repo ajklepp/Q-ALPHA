@@ -1,8 +1,9 @@
 """
 Q-ALPHA UTS v2.6 — 1H LAUNCH entry gates.
 
-Trigger is last completed 1H bar (buy/early_bull + launch), not 3H buy_signal.
-Color does NOT veto. 3H phase != EXTENSION is context. Hours {7, 11, 12, 13} ET.
+Trigger is last completed 1H bar (buy/early_bull + continuation list), not 3H buy_signal.
+Color does NOT veto. Soft EXTENSION demoted by score; hard-block scan>=75 only.
+Hours {7, 10, 11, 12, 13, 14, 15} ET. Peak {7,11,12,13} = score bonus.
 SPY regime is dashboard context only — never vetoes entry.
 """
 from __future__ import annotations
@@ -30,17 +31,19 @@ from tsd_scan_pipeline.tsd_1h_signal import (
     is_launch_hour_window,
 )
 from tsd_scan_pipeline.tsd_launch_score import (
+    EXTENSION_SCAN_AUTO,
     enrich_launch_fields,
+    is_continuation_list_candidate,
     is_launch_candidate,
 )
 
 ET = pytz.timezone("America/New_York")
 
-WATCH_TIMEOUT = time(13, 30)  # after last allowed 13:00 bar; not 11:00
+WATCH_TIMEOUT = time(15, 30)  # after last allowed 15:00 bar + settle
 
 
 def is_entry_window(now: datetime | None = None) -> bool:
-    """True when ET weekday hour is a launch allowlist hour (07/11/12/13)."""
+    """True when ET weekday hour is a launch allowlist hour (through 15)."""
     dt = _as_et(now)
     if dt.weekday() >= 5 or not is_trading_day(dt.date()):
         return False
@@ -157,17 +160,21 @@ def evaluate_launch_gates(
         bar_hour = _as_et(now).hour
     hour_ok = is_allowed_hour(int(bar_hour))
 
-    launch_ok = is_launch_candidate(row)
+    launch_ok = is_continuation_list_candidate(row)
+    legacy_launch = is_launch_candidate(row)  # telemetry
     trigger_ok = bool(row.get("buy_signal")) or bool(row.get("early_bull"))
     red_ok = bool(row.get("signal_bar_red"))  # soft / telemetry only
     structure_ok = str(launch_row.get("reject_reason") or "") != "structure_too_wide"
+    scan = float(row.get("scan_score") or 0)
+    not_hard_ext = scan < EXTENSION_SCAN_AUTO and str(row.get("bar_state") or "") != "extended"
 
     gates: dict[str, bool] = {
         "htf_1h_buy": htf_1h_ok,
-        "launch_candidate": launch_ok,
+        "launch_candidate": launch_ok,  # now = continuation list (EXP-0021)
+        "legacy_peak_launch": legacy_launch,
         "trigger": trigger_ok,
         "signal_bar_red": red_ok,  # informational — not in core
-        "not_extension": phase_3h != "EXTENSION",
+        "not_extension": not_hard_ext,  # hard only scan>=75 / extended bar
         "structure_ok": structure_ok,
         "htf_daily": htf_pass,
         "hour_allowed": hour_ok,
@@ -181,15 +188,17 @@ def evaluate_launch_gates(
     gates["regime_context"] = True  # informational only; label in {regime_label}
 
     reasons: list[str] = []
-    if phase_3h == "EXTENSION":
-        reasons.append("extension_phase")
+    if not not_hard_ext:
+        reasons.append("extension_hard")
+    elif phase_3h == "EXTENSION":
+        reasons.append("extension_soft")  # informational; not a fail
     if not gates["htf_1h_buy"]:
         if launch_row.get("reject_reason") == "structure_too_wide":
             reasons.append("structure_too_wide")
         else:
             reasons.append("no_1h_buy_signal")
     if not gates["launch_candidate"]:
-        reasons.append("not_launch_candidate")
+        reasons.append("not_continuation_list")
     if not gates["trigger"]:
         reasons.append("no_buy_or_early_bull")
     if not gates["structure_ok"]:
@@ -215,6 +224,9 @@ def evaluate_launch_gates(
     passed = all(gates[k] for k in core)
     if require_rth_window:
         passed = passed and gates["rth_window"]
+    # Drop informational soft-extension tag from fail reasons when passed
+    if passed:
+        reasons = [r for r in reasons if r != "extension_soft"]
     return passed, gates, reasons
 
 
