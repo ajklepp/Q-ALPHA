@@ -1,7 +1,7 @@
 # Peak Hour Performers — Live Paper design
 
 **Status:** Live Paper primary = **1H LAUNCH @ :15** (hours **05–15** ET).  
-**Product:** Peak Hour Performers v3.1 · continuation_score_v1 · 2 slots/scan · LONG-ONLY.  
+**Product:** Peak Hour Performers v3.1 · continuation_score_v1.1 · 2 slots/scan · LONG-ONLY.  
 **Workspace:** Q-ALPHA only.
 
 ### Live Paper stack (KEEP)
@@ -105,6 +105,21 @@ py -3 candidates\tsd_scan_pipeline\tsd_options_study.py --days 5 --write
 
 Study cohorts: top-100 by score, signals, watch-10, trade-3, filled. Options overlay
 uses Polygon same-day call/put volume (best-effort; does not affect live scoring).
+
+---
+
+## Tuesday go-live checklist (ops)
+
+First trading day after Labor Day weekend = **Tue 2026-09-08** (Mon 9/7 holiday — ticks skip).
+
+1. TWS paper API on **7497** before **05:15 ET** (trail loop needs it from **04:00**).
+2. Confirm Task Scheduler: **QAlpha TSD Scheduler**, **Trail Monitor**, **Live TWS Sync** Enabled; Setup Watch absent/disabled.
+3. First `:15` log line shows `score=v1.1` and `slots=2`.
+4. HTF refresh at **04:30** (or first launch rebuilds if cache miss).
+5. Keep laptop awake / plugged if possible — tasks now allow battery, but sleep still kills ticks.
+6. Do **not** re-enable Setup Watch / gap agent / Approval Runner.
+
+Ship note: `experiments/EXP-0021/STUDY_SHIP_V11.md`.
 
 ---
 

@@ -41,7 +41,7 @@ $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Add-Content -LiteralPath $LogFile -Value ""
 Add-Content -LiteralPath $LogFile -Value "======== TSD SCHEDULER TICK START $stamp ========"
 
-& $Python $Runner --tick --live *>> $LogFile
+& $Python $Runner --tick --live 2>&1 | Out-File -FilePath $LogFile -Append -Encoding utf8
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 

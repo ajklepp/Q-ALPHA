@@ -6,7 +6,7 @@ queue / enter at most 2 NEW names if slots free.
 
 Bar source: Polygon 1H aggs (see tsd_1h_signal.BAR_SOURCE).
 Hours: 05–15 ET (scan at :15 after bar close; hitch study + RTH).
-Rank: continuation_score_v1 (EXP-0021). Cap: 2 new names per scan.
+Rank: continuation_score_v1.1 (EXP-0021 ship gate). Cap: 2 new names per scan.
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def rank_1h_launches(
     now: datetime | None = None,
     attach_social: bool = True,
 ) -> list[dict[str, Any]]:
-    """Rank by continuation_score_v1 (EXP-0021); peak hour is bonus only."""
+    """Rank by continuation_score_v1.1 (EXP-0021); peak hour is bonus only."""
     from tsd_scan_pipeline.universe_tsd import load_polygon_key
     from tsd_scan_pipeline.tsd_social import attach_social_to_rows
     from tsd_scan_pipeline.tsd_deep_features import attach_deep_features
@@ -170,7 +170,8 @@ def rank_1h_launches(
             print(
                 f"  Deep features: room_filled={n_room} prior_filled={n_prior} "
                 f"path_prior={n_path}"
-            )        except Exception as exc:
+            )
+        except Exception as exc:
             print(f"  deep features warn: {exc}")
 
     for row in passed:
@@ -229,7 +230,7 @@ def evaluate_1h_symbol(
     ok, launch_row = evaluate_1h_buy_signal(base, polygon_key=polygon_key, now=now)
     out = {**base, **launch_row, "symbol": symbol.upper()}
     scan = float(out.get("scan_score") or out.get("htf_1h_scan_score") or 0)
-    # Hard-block only auto-extended; softer EXTENSION demoted in continuation_score_v1
+    # Hard-block only auto-extended; softer EXTENSION demoted in continuation_score_v1.1
     if scan >= EXTENSION_SCAN_AUTO or str(out.get("bar_state") or "") == "extended":
         out["pass"] = False
         out["reject_reason"] = "extension_hard"

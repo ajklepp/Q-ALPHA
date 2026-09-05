@@ -42,7 +42,7 @@ Add-Content -LiteralPath $LogFile -Value ""
 Add-Content -LiteralPath $LogFile -Value "======== TSD TRAIL MONITOR START $stamp ========"
 
 # 60s loop with adaptive RTH 30s / extended 5m polling (TWS must be open)
-& $Python $Runner --loop --adaptive *>> $LogFile
+& $Python $Runner --loop --adaptive 2>&1 | Out-File -FilePath $LogFile -Append -Encoding utf8
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 

@@ -7,7 +7,7 @@ High scan_score (65+) = EXTENSION — soft penalty in ranker; hard-block only >=
 Chat A bar-state bakeoff: drop hard red veto; yellow best, red ok, green ok,
 orange admit-but-deprioritize.
 
-Live slot pick: continuation_score_v1 (peak-hour bonus, not hard hour gate).
+Live slot pick: continuation_score_v1.1 (peak-hour bonus, not hard hour gate).
 """
 from __future__ import annotations
 

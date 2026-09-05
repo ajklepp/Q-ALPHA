@@ -68,6 +68,17 @@ if ($results.Values -contains $false) {
     exit 1
 }
 
+# Laptop paper desk: do not skip ticks when on battery
+foreach ($tn in @("QAlpha TSD Scheduler", "QAlpha TSD Trail Monitor", "QAlpha TSD Weekly Reports")) {
+    $task = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+    if (-not $task) { continue }
+    $settings = $task.Settings
+    $settings.DisallowStartIfOnBatteries = $false
+    $settings.StopIfGoingOnBatteries = $false
+    Set-ScheduledTask -TaskName $tn -Settings $settings | Out-Null
+    Write-Host "  Battery OK: $tn"
+}
+
 Write-Host ""
 Write-Host "POLICY: Sole live entry = TSD Scheduler → 1H LAUNCH. Setup Watch / gap agent = off."
 Write-Host "Verify:"

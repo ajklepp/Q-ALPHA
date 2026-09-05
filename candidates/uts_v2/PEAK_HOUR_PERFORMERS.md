@@ -7,7 +7,7 @@
 ## Edge
 1H LAUNCH at bar-close hours **05–15 ET**, scan at **:15** (delayed Polygon — no front-run).  
 Daily HTF pre-filter (range ≥25%, close > SMA50, SMA20 rising, price ≥ $5).  
-**Continuation ranker** (`continuation_score_v1`) — peak hours are score bonus only; 2 slots/scan.  
+**Continuation ranker** (`continuation_score_v1.1`) — peak hours are score bonus only; 2 slots/scan.  
 
 ## Exits
 - Kill only until +1R, then BE lock `entry×0.997`

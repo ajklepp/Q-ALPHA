@@ -1,5 +1,5 @@
 """
-Live deep features for continuation_score_v1 (room / bounce / ticker prior).
+Live deep features for continuation_score_v1.1 (room / bounce / ticker prior).
 
 Causal:
   - daily bars strictly before today for room/bounce

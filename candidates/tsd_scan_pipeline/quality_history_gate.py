@@ -2,7 +2,8 @@
 Q-ALPHA UTS v2 Phase 2 — quality + history gate (NOT a news veto).
 
 Hard blocks: instrument safety, liquidity (mcap / dollar vol when present),
-price floor, not_extension.
+price floor, auto-extension only (scan>=75 / bar_state extended).
+Soft EXTENSION (phase label / scan 65–74) is score-demoted upstream — never veto.
 Analogs (count / win rate) are soft context only — never veto entry.
 Optional for kill sizing via tsd_profile.kill_pct when present.
 News/sentiment are context tags only — never block admission.
@@ -23,7 +24,7 @@ CANDIDATES_DIR = PIPELINE_DIR.parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
-from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
+from tsd_scan_pipeline.tsd_launch_score import EXTENSION_SCAN_AUTO, enrich_launch_fields
 from tsd_scan_pipeline.universe_tsd import (
     MCAP_MIN,
     MIN_DOLLAR_VOL_20D,
@@ -143,6 +144,12 @@ def evaluate_quality_history_gate(
     dollar_vol = row.get("dollar_vol_20d") or row.get("dollar_volume")
     price = float(row.get("close") or row.get("price") or 0)
     distress = detect_fundamental_distress(row)
+    scan = float(row.get("scan_score") or 0)
+    # Align with tsd_entry_gates / launch scan: hard-block auto-ext only
+    not_hard_ext = (
+        scan < EXTENSION_SCAN_AUTO
+        and str(row.get("bar_state") or "") != "extended"
+    )
 
     gates: dict[str, bool] = {
         "instrument_safety": passes_instrument_safety(sym, require_cs_cache=False) if sym else False,
@@ -151,7 +158,7 @@ def evaluate_quality_history_gate(
         "price_floor": price >= MIN_PRICE_FLOOR if price > 0 else True,
         "analog_count": True,  # soft context — never hard-blocks (stored on enrich)
         "analog_win_rate": True,  # soft context — never hard-blocks
-        "not_extension": row.get("phase") != "EXTENSION",
+        "not_extension": not_hard_ext,
         "no_distress": not distress if not FUNDAMENTAL_DISTRESS_SPEC_ONLY else True,
     }
     _ = (analog_count, win_rate)  # computed for callers via enrich_queue_row
@@ -166,7 +173,9 @@ def evaluate_quality_history_gate(
     if not gates["price_floor"]:
         reasons.append(f"price<{MIN_PRICE_FLOOR:.0f}")
     if not gates["not_extension"]:
-        reasons.append("extension_phase")
+        reasons.append("extension_hard")
+    elif str(row.get("phase") or "") == "EXTENSION":
+        reasons.append("extension_soft")  # informational; not a fail
     if distress and not FUNDAMENTAL_DISTRESS_SPEC_ONLY:
         reasons.append("fundamental_distress")
 
