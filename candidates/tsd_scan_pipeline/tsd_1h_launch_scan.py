@@ -349,6 +349,38 @@ def run_1h_launch_scan(
         live=live,
     )
 
+    # Missed-move ledger: ranked launches not filled (Weekly Review highlights)
+    try:
+        from tsd_scan_pipeline.php_missed_ledger import mark_ran_up, record_scan_outcomes
+
+        taken_syms = {
+            str(e.get("symbol") or "").upper()
+            for e in entry_results
+            if str(e.get("status") or "").upper() == "FILLED"
+        }
+        # Also treat OPEN book names from this scan's take as taken if already entered
+        if not taken_syms and take:
+            try:
+                book_now = load_state()
+                open_syms = {
+                    str(p.get("symbol") or "").upper()
+                    for p in (book_now.get("positions") or [])
+                    if str(p.get("status") or "").upper() == "OPEN"
+                }
+                for r in take:
+                    sym = str(r.get("symbol") or "").upper()
+                    if sym in open_syms:
+                        taken_syms.add(sym)
+            except Exception:
+                pass
+        n_led = record_scan_outcomes(
+            now_et=now_et, ranked=ranked, taken_symbols=taken_syms,
+        )
+        n_mark = mark_ran_up(days=14, only_missed=True) if live else 0
+        print(f"  Missed ledger upserted={n_led} marked={n_mark}")
+    except Exception as exc:
+        print(f"  missed ledger warn: {exc}")
+
     # Always refresh dashboard + Telegram after every live scan (incl. 0 launches).
     if live:
         try:

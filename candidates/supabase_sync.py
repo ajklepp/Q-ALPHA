@@ -72,38 +72,15 @@ TRADE_FIELDS = (
     "last_updated",
 )
 
-TSD_POSITION_FIELDS = (
+TSD_MISSED_MOVE_FIELDS = (
     "symbol",
-    "entry_date",
-    "leg_opened_at",
-    "entry_price",
-    "shares",
-    "kill_price",
-    "current_price",
-    "pnl_dollars",
-    "pnl_pct",
-    "status",
-    "last_bar_time",
-    "scan_score",
-    "peak_high",
-    "kill_pct",
-    "trail_pct",
-    "trading_day",
-    "t4_only",
-    "tranche_summary",
-    "structure_stop",
-    "rth_armed",
-    "structure_stop_reason",
-    "breakeven_locked",
-    "tranche_json",
-    "t1_trigger_price",
-    "next_trail_stop",
-    "launch_score",
-    "phase",
-    "pre_catalyst",
-    "mfe_r",
-    "kill_source",
-    "bar_state",
+    "signal_day",
+    "signal_at",
+    "ref_price",
+    "peak_price",
+    "ran_up_pct",
+    "outcome",
+    "marked_at",
     "last_updated",
 )
 
@@ -523,6 +500,56 @@ class SupabaseSync:
         except Exception as exc:
             err = str(exc)
             if "PGRST205" in err or "tsd_closed_legs" in err:
+                return []
+            raise
+
+    def upsert_tsd_missed_moves(self, rows: list[dict]) -> int:
+        """Upsert missed-move highlight rows (Weekly Review)."""
+        if not rows:
+            return 0
+        clean = []
+        now = datetime.now(timezone.utc).isoformat()
+        for r in rows:
+            item = {field: r.get(field) for field in TSD_MISSED_MOVE_FIELDS}
+            item["symbol"] = str(r.get("symbol") or "").upper()
+            item["signal_day"] = str(r.get("signal_day") or "")[:10]
+            if not item["symbol"] or not item["signal_day"]:
+                continue
+            item["last_updated"] = r.get("last_updated") or now
+            clean.append(item)
+        if not clean:
+            return 0
+        try:
+            self.client.table("tsd_missed_moves").upsert(
+                clean, on_conflict="symbol,signal_day"
+            ).execute()
+        except Exception:
+            for r in clean:
+                self._upsert_strip_unknown(
+                    "tsd_missed_moves", r, on_conflict="symbol,signal_day",
+                )
+        return len(clean)
+
+    def get_tsd_missed_moves(self, *, days: int = 14) -> list:
+        """Missed moves in the last N days, best ran-up first."""
+        try:
+            from datetime import timedelta
+
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime(
+                "%Y-%m-%d"
+            )
+            result = (
+                self.client.table("tsd_missed_moves")
+                .select("*")
+                .eq("outcome", "MISSED")
+                .gte("signal_day", cutoff)
+                .order("ran_up_pct", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            err = str(exc)
+            if "PGRST205" in err or "tsd_missed_moves" in err:
                 return []
             raise
 

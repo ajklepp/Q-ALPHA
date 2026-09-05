@@ -838,6 +838,25 @@ def sync_tsd_positions_to_supabase(
             summary["verify_errors"].append(f"tsd_watch_queue:{exc}")
             print(f"  *** watch_queue sync FAILED: {exc} ***")
 
+    try:
+        from tsd_scan_pipeline.php_missed_ledger import _load_ledger, mark_ran_up
+
+        mark_ran_up(days=14, only_missed=True)
+        missed_rows = list((_load_ledger().get("rows") or []))
+        summary["missed_synced"] = sync.upsert_tsd_missed_moves(missed_rows)
+        print(f"  missed_moves_synced={summary['missed_synced']}")
+    except Exception as exc:
+        err = str(exc)
+        if "PGRST205" in err or "tsd_missed_moves" in err:
+            summary["missed_missing"] = True
+            print(
+                "  *** tsd_missed_moves table MISSING — "
+                "run candidates/sql/tsd_cloud.sql (missed highlights) ***"
+            )
+        else:
+            summary["verify_errors"].append(f"tsd_missed_moves:{exc}")
+            print(f"  *** missed_moves sync FAILED: {exc} ***")
+
     verify_errors = _verify_tsd_supabase_rows(rows)
     summary["verify_errors"].extend(verify_errors)
 

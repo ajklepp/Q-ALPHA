@@ -1,5 +1,5 @@
 """
-Dashboard Weekly Review — on-the-go results from Supabase (no local funnel / no process detail).
+Dashboard Weekly Review — results + missed runners (on-the-go highlights).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         if x is None:
             return default
         v = float(x)
-        return v if v == v else default  # NaN check
+        return v if v == v else default
     except (TypeError, ValueError):
         return default
 
@@ -55,12 +55,24 @@ def _in_window(dt: datetime | None, start: datetime) -> bool:
     return dt is not None and dt >= start
 
 
-def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
-    """
-    Mobile-friendly weekly scoreboard from cloud book data.
+def _local_missed(days: int) -> list[dict[str, Any]]:
+    try:
+        import sys
+        from pathlib import Path
 
-    Shows results only — never scores, gates, hours, reject reasons, or research docs.
-    """
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from tsd_scan_pipeline.php_missed_ledger import rows_since
+
+        return rows_since(days, outcome="MISSED")
+    except Exception:
+        return []
+
+
+def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
+    """Weekly scoreboard + missed runners for on-the-go review."""
     days = st.selectbox("Last", [7, 14, 30], index=0, format_func=lambda d: f"{d} days")
     now = datetime.now(ET)
     start = now - timedelta(days=int(days))
@@ -68,12 +80,14 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
     closed: list[dict] = []
     opens: list[dict] = []
     pool: dict = {}
+    missed: list[dict] = []
     err: str | None = None
     try:
         sync = get_sync()
         closed = list(sync.get_tsd_closed_legs() or [])
         opens = list(sync.get_tsd_positions(status="OPEN") or [])
         pool = sync.get_latest_tsd_pool() or {}
+        missed = list(sync.get_tsd_missed_moves(days=int(days)) or [])
     except Exception as exc:
         err = str(exc)
 
@@ -82,7 +96,9 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
         st.caption(err)
         return
 
-    # Closed in window (by close time, else entry date)
+    if not missed:
+        missed = _local_missed(int(days))
+
     closed_w: list[dict] = []
     for r in closed:
         dt = _parse_et_date(r.get("closed_at")) or _parse_et_date(r.get("entry_date"))
@@ -95,26 +111,6 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
     pnl_open = sum(_safe_float(r.get("pnl_dollars")) for r in opens)
     wr = (len(wins) / len(closed_w)) if closed_w else None
 
-    avg_win = (sum(_safe_float(r.get("pnl_dollars")) for r in wins) / len(wins)) if wins else None
-    avg_loss = (sum(_safe_float(r.get("pnl_dollars")) for r in losses) / len(losses)) if losses else None
-
-    # Best run-up among closed + open
-    best_run: tuple[str, float] | None = None
-    for r in list(closed_w) + list(opens):
-        entry = _safe_float(r.get("entry_price"))
-        peak = _safe_float(r.get("peak_high"), float("nan"))
-        mfe = r.get("mfe_pct")
-        if mfe is not None:
-            pct = _safe_float(mfe)
-        else:
-            pct_opt = _ran_up_pct(entry, peak)
-            pct = pct_opt if pct_opt is not None else float("-inf")
-        if pct == float("-inf"):
-            continue
-        sym = str(r.get("symbol") or "").upper()
-        if best_run is None or pct > best_run[1]:
-            best_run = (sym, pct)
-
     cash = _safe_float(pool.get("pool"), 3000.0)
     starting = _safe_float(pool.get("starting_pool"), 3000.0)
     in_mkt = sum(
@@ -123,6 +119,13 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
     )
     equity = cash + in_mkt
     total_pnl = equity - starting
+
+    # Highlight: biggest missed runs
+    hot_misses = [
+        m for m in missed
+        if _safe_float(m.get("ran_up_pct"), float("-inf")) > 0
+    ]
+    best_miss = hot_misses[0] if hot_misses else None
 
     with st.container(border=True):
         section_header("Week", f"Last {int(days)} days")
@@ -135,25 +138,48 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("Taken", str(len(closed_w) + len(opens)))
         d2.metric("Still open", str(len(opens)))
-        d3.metric("Avg win", f"${avg_win:+,.2f}" if avg_win is not None else "—")
-        d4.metric("Avg loss", f"${avg_loss:+,.2f}" if avg_loss is not None else "—")
-
-        e1, e2, e3 = st.columns(3)
-        e1.metric("Book equity", f"${equity:,.2f}")
-        e2.metric("Book P&L", f"${total_pnl:+,.2f}")
-        if best_run:
-            e3.metric("Best run", f"{best_run[0]} {best_run[1]:+.1f}%")
+        d3.metric("Missed", str(len(missed)))
+        if best_miss:
+            d4.metric(
+                "Biggest miss",
+                f"{best_miss.get('symbol')} {_safe_float(best_miss.get('ran_up_pct')):+.1f}%",
+            )
         else:
-            e3.metric("Best run", "—")
-        if opens:
-            st.caption(f"Open MTM {pnl_open:+,.2f}")
+            d4.metric("Biggest miss", "—")
+        st.caption(
+            f"Book ${equity:,.2f} · P&L ${total_pnl:+,.2f}"
+            + (f" · open MTM ${pnl_open:+,.2f}" if opens else "")
+        )
 
-    rows: list[dict[str, str]] = []
+    # --- Missed first (the point of weekly review) ---
+    with st.container(border=True):
+        section_header("Missed", "")
+        if not missed:
+            st.info("No missed names in this window yet.")
+        else:
+            rows = []
+            for m in missed:
+                ran = m.get("ran_up_pct")
+                rows.append({
+                    "Symbol": str(m.get("symbol") or "").upper(),
+                    "Day": str(m.get("signal_day") or "")[:10],
+                    "Ref": f"${_safe_float(m.get('ref_price')):.2f}",
+                    "High": (
+                        f"${_safe_float(m.get('peak_price')):.2f}"
+                        if m.get("peak_price") is not None
+                        else "—"
+                    ),
+                    "Ran up": f"{_safe_float(ran):+.1f}%" if ran is not None else "—",
+                })
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    # --- Taken ---
+    trade_rows: list[dict[str, str]] = []
     for r in opens:
         entry = _safe_float(r.get("entry_price"))
         peak = _safe_float(r.get("peak_high"), float("nan"))
         ran = _ran_up_pct(entry, peak)
-        rows.append({
+        trade_rows.append({
             "Symbol": str(r.get("symbol") or "").upper(),
             "Status": "Open",
             "P&L": f"${_safe_float(r.get('pnl_dollars')):+.2f}",
@@ -170,7 +196,7 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
         if r.get("mfe_pct") is not None:
             ran = _safe_float(r.get("mfe_pct"))
         pnl = _safe_float(r.get("pnl_dollars"))
-        rows.append({
+        trade_rows.append({
             "Symbol": str(r.get("symbol") or "").upper(),
             "Status": "Win" if pnl > 0 else "Loss",
             "P&L": f"${pnl:+.2f}",
@@ -178,8 +204,8 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
         })
 
     with st.container(border=True):
-        section_header("Trades", "")
-        if not rows:
-            st.info("No trades in this window yet.")
+        section_header("Taken", "")
+        if not trade_rows:
+            st.info("No taken trades in this window.")
         else:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(trade_rows), hide_index=True, use_container_width=True)

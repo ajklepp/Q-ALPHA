@@ -165,6 +165,25 @@ ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS exit_layer     TEXT;
 CREATE INDEX IF NOT EXISTS tsd_closed_legs_closed_at_idx ON tsd_closed_legs (closed_at DESC);
 
 -- ---------------------------------------------------------------------------
+-- tsd_missed_moves — launches seen but not taken (Weekly Review highlights)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tsd_missed_moves (
+    symbol          TEXT NOT NULL,
+    signal_day      TEXT NOT NULL,
+    signal_at       TIMESTAMPTZ,
+    ref_price       NUMERIC,
+    peak_price      NUMERIC,
+    ran_up_pct      NUMERIC,
+    outcome         TEXT DEFAULT 'MISSED',
+    marked_at       TIMESTAMPTZ,
+    last_updated    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (symbol, signal_day)
+);
+
+CREATE INDEX IF NOT EXISTS tsd_missed_moves_day_idx ON tsd_missed_moves (signal_day DESC);
+CREATE INDEX IF NOT EXISTS tsd_missed_moves_ran_idx ON tsd_missed_moves (ran_up_pct DESC NULLS LAST);
+
+-- ---------------------------------------------------------------------------
 -- RLS: anon SELECT for Streamlit Cloud (service role writes from local sync)
 -- ---------------------------------------------------------------------------
 ALTER TABLE tsd_positions ENABLE ROW LEVEL SECURITY;
@@ -172,12 +191,14 @@ ALTER TABLE tsd_pool_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_watchlist ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_closed_legs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tsd_watch_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tsd_missed_moves ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT ON TABLE public.tsd_positions TO anon;
 GRANT SELECT ON TABLE public.tsd_pool_snapshots TO anon;
 GRANT SELECT ON TABLE public.tsd_watchlist TO anon;
 GRANT SELECT ON TABLE public.tsd_closed_legs TO anon;
 GRANT SELECT ON TABLE public.tsd_watch_queue TO anon;
+GRANT SELECT ON TABLE public.tsd_missed_moves TO anon;
 
 DROP POLICY IF EXISTS tsd_positions_anon_select ON public.tsd_positions;
 CREATE POLICY tsd_positions_anon_select ON public.tsd_positions
@@ -197,6 +218,10 @@ CREATE POLICY tsd_closed_legs_anon_select ON public.tsd_closed_legs
 
 DROP POLICY IF EXISTS tsd_watch_queue_anon_select ON public.tsd_watch_queue;
 CREATE POLICY tsd_watch_queue_anon_select ON public.tsd_watch_queue
+    FOR SELECT TO anon USING (true);
+
+DROP POLICY IF EXISTS tsd_missed_moves_anon_select ON public.tsd_missed_moves;
+CREATE POLICY tsd_missed_moves_anon_select ON public.tsd_missed_moves
     FOR SELECT TO anon USING (true);
 
 NOTIFY pgrst, 'reload schema';
