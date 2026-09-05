@@ -21,8 +21,10 @@ if str(ROOT) not in sys.path:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Default: ~$0.02 / $0.03 per 1M tokens — pennies per scan day.
-DEFAULT_MODEL = "mistralai/mistral-nemo"
+# Default: gpt-4o-mini — solid tags, still pennies/day for Peak Hour.
+# ~$0.15 / $0.60 per 1M tokens → ~40 short calls/day ≈ $0.004/day (nowhere near $1+).
+# Pin via OPENROUTER_MODEL. Optional OPENROUTER_TRY_FREE=1 tries free first.
+DEFAULT_MODEL = "openai/gpt-4o-mini"
 # Free attempts (flaky; only if OPENROUTER_TRY_FREE=1)
 FREE_MODELS = (
     "inclusionai/ling-3.0-flash-fin:free",
@@ -31,7 +33,8 @@ FREE_MODELS = (
 )
 # Paid fallbacks if primary fails
 PAID_FALLBACKS = (
-    "meta-llama/llama-3.1-8b-instruct",
+    "meta-llama/llama-3.3-70b-instruct",
+    "mistralai/mistral-nemo",
     "amazon/nova-micro-v1",
 )
 

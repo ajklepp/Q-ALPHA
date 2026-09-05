@@ -12,7 +12,7 @@
 | HTF universe @ 04:30 | Daily pass set for hourly scan |
 | `tsd_watch_queue` + `execute_live_entries` | Admit + BUY |
 | `tsd_social` (Polygon news + StockTwits; X off) | Soft continuation terms + thesis; never hard-vetoes |
-| `catalyst_ai` via OpenRouter (`mistral-nemo` default) | Headline → print/outlook tags; free tiers optional via env |
+| `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Headline → print/outlook; ~pennies/day; free optional via env |
 | `tsd_trail_monitor` | Kill until +1R → BE → trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
