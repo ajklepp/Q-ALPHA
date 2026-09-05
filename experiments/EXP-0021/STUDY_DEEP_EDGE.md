@@ -67,9 +67,10 @@
 | reward_high_vol_no_ext_pen | 720 | 10.0% | 0.282 | 20.6% |
 
 ### 4) News / catalyst
-- INCONCLUSIVE — full HTF bakeoff ran with news/social off. Need powered rebuild before catalyst claims. Pilot alone underpowered.
-- HTF social_missing rate: 100%
-- Pilot: n=332 news>0=47 WR with=0.0425531914893617 without=0.09473684210526316
+- **POWERED** (causal Polygon news enrich via `enrich_social_corpus.py`; ST/X skipped on corpus — live-only).
+- Admits news>0=222 without=3131 · WR 6.8% vs 6.4% · exp 0.285 vs 0.252
+- Soft-rank only — news presence is not a hard gate; nearly flat WR, slightly higher expectancy with headlines.
+- Live: `tsd_social.py` attaches Polygon + StockTwits (+ X if `X_BEARER_TOKEN`) on 1H rank.
 
 ### 5) TF-mix proxies
 - Best by exp then capture: **`A_1H_only`**
@@ -110,7 +111,7 @@
 1. Equal 1H admit stays; rank terms should be kept only if ablation shows lift.
 2. Longer lookback (52w / SMA200) is a candidate upgrade over pure 20d room — see study 2.
 3. Soft-punishing hot scan/vol is **not** clearly justified — see study 3 policies.
-4. Catalyst claims stay blocked until a powered news corpus exists.
+4. News is powered for soft rank; do **not** hard-gate on headlines (WR ~flat vs no-news).
 5. Daily structure filters (SMA200 / HH-HL) change the list shape — trade capture vs quality.
 6. Fitted importance surfaces metrics beyond the heuristic weights.
 
@@ -119,6 +120,14 @@
 - Study 1 ablation: **PASS** (completed on corpus)
 - Study 2 lookback: **PASS** (completed; best=`room_20d_plus_52w_avg`)
 - Study 3 vol/scan: **PASS** (completed; best policy=`baseline`)
-- Study 4 news: **FAIL / INCONCLUSIVE** (data missing on HTF corpus)
+- Study 4 news: **PASS / POWERED** (soft-rank only; ST historical skipped to avoid look-ahead)
 - Study 5 TF mix: **PASS** (completed; best=`A_1H_only`)
 - Study 6 fitted: **PASS**
+
+## Study 4 refresh (powered social enrich)
+
+- Verdict: **POWERED — enough news coverage to compare with/without; still soft-rank only.**
+- social_missing_rate=0.958
+- Admits news>0=222 without=3131 WR 0.06756756756756757 vs 0.06419674225487065 exp 0.2847513513513514 vs 0.25150814436282337
+- StockTwits ok=0 WR None vs missing 0.06441992245750075; bullish≥0.55 n=0 WR=None
+- Live path: `tsd_social.py` attached on 1H rank (never hard-vetoes).

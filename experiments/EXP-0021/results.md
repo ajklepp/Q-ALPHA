@@ -68,7 +68,7 @@ No 04 (empty label); no evening entry clock.
 Ran studies 1→6 on the same HTF corpus:  
 **[`STUDY_DEEP_EDGE.md`](STUDY_DEEP_EDGE.md)** · `study_deep_edge_metrics.json` · runner `study_deep_edge.py`
 
-Headline: **ticker prior** is the term that hurts most when ablated; **20d room** still beats 52w/SMA200 for slot expectancy; **soft vol/scan penalties don’t help taken slots** (almost no scan>55 gets taken anyway); **news INCONCLUSIVE** (social off on corpus); **daily SMA filters hurt** vs 1H-only admit; fitted logistic **raises expander capture, lowers expectancy**.
+Headline: **ticker prior** is the term that hurts most when ablated; **20d room** still beats 52w/SMA200 for slot expectancy; **soft vol/scan penalties don’t help taken slots** (almost no scan>55 gets taken anyway); **news POWERED** (222 admits with headlines — soft rank only, WR ~flat); **daily SMA filters hurt** vs 1H-only admit; fitted logistic **raises expander capture, lowers expectancy**.
 
 ## Costs
 

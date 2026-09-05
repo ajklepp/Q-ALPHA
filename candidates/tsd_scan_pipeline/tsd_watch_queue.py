@@ -183,6 +183,34 @@ def add_to_watch_queue(
             "news_summary": qh_row.get("news_summary") or "",
             "catalyst_tier": int(qh_row.get("catalyst_tier") or 0),
             "sentiment_score": float(qh_row.get("sentiment_score") or 0),
+            # Live social/news velocity (tsd_social) — soft rank + thesis only
+            "news_velocity_24h": float(
+                qh_row.get("news_velocity_24h") or cand.get("news_velocity_24h") or 0
+            ),
+            "news_velocity_72h": float(
+                qh_row.get("news_velocity_72h") or cand.get("news_velocity_72h") or 0
+            ),
+            "news_headline_count_48h": float(
+                qh_row.get("news_headline_count_48h")
+                or cand.get("news_headline_count_48h")
+                or 0
+            ),
+            "dilution_flag": int(qh_row.get("dilution_flag") or cand.get("dilution_flag") or 0),
+            "distress_flag": int(qh_row.get("distress_flag") or cand.get("distress_flag") or 0),
+            "catalyst_type": qh_row.get("catalyst_type") or cand.get("catalyst_type") or "none",
+            "st_msg_24h": float(qh_row.get("st_msg_24h") or cand.get("st_msg_24h") or 0),
+            "st_bull_ratio": float(
+                qh_row.get("st_bull_ratio")
+                if qh_row.get("st_bull_ratio") is not None
+                else (cand.get("st_bull_ratio") if cand.get("st_bull_ratio") is not None else 0.5)
+            ),
+            "social_missing": int(
+                qh_row.get("social_missing")
+                if qh_row.get("social_missing") is not None
+                else (cand.get("social_missing") if cand.get("social_missing") is not None else 1)
+            ),
+            "x_posts_24h": float(qh_row.get("x_posts_24h") or cand.get("x_posts_24h") or 0),
+            "x_sent_lex": float(qh_row.get("x_sent_lex") or cand.get("x_sent_lex") or 0),
         }
 
         idx = _queue_index(state, sym)
@@ -295,6 +323,16 @@ def execute_live_entries(
             analog_count=cand.get("analog_count"),
             news_headline_count_48h=cand.get("news_headline_count_48h"),
             dollar_vol_1h=cand.get("dollar_vol_1h"),
+            news_velocity_24h=cand.get("news_velocity_24h"),
+            news_velocity_72h=cand.get("news_velocity_72h"),
+            dilution_flag=cand.get("dilution_flag"),
+            distress_flag=cand.get("distress_flag"),
+            catalyst_type=cand.get("catalyst_type"),
+            st_msg_24h=cand.get("st_msg_24h"),
+            st_bull_ratio=cand.get("st_bull_ratio"),
+            social_missing=cand.get("social_missing"),
+            x_posts_24h=cand.get("x_posts_24h"),
+            x_sent_lex=cand.get("x_sent_lex"),
         )
         any_fill = True
         results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})

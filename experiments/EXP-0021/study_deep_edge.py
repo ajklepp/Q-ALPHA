@@ -351,6 +351,11 @@ def study3_vol_scan(df: pd.DataFrame) -> dict[str, Any]:
 
 def study4_news(df: pd.DataFrame) -> dict[str, Any]:
     print("\n=== STUDY 4: News / catalyst ===")
+    # Prefer powered social enrich if present
+    social_path = EXP_DIR / "corpus_htf_universe_social.csv"
+    if social_path.exists():
+        print(f"  Using powered social corpus: {social_path.name}")
+        df = pd.read_csv(social_path)
     has_news = "news_velocity_24h" in df.columns or "news_headline_count_48h" in df.columns
     social_miss = float(df["social_missing"].mean()) if "social_missing" in df.columns else 1.0
     news_col = None
@@ -365,10 +370,12 @@ def study4_news(df: pd.DataFrame) -> dict[str, Any]:
         "verdict": "",
         "pilot": None,
         "htf": None,
+        "st": None,
+        "source": social_path.name if social_path.exists() else "corpus_htf_universe",
     }
 
     if news_col and df[news_col].fillna(0).gt(0).any():
-        sub = df[df["all_hours_admit"] == 1].copy()
+        sub = df[df["all_hours_admit"] == 1].copy() if "all_hours_admit" in df.columns else df
         has = sub[news_col].fillna(0) > 0
         result["htf"] = {
             "n_with_news": int(has.sum()),
@@ -381,6 +388,16 @@ def study4_news(df: pd.DataFrame) -> dict[str, Any]:
         print(f"  HTF news col={news_col}: with={has.sum()} without={(~has).sum()}")
     else:
         print("  HTF corpus: news/social effectively empty (social_missing≈1).")
+
+    if "st_ok" in df.columns and "all_hours_admit" in df.columns:
+        sub = df[df["all_hours_admit"] == 1].copy()
+        has = sub["st_ok"].fillna(0).astype(int) == 1
+        result["st"] = {
+            "n_st_ok": int(has.sum()),
+            "wr_st_ok": float(sub.loc[has, "hit_1r"].mean()) if has.any() else None,
+            "wr_st_missing": float(sub.loc[~has, "hit_1r"].mean()) if (~has).any() else None,
+        }
+        print(f"  StockTwits ok={has.sum()} WR={result['st']['wr_st_ok']}")
 
     if PILOT_PATH.exists():
         pilot = pd.read_csv(PILOT_PATH)
@@ -409,13 +426,20 @@ def study4_news(df: pd.DataFrame) -> dict[str, Any]:
                 f"wr_with={result['pilot']['wr_with']} wr_without={result['pilot']['wr_without']}"
             )
 
-    if social_miss > 0.95 and (result["htf"] is None or (result["htf"] or {}).get("n_with_news", 0) == 0):
+    n_news = (result.get("htf") or {}).get("n_with_news") or 0
+    if social_miss > 0.95 and n_news == 0:
         result["verdict"] = (
             "INCONCLUSIVE — full HTF bakeoff ran with news/social off. "
-            "Need powered rebuild before catalyst claims. Pilot alone underpowered."
+            "Run enrich_social_corpus.py before catalyst claims."
+        )
+    elif n_news < 80:
+        result["verdict"] = (
+            f"PARTIAL — news>0 on {n_news} admits; soft context only, not hard gates."
         )
     else:
-        result["verdict"] = "Partial data — see tables; do not ship catalyst gates yet."
+        result["verdict"] = (
+            "POWERED — enough news coverage for with/without compare; keep soft-rank only."
+        )
     print(f"  Verdict: {result['verdict']}")
     return result
 

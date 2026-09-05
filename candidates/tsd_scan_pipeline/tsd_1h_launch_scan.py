@@ -126,16 +126,46 @@ def _write_launch_artifact(
     return LAUNCH_CACHE_PATH
 
 
-def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def rank_1h_launches(
+    rows: list[dict[str, Any]],
+    *,
+    polygon_key: str | None = None,
+    now: datetime | None = None,
+    attach_social: bool = True,
+) -> list[dict[str, Any]]:
     """Rank by continuation_score_v1 (EXP-0021); peak hour is bonus only."""
+    from tsd_scan_pipeline.universe_tsd import load_polygon_key
+    from tsd_scan_pipeline.tsd_social import attach_social_to_rows
+
     passed = [r for r in rows if r.get("pass")]
+    if attach_social and passed:
+        key = polygon_key or load_polygon_key()
+        try:
+            passed = attach_social_to_rows(
+                passed,
+                api_key=key,
+                as_of=now,
+                include_x=None,  # auto if X_BEARER_TOKEN set
+            )
+            n_news = sum(1 for r in passed if float(r.get("news_velocity_24h") or 0) > 0)
+            n_st = sum(1 for r in passed if int(r.get("st_ok") or 0) == 1)
+            print(f"  Social/news attached: {len(passed)} passers · news>0={n_news} · ST_ok={n_st}")
+        except Exception as exc:
+            print(f"  social attach warn: {exc}")
+
     for row in passed:
         enriched = enrich_launch_fields(row)
         if row.get("htf_range_20d_pct") is not None:
             row["htf_score"] = compute_htf_rank_score(row)
         elif row.get("htf_score") is None:
             row["htf_score"] = 0.0
-        merged = {**enriched, "htf_score": row["htf_score"]}
+        merged = {**enriched, **{k: row.get(k) for k in (
+            "news_velocity_24h", "news_velocity_72h", "news_headline_count_48h",
+            "dilution_flag", "distress_flag", "unresolved", "catalyst_type",
+            "st_msg_24h", "st_bull_ratio", "st_ok",
+            "x_posts_24h", "x_sent_lex", "x_ok", "social_missing",
+            "guidance_cut", "print", "outlook",
+        ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
         row["bar_state"] = enriched2.get("bar_state")
@@ -143,6 +173,15 @@ def rank_1h_launches(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["continuation_score"] = enriched2.get("continuation_score")
         row["continuation_score_v0"] = enriched2.get("continuation_score_v0")
         row["combined_rank_score"] = enriched2.get("combined_rank_score")
+        # Keep social fields on row for book / thesis / funnel
+        for k in (
+            "news_velocity_24h", "news_velocity_72h", "news_headline_count_48h",
+            "dilution_flag", "distress_flag", "catalyst_type",
+            "st_msg_24h", "st_bull_ratio", "social_missing",
+            "x_posts_24h", "x_sent_lex",
+        ):
+            if k in row or k in merged:
+                row[k] = merged.get(k, row.get(k))
     passed.sort(
         key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
     )
@@ -263,7 +302,7 @@ def run_1h_launch_scan(
                 f"{'LAUNCH' if row.get('pass') else row.get('reject_reason')}"
             )
 
-    ranked = rank_1h_launches(rows)
+    ranked = rank_1h_launches(rows, polygon_key=key, now=now_et)
     take = ranked[:MAX_NEW_ENTRIES_PER_SCAN]
     print(f"\n1H launches: {len(ranked)}  taking top {len(take)} (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)")
     for r in take:

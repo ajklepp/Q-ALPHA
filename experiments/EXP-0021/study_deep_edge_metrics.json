@@ -347,22 +347,24 @@
     "best_policy_by_exp": "baseline"
   },
   "study4": {
-    "htf_social_missing_rate": 1.0,
-    "htf_has_news_column": false,
-    "verdict": "INCONCLUSIVE \u2014 full HTF bakeoff ran with news/social off. Need powered rebuild before catalyst claims. Pilot alone underpowered.",
-    "pilot": {
-      "n": 332,
-      "n_with_news": 47,
-      "wr_with": 0.0425531914893617,
-      "wr_without": 0.09473684210526316,
-      "catalyst_types": {
-        "none": 308,
-        "earnings": 14,
-        "offering": 7,
-        "contract": 3
-      }
+    "htf_social_missing_rate": 0.9575019040365575,
+    "htf_has_news_column": true,
+    "verdict": "POWERED \u2014 enough news coverage to compare with/without; still soft-rank only.",
+    "htf": {
+      "n_with_news": 222,
+      "n_without": 3131,
+      "wr_with": 0.06756756756756757,
+      "wr_without": 0.06419674225487065,
+      "exp_with": 0.2847513513513514,
+      "exp_without": 0.25150814436282337
     },
-    "htf": null
+    "st": {
+      "n_st_ok": 0,
+      "wr_st_ok": null,
+      "wr_st_missing": 0.06441992245750075,
+      "n_bullish": 0,
+      "wr_bullish": null
+    }
   },
   "study5": {
     "rows": [
@@ -568,5 +570,6 @@
     },
     "beats_v1_exp": false,
     "beats_v1_capture": true
-  }
+  },
+  "study4_enriched_at": "2026-09-05T12:31:10.001132-04:00"
 }

@@ -43,3 +43,6 @@ candidates/_fullscan_preview.json
 candidates/full_scan/
 candidates/cs_universe*.json
 candidates/session_tracker_*.json
+
+# EXP-0021 news enrich disk cache (regenerable)
+experiments/EXP-0021/social_day_cache.json

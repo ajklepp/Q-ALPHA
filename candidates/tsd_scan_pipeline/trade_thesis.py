@@ -134,7 +134,17 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
     outlook = str(row.get("outlook") or "").lower().strip()
     news_n = _finite(row.get("news_headline_count_48h") or row.get("news_velocity_24h"))
     guidance = bool(row.get("guidance_cut"))
-    used = _present(print_tag) or _present(outlook) or news_n is not None or "guidance_cut" in row
+    st_msg = _finite(row.get("st_msg_24h"))
+    st_bull = _finite(row.get("st_bull_ratio"))
+    cat_type = row.get("catalyst_type")
+    used = (
+        _present(print_tag)
+        or _present(outlook)
+        or news_n is not None
+        or "guidance_cut" in row
+        or st_msg is not None
+        or _present(cat_type)
+    )
 
     parts: list[str] = []
     if guidance or outlook in ("lowered", "withdrawn"):
@@ -144,15 +154,31 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
     elif outlook and outlook not in ("unknown", "none", "null"):
         parts.append("outlook noted")
 
+    if bool(row.get("dilution_flag")):
+        parts.append("dilution / offering headline — caution")
+    if bool(row.get("distress_flag")):
+        parts.append("distress headline — caution")
+
     if _present(print_tag) and str(print_tag).lower() not in ("unknown", "none", "null"):
         parts.append(f"print: {str(print_tag).replace('_', ' ')}")
     elif news_n is not None and news_n <= 0:
         parts.append("no fresh headlines in window")
     elif news_n is not None and news_n > 0:
-        parts.append("recent headlines present")
-    else:
-        if not parts:
-            parts.append("catalyst quiet / unknown")
+        parts.append(f"recent headlines present ({int(news_n)})")
+
+    if _present(cat_type) and str(cat_type).lower() not in ("none", "unknown", "null", ""):
+        parts.append(f"catalyst type: {str(cat_type)}")
+
+    if st_msg is not None and st_msg > 0:
+        if st_bull is not None and st_bull >= 0.6:
+            parts.append("social tape bullish")
+        elif st_bull is not None and st_bull <= 0.4:
+            parts.append("social tape mixed-soft")
+        else:
+            parts.append("social chatter present")
+
+    if not parts:
+        parts.append("catalyst quiet / unknown")
 
     pre = row.get("pre_catalyst")
     if pre is True:

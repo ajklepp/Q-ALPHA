@@ -11,6 +11,7 @@
 | `scheduler.py --tick --live` | Sole entry authority → `tsd_1h_launch_scan` |
 | HTF universe @ 04:30 | Daily pass set for hourly scan |
 | `tsd_watch_queue` + `execute_live_entries` | Admit + BUY |
+| `tsd_social` (Polygon news + StockTwits + optional X) | Soft continuation terms + thesis; never hard-vetoes |
 | `tsd_trail_monitor` | Kill until +1R → BE → trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
