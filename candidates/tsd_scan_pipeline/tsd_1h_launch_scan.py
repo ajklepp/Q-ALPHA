@@ -136,6 +136,7 @@ def rank_1h_launches(
     """Rank by continuation_score_v1 (EXP-0021); peak hour is bonus only."""
     from tsd_scan_pipeline.universe_tsd import load_polygon_key
     from tsd_scan_pipeline.tsd_social import attach_social_to_rows
+    from tsd_scan_pipeline.tsd_deep_features import attach_deep_features
 
     passed = [r for r in rows if r.get("pass")]
     if attach_social and passed:
@@ -147,12 +148,27 @@ def rank_1h_launches(
                 as_of=now,
                 include_x=False,  # X API off — OpenRouter + Polygon/ST only
                 include_st=True,
+                include_tws=True,
             )
             n_news = sum(1 for r in passed if float(r.get("news_velocity_24h") or 0) > 0)
             n_st = sum(1 for r in passed if int(r.get("st_ok") or 0) == 1)
-            print(f"  Social/news attached: {len(passed)} passers · news>0={n_news} · ST_ok={n_st}")
+            n_tws = sum(1 for r in passed if int(r.get("tws_ok") or 0) == 1)
+            print(
+                f"  Social/news attached: {len(passed)} passers · "
+                f"news>0={n_news} · ST_ok={n_st} · TWS_ok={n_tws}"
+            )
         except Exception as exc:
             print(f"  social attach warn: {exc}")
+
+    if passed:
+        try:
+            key = polygon_key or load_polygon_key()
+            passed = attach_deep_features(passed, api_key=key, as_of=now)
+            n_room = sum(1 for r in passed if abs(float(r.get("dist_20d_high_pct") or 0)) > 1e-6)
+            n_prior = sum(1 for r in passed if float(r.get("ticker_prior_n") or 0) > 0)
+            print(f"  Deep features: room_filled={n_room} prior_filled={n_prior}")
+        except Exception as exc:
+            print(f"  deep features warn: {exc}")
 
     for row in passed:
         enriched = enrich_launch_fields(row)
@@ -166,6 +182,10 @@ def rank_1h_launches(
             "st_msg_24h", "st_bull_ratio", "st_ok",
             "x_posts_24h", "x_sent_lex", "x_ok", "social_missing",
             "guidance_cut", "print", "outlook",
+            "tws_ok", "tws_headline_count",
+            "dist_20d_high_pct", "dist_20d_low_bounce", "dist_20d_low_pct",
+            "vol_ratio_20", "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50",
+            "ticker_prior_n",
         ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
@@ -174,15 +194,17 @@ def rank_1h_launches(
         row["continuation_score"] = enriched2.get("continuation_score")
         row["continuation_score_v0"] = enriched2.get("continuation_score_v0")
         row["combined_rank_score"] = enriched2.get("combined_rank_score")
-        # Keep social fields on row for book / thesis / funnel
         for k in (
             "news_velocity_24h", "news_velocity_72h", "news_headline_count_48h",
             "dilution_flag", "distress_flag", "catalyst_type",
             "st_msg_24h", "st_bull_ratio", "social_missing",
             "x_posts_24h", "x_sent_lex",
+            "tws_ok", "tws_headline_count",
+            "dist_20d_high_pct", "dist_20d_low_bounce", "vol_ratio_20",
+            "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50", "ticker_prior_n",
         ):
-            if k in row or k in merged:
-                row[k] = merged.get(k, row.get(k))
+            if k in merged:
+                row[k] = merged.get(k)
     passed.sort(
         key=lambda r: (-(r.get("combined_rank_score") or 0), r.get("scan_score") or 99),
     )

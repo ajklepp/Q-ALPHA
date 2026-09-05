@@ -240,15 +240,15 @@ def fetch_social_bundle(
     as_of: datetime | None = None,
     include_x: bool | None = None,
     include_st: bool = True,
+    include_tws: bool = True,
+    ib: Any | None = None,
 ) -> dict[str, Any]:
-    """Combine news velocity + StockTwits + optional X. Never raises.
+    """Combine Polygon + optional TWS news + StockTwits + optional X. Never raises.
 
     Note: StockTwits has no historical as_of — use include_st=False for
     backtests / corpus enrich to avoid look-ahead from the live stream.
     """
     if include_x is None:
-        # Default OFF unless X_BEARER_TOKEN set AND OPENROUTER path alone is not enough.
-        # Peak Hour: leave X off; set include_x=True explicitly to enable.
         include_x = False
     out: dict[str, Any] = {
         "social_missing": 0,
@@ -267,6 +267,41 @@ def fetch_social_bundle(
             "distress_flag": 0,
             "unresolved": 0,
             "catalyst_type": "none",
+        })
+
+    if include_tws:
+        try:
+            from tsd_scan_pipeline.tsd_tws_news import fetch_tws_headlines
+
+            tws = fetch_tws_headlines(symbol, ib=ib)
+            out["tws_ok"] = int(tws.get("tws_ok") or 0)
+            out["tws_headline_count"] = float(tws.get("tws_headline_count") or 0)
+            out["tws_providers_hit"] = tws.get("tws_providers_hit") or []
+            out["tws_headlines"] = tws.get("tws_headlines") or []
+            if int(tws.get("dilution_flag") or 0):
+                out["dilution_flag"] = 1
+            if int(tws.get("distress_flag") or 0):
+                out["distress_flag"] = 1
+            tws_n = float(tws.get("tws_headline_count") or 0)
+            if tws_n > 0:
+                out["news_velocity_24h"] = float(out.get("news_velocity_24h") or 0) + min(tws_n, 5.0)
+                out["news_velocity_72h"] = float(out.get("news_velocity_72h") or 0) + tws_n
+                out["news_headline_count_48h"] = float(
+                    out.get("news_headline_count_48h") or 0
+                ) + tws_n
+        except Exception:
+            out.update({
+                "tws_ok": 0,
+                "tws_headline_count": 0.0,
+                "tws_providers_hit": [],
+                "tws_headlines": [],
+            })
+    else:
+        out.update({
+            "tws_ok": 0,
+            "tws_headline_count": 0.0,
+            "tws_providers_hit": [],
+            "tws_headlines": [],
         })
 
     if include_st:
@@ -299,7 +334,13 @@ def fetch_social_bundle(
 
     st_ok = int(out.get("st_ok") or 0)
     x_ok = int(out.get("x_ok") or 0)
-    if st_ok == 0 and x_ok == 0 and float(out.get("news_velocity_24h") or 0) == 0:
+    tws_ok = int(out.get("tws_ok") or 0)
+    if (
+        st_ok == 0
+        and x_ok == 0
+        and tws_ok == 0
+        and float(out.get("news_velocity_24h") or 0) == 0
+    ):
         out["social_missing"] = 1
     return out
 
@@ -311,6 +352,8 @@ def attach_social_to_rows(
     as_of: datetime | None = None,
     include_x: bool | None = None,
     include_st: bool = True,
+    include_tws: bool = True,
+    ib: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Mutate/return rows with social bundle fields (one fetch per symbol)."""
     cache: dict[str, dict[str, Any]] = {}
@@ -327,6 +370,8 @@ def attach_social_to_rows(
                 as_of=as_of,
                 include_x=include_x,
                 include_st=include_st,
+                include_tws=include_tws,
+                ib=ib,
             )
         merged = {**row, **cache[sym]}
         out.append(merged)

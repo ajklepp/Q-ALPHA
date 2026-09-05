@@ -316,15 +316,33 @@ def fetch_news_context(
     *,
     polygon_key: str | None = None,
     summarize: bool = True,
+    include_tws: bool = True,
 ) -> dict[str, Any]:
     """
     Fetch news + optional AI summary AFTER quality pass.
 
-    Context only — never used to veto admission.
+    Polygon + optional TWS headlines. Context only — never used to veto admission.
     """
     sym = symbol.upper()
     key = polygon_key or load_polygon_key()
     headlines = fetch_headlines_48h(sym, key)
+    tws_n = 0
+    dilution = False
+    distress = False
+    if include_tws:
+        try:
+            from tsd_scan_pipeline.tsd_tws_news import fetch_tws_headlines
+
+            tws = fetch_tws_headlines(sym)
+            tws_n = int(float(tws.get("tws_headline_count") or 0))
+            dilution = bool(tws.get("dilution_flag"))
+            distress = bool(tws.get("distress_flag"))
+            for h in tws.get("tws_headlines") or []:
+                if h and h not in headlines:
+                    headlines.append(h)
+        except Exception as exc:
+            print(f"  tws news {sym}: {exc}")
+
     pre_catalyst = len(headlines) == 0
 
     summary = ""
@@ -345,6 +363,10 @@ def fetch_news_context(
     tags_extra: list[str] = []
     if outlook_tag in ("lowered", "withdrawn"):
         tags_extra.append("guidance_cut")
+    if dilution:
+        tags_extra.append("dilution")
+    if distress:
+        tags_extra.append("distress")
 
     return {
         "news_summary": summary,
@@ -352,9 +374,12 @@ def fetch_news_context(
         "sentiment_score": sentiment,
         "pre_catalyst": pre_catalyst,
         "headline_count": len(headlines),
+        "tws_headline_count": tws_n,
         "print": print_tag,
         "outlook": outlook_tag,
         "guidance_cut": outlook_tag in ("lowered", "withdrawn"),
+        "dilution_flag": int(dilution),
+        "distress_flag": int(distress),
         "news_tags": tags_extra,
     }
 

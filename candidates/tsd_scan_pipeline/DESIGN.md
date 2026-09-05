@@ -11,7 +11,8 @@
 | `scheduler.py --tick --live` | Sole entry authority → `tsd_1h_launch_scan` |
 | HTF universe @ 04:30 | Daily pass set for hourly scan |
 | `tsd_watch_queue` + `execute_live_entries` | Admit + BUY |
-| `tsd_social` (Polygon news + StockTwits; X off) | Soft continuation terms + thesis; never hard-vetoes |
+| `tsd_social` (Polygon + TWS news + StockTwits; X off) | Soft continuation terms + thesis; never hard-vetoes |
+| `tsd_deep_features` (20d room/bounce + profile prior) | Fill continuation_score_v1 inputs on passers |
 | `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Headline → print/outlook; ~pennies/day; free optional via env |
 | `tsd_trail_monitor` | Kill until +1R → BE → trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |

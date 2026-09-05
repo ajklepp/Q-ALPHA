@@ -211,6 +211,20 @@ def add_to_watch_queue(
             ),
             "x_posts_24h": float(qh_row.get("x_posts_24h") or cand.get("x_posts_24h") or 0),
             "x_sent_lex": float(qh_row.get("x_sent_lex") or cand.get("x_sent_lex") or 0),
+            "tws_ok": int(qh_row.get("tws_ok") or cand.get("tws_ok") or 0),
+            "tws_headline_count": float(
+                qh_row.get("tws_headline_count") or cand.get("tws_headline_count") or 0
+            ),
+            "dist_20d_high_pct": qh_row.get("dist_20d_high_pct", cand.get("dist_20d_high_pct")),
+            "dist_20d_low_bounce": qh_row.get("dist_20d_low_bounce", cand.get("dist_20d_low_bounce")),
+            "vol_ratio_20": qh_row.get("vol_ratio_20", cand.get("vol_ratio_20")),
+            "ticker_prior_hit1r_rate": qh_row.get(
+                "ticker_prior_hit1r_rate", cand.get("ticker_prior_hit1r_rate")
+            ),
+            "ticker_prior_mfe_p50": qh_row.get(
+                "ticker_prior_mfe_p50", cand.get("ticker_prior_mfe_p50")
+            ),
+            "ticker_prior_n": qh_row.get("ticker_prior_n", cand.get("ticker_prior_n")),
         }
 
         idx = _queue_index(state, sym)
