@@ -247,7 +247,9 @@ def fetch_social_bundle(
     backtests / corpus enrich to avoid look-ahead from the live stream.
     """
     if include_x is None:
-        include_x = bool(_x_bearer())
+        # Default OFF unless X_BEARER_TOKEN set AND OPENROUTER path alone is not enough.
+        # Peak Hour: leave X off; set include_x=True explicitly to enable.
+        include_x = False
     out: dict[str, Any] = {
         "social_missing": 0,
         "guidance_cut": 0,

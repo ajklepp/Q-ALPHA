@@ -1,9 +1,14 @@
 """
-AI catalyst summarization for Q-Alpha morning scanner via OpenRouter.
+AI catalyst summarization for Peak Hour via OpenRouter.
+
+Default: cheap paid model (mistral-nemo) — free :free tiers are often
+rate-limited / poor at structured tags. Override with OPENROUTER_MODEL.
+Optional: OPENROUTER_TRY_FREE=1 tries free models first, then falls back.
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -14,21 +19,97 @@ ROOT = CANDIDATES_DIR.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Default: ~$0.02 / $0.03 per 1M tokens — pennies per scan day.
+DEFAULT_MODEL = "mistralai/mistral-nemo"
+# Free attempts (flaky; only if OPENROUTER_TRY_FREE=1)
+FREE_MODELS = (
+    "inclusionai/ling-3.0-flash-fin:free",
+    "google/gemma-4-31b-it:free",
+    "openrouter/free",
+)
+# Paid fallbacks if primary fails
+PAID_FALLBACKS = (
+    "meta-llama/llama-3.1-8b-instruct",
+    "amazon/nova-micro-v1",
+)
+
+_TAG_RE = re.compile(
+    r"PRINT:\s*(beat|miss|inline|unknown).*OUTLOOK:\s*"
+    r"(raised|maintained|lowered|withdrawn|unknown)",
+    re.I,
+)
+
+
+def _model_chain() -> list[str]:
+    """Ordered models to try. Env OPENROUTER_MODEL pins first choice."""
+    pinned = (os.environ.get("OPENROUTER_MODEL") or "").strip()
+    try_free = (os.environ.get("OPENROUTER_TRY_FREE") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    chain: list[str] = []
+    if pinned:
+        chain.append(pinned)
+    if try_free:
+        chain.extend(FREE_MODELS)
+    if DEFAULT_MODEL not in chain:
+        chain.append(DEFAULT_MODEL)
+    for m in PAID_FALLBACKS:
+        if m not in chain:
+            chain.append(m)
+    # de-dupe preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in chain:
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+def _looks_valid(summary: str) -> bool:
+    if not summary or len(summary) < 8:
+        return False
+    # Reject chain-of-thought dumps from free reasoning models
+    low = summary.lower()
+    if "thinking process" in low or "analyze user input" in low:
+        return False
+    if len(summary) > 280:
+        return False
+    return bool(_TAG_RE.search(summary)) or ("|" in summary and "print" in low)
+
+
+def _call_openrouter(api_key: str, model: str, prompt: str) -> str:
+    response = requests.post(
+        OPENROUTER_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/ajklepp/Q-ALPHA",
+        },
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 80,
+            "temperature": 0.1,
+        },
+        timeout=20,
+    )
+    if response.status_code == 429:
+        raise RuntimeError(f"rate_limited:{model}")
+    response.raise_for_status()
+    result = response.json()
+    msg = (result.get("choices") or [{}])[0].get("message") or {}
+    return str(msg.get("content") or "").strip()
+
 
 def summarize_catalyst(ticker: str, headlines: list[str]) -> str:
     """
     Takes a list of news headlines for a ticker and returns
     a one-sentence AI summary of WHY the stock is gapping.
 
-    Returns format: "EMOJI Type: reason"
-    Examples:
-      "📈 Earnings Beat: Q2 revenue +34% YoY, EPS beat by $0.18, guidance raised"
-      "💊 FDA Approval: NDA approved for lead oncology drug"
-      "🏛️ Contract Win: $45M government contract, 3x quarterly revenue"
-      "🔀 No Catalyst: High short interest, possible technical squeeze"
-      "📰 Analyst: Goldman Sachs upgrade to Buy, PT raised to $55"
-
-    If no headlines: returns "❓ Unknown: No news found"
+    Returns format: "EMOJI Type: reason | PRINT: x | OUTLOOK: y"
     """
     from dotenv import load_dotenv
 
@@ -66,30 +147,24 @@ Reply with ONLY: emoji Type: reason | PRINT: x | OUTLOOK: y
 Example: "📈 Earnings Beat: Q2 revenue surged 45% | PRINT: beat | OUTLOOK: raised"
 """
 
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/ajklepp/Q-ALPHA",
-            },
-            json={
-                "model": "anthropic/claude-3-haiku",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 80,
-                "temperature": 0.1,
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        result = response.json()
-        summary = result["choices"][0]["message"]["content"].strip()
-        return summary
+    last_err: Exception | None = None
+    for model in _model_chain():
+        try:
+            summary = _call_openrouter(api_key, model, prompt)
+            if not _looks_valid(summary):
+                print(f"  catalyst_ai skip bad shape model={model}: {summary[:80]!r}")
+                continue
+            # Normalize to one line
+            summary = " ".join(summary.split())
+            print(f"  catalyst_ai model={model}")
+            return summary
+        except Exception as e:
+            last_err = e
+            print(f"  catalyst_ai fail model={model}: {e}")
+            continue
 
-    except Exception as e:
-        print(f"AI catalyst failed for {ticker}: {e}")
-        return f"📰 News: {headlines[0][:60]}..." if headlines else "❓ Unknown"
+    print(f"AI catalyst failed for {ticker}: {last_err}")
+    return f"📰 News: {headlines[0][:60]}..." if headlines else "❓ Unknown"
 
 
 def get_ticker_headlines(ticker: str, api_key: str) -> list[str]:

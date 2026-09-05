@@ -145,7 +145,8 @@ def rank_1h_launches(
                 passed,
                 api_key=key,
                 as_of=now,
-                include_x=None,  # auto if X_BEARER_TOKEN set
+                include_x=False,  # X API off — OpenRouter + Polygon/ST only
+                include_st=True,
             )
             n_news = sum(1 for r in passed if float(r.get("news_velocity_24h") or 0) > 0)
             n_st = sum(1 for r in passed if int(r.get("st_ok") or 0) == 1)
