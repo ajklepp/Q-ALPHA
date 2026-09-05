@@ -1,6 +1,7 @@
 # EXP-0021 Design — Continuation Ranker
 
-**Status:** Full-HTF bakeoff **PASS** — **live shipped** (hourly :15 through 15:15, 2 slots, continuation_score_v1)  
+**Status:** Full-HTF bakeoff **PASS** — **live shipped** (hourly :15 through 15:15, 2 slots, `continuation_score_v1.1`)  
+**Ship gate:** [`STUDY_SHIP_V11.md`](STUDY_SHIP_V11.md) — v1.1 beats v1 on slot expectancy (0.297 vs 0.285) and OOS; multi-year SMA filter **not** shipped.  
 **App / path:** `experiments/EXP-0021/` + live wire in `candidates/tsd_scan_pipeline/`
 
 ## Problem

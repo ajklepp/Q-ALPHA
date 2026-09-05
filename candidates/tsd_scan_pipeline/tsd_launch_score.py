@@ -62,7 +62,7 @@ BAR_STATE_PTS_V1 = {
     "extended": -20.0,
 }
 RANKER_LIST_LAUNCH_FLOOR = 40.0  # admit if launch>=40 OR scan<=55
-CONTINUATION_SCORE_VERSION = "v1"
+CONTINUATION_SCORE_VERSION = "v1.1"  # ship gate PASS: prior↑ + scan/launch↓ (20d room)
 
 
 def signal_bar_red(row: dict[str, Any]) -> bool:
@@ -218,7 +218,7 @@ def _row_hour(row: dict[str, Any]) -> int | None:
 
 def compute_continuation_score_v1(row: dict[str, Any]) -> float:
     """
-    EXP-0021 live ranker: peak-hour bonus only; soft EXTENSION; quality features.
+    EXP-0021 original live ranker (kept for bakeoff / ablation).
 
     Missing MTF/social fields score as 0 (non-blocking).
     """
@@ -265,7 +265,7 @@ def compute_continuation_score_v1(row: dict[str, Any]) -> float:
     launch = float(row.get("launch_score") or compute_launch_score(row))
     launch_term = 0.25 * launch
     htf = float(row.get("htf_score") or 0.0)
-    htf_term = 0.15 * htf  # keep HTF continuous rank in live score
+    htf_term = 0.15 * htf
 
     scan = float(row.get("scan_score") or 55.0)
     if 25.0 <= scan <= 45.0:
@@ -290,9 +290,100 @@ def compute_continuation_score_v1(row: dict[str, Any]) -> float:
     if scan > LAUNCH_SCAN_MAX:
         score -= 20.0
     if str(row.get("phase") or row.get("phase_3h") or "") == "EXTENSION":
-        score -= 15.0  # soft — not a hard veto
+        score -= 15.0
 
     return round(score, 2)
+
+
+def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
+    """
+    Study-backed ranker for live paper (EXP-0021 deep-edge + ship grid).
+
+    Verified on HTF social corpus vs v1:
+      prior↑ + scan/launch↓ → higher slot expectancy (ship gate PASS).
+
+    Changes vs v1:
+      - prior (ticker hist) upweighted — ablation hurt most when removed
+      - scan + launch downweighted — removing them raised slot expectancy
+      - softer scan>55 pile-on (-10 vs -20)
+      - keep 20d room (blend/52w did not beat this grid)
+    """
+    hour = _row_hour(row)
+    peak = 25.0 if hour is not None and hour in PEAK_HOUR_BONUS_HOURS else 0.0
+    bs = str(row.get("bar_state") or classify_bar_state(row))
+    bar_pts = float(BAR_STATE_PTS_V1.get(bs, 0.0))
+
+    room = float(row.get("dist_20d_high_pct") or 0.0)
+    if room < 0:
+        room_term = -15.0 * _clip01((-room) / 0.05)
+    else:
+        room_term = 20.0 * _clip01(room / 0.15)
+
+    bounce = float(row.get("dist_20d_low_bounce") or 0.0)
+    bounce_term = 15.0 * _clip01(bounce)
+
+    vr = float(row.get("vol_ratio_20") or row.get("vol_ratio") or 1.0)
+    vol_term = 15.0 * _clip01(math.log1p(max(vr, 0.0)) / math.log1p(5.0))
+    if vr < 0.5:
+        vol_term -= 8.0
+
+    prior_hit = float(row.get("ticker_prior_hit1r_rate") or 0.0)
+    prior_mfe = float(row.get("ticker_prior_mfe_p50") or 0.0)
+    hist_term = 16.0 * _clip01(prior_hit) + 18.0 * _clip01(prior_mfe / 0.05)
+
+    news_v = float(
+        row.get("news_velocity_24h")
+        or row.get("news_headline_count_48h")
+        or row.get("headline_count")
+        or 0.0
+    )
+    news_term = 10.0 * _clip01(news_v / 5.0)
+
+    st_msg = float(row.get("st_msg_24h") or 0.0)
+    st_bull = float(row.get("st_bull_ratio") or 0.5)
+    st_term = 8.0 * _clip01(st_bull) if st_msg > 0 else 0.0
+
+    x_sent = float(row.get("x_sent_lex") or 0.0)
+    x_term = (
+        5.0 * _clip01((x_sent + 1.0) / 2.0) if not row.get("social_missing") else 0.0
+    )
+
+    launch = float(row.get("launch_score") or compute_launch_score(row))
+    launch_term = 0.10 * launch
+    htf = float(row.get("htf_score") or 0.0)
+    htf_term = 0.15 * htf
+
+    scan = float(row.get("scan_score") or 55.0)
+    if 25.0 <= scan <= 45.0:
+        scan_term = 5.0
+    elif scan <= 55.0:
+        scan_term = 2.0
+    else:
+        scan_term = -5.0
+
+    score = (
+        peak + bar_pts + room_term + bounce_term + vol_term + hist_term
+        + news_term + st_term + x_term + launch_term + htf_term + scan_term
+    )
+
+    outlook = str(row.get("outlook") or "").lower()
+    if row.get("guidance_cut") or outlook in ("lowered", "withdrawn"):
+        score -= GUIDANCE_CUT_PENALTY
+    if row.get("dilution_flag"):
+        score -= 30.0
+    if row.get("distress_flag"):
+        score -= 40.0
+    if scan > LAUNCH_SCAN_MAX:
+        score -= 10.0  # was -20 in v1
+    if str(row.get("phase") or row.get("phase_3h") or "") == "EXTENSION":
+        score -= 15.0
+
+    return round(score, 2)
+
+
+def compute_continuation_score(row: dict[str, Any]) -> float:
+    """Live ranker entrypoint — currently v1.1."""
+    return compute_continuation_score_v1_1(row)
 
 
 def is_continuation_list_candidate(row: dict[str, Any]) -> bool:
@@ -328,7 +419,8 @@ def enrich_launch_fields(row: dict[str, Any]) -> dict[str, Any]:
     htf = float(out.get("htf_score") or 0)
     out["htf_score"] = htf
     out["continuation_score_v0"] = compute_continuation_score_v0(out)
-    out["continuation_score"] = compute_continuation_score_v1(out)
+    out["continuation_score_v1"] = compute_continuation_score_v1(out)
+    out["continuation_score"] = compute_continuation_score_v1_1(out)
     out["continuation_score_version"] = CONTINUATION_SCORE_VERSION
     out["combined_rank_score"] = out["continuation_score"]
     out["entry_score"] = out["combined_rank_score"]

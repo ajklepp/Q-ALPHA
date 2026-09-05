@@ -273,6 +273,7 @@ def room_bounce_from_daily(
     if signal_close <= 0:
         return {
             "dist_20d_high_pct": 0.0,
+            "dist_52w_high_pct": 0.0,
             "dist_20d_low_bounce": 0.0,
             "dist_20d_low_pct": 0.0,
             "vol_ratio_20": 1.0,
@@ -326,8 +327,10 @@ def room_bounce_from_daily(
     vols = [float(b.get("v") or 0) for b in results]
     high20 = max(highs[-20:])
     low20 = min(lows[-20:])
+    high52 = max(highs[-min(252, len(highs)):])
     dist_low = (signal_close - low20) / signal_close
     room = (high20 - signal_close) / signal_close
+    room52 = (high52 - signal_close) / signal_close
     bounce = _clip01(1.0 - dist_low / 0.08) if dist_low >= 0 else 0.0
     avg_vol = sum(vols[-20:]) / 20.0 if vols else 0.0
     last_vol = vols[-1] if vols else 0.0
@@ -335,6 +338,7 @@ def room_bounce_from_daily(
 
     out = {
         "dist_20d_high_pct": float(room),
+        "dist_52w_high_pct": float(room52),
         "dist_20d_low_pct": float(dist_low),
         "dist_20d_low_bounce": float(bounce),
         "vol_ratio_20": float(vol_ratio),

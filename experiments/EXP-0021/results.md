@@ -59,9 +59,20 @@ Scan clock: hourly :15 · slots=2 · Social: StockTwits+news; X=off
 
 ## Live promotion
 
-**SHIPPED:** hourly :15 for **05–15 ET**, 2-slot cap, `continuation_score_v1`.
+**SHIPPED:** hourly :15 for **05–15 ET**, 2-slot cap, `continuation_score_v1.1`
+(was v1; promoted 2026-09-05 after ship gate — see [`STUDY_SHIP_V11.md`](STUDY_SHIP_V11.md)).
 `ALLOWED_HOURS={5,6,7,8,9,10,11,12,13,14,15}`. Premarket 05/06/08/09 from hitch study.
 No 04 (empty label); no evening entry clock.
+
+### v1.1 ship deltas (taken slots, same corpus)
+
+| | WR | Exp R | Capture | OOS exp |
+|---|---:|---:|---:|---:|
+| v1 | 10.0% | 0.285 | 43.3% | 0.335 |
+| **v1.1** | **10.4%** | **0.297** | 42.8% | **0.357** |
+
+Knobs: prior_hit×16 / prior_mfe×18, launch×0.10, scan sweet/mid/hot 5/2/−5, scan>55 −10 (not −20).  
+**Not shipped:** multi-year SMA200 admit filter (hurt exp/capture). News stays soft-rank; dilution soft penalty.
 
 ## Follow-on deep-edge studies (2026-09-05)
 
