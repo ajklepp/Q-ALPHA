@@ -166,8 +166,11 @@ def rank_1h_launches(
             passed = attach_deep_features(passed, api_key=key, as_of=now)
             n_room = sum(1 for r in passed if abs(float(r.get("dist_20d_high_pct") or 0)) > 1e-6)
             n_prior = sum(1 for r in passed if float(r.get("ticker_prior_n") or 0) > 0)
-            print(f"  Deep features: room_filled={n_room} prior_filled={n_prior}")
-        except Exception as exc:
+            n_path = sum(1 for r in passed if float(r.get("ticker_prior_source") or 0) >= 2.0)
+            print(
+                f"  Deep features: room_filled={n_room} prior_filled={n_prior} "
+                f"path_prior={n_path}"
+            )        except Exception as exc:
             print(f"  deep features warn: {exc}")
 
     for row in passed:

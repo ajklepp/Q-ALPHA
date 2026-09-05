@@ -225,6 +225,9 @@ def add_to_watch_queue(
                 "ticker_prior_mfe_p50", cand.get("ticker_prior_mfe_p50")
             ),
             "ticker_prior_n": qh_row.get("ticker_prior_n", cand.get("ticker_prior_n")),
+            "ticker_prior_source": qh_row.get(
+                "ticker_prior_source", cand.get("ticker_prior_source")
+            ),
         }
 
         idx = _queue_index(state, sym)
