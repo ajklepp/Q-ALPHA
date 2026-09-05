@@ -1,110 +1,185 @@
 """
-Dashboard Weekly Review — public scoreboard only (no strategy docs).
+Dashboard Weekly Review — on-the-go results from Supabase (no local funnel / no process detail).
 """
 from __future__ import annotations
 
-import json
-import sys
-from datetime import datetime
-from pathlib import Path
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
+import pandas as pd
 import pytz
 import streamlit as st
 
-ROOT = Path(__file__).resolve().parent
-CANDIDATES = ROOT / "candidates"
-if str(CANDIDATES) not in sys.path:
-    sys.path.insert(0, str(CANDIDATES))
+from dashboard_theme import section_header
 
 ET = pytz.timezone("America/New_York")
-FUNNEL_DIR = CANDIDATES / "tsd_scan_pipeline" / "results" / "peak_hour_scans"
 
 
-def _latest_weekly_files() -> tuple[Path | None, Path | None]:
-    """Newest php_weekly_*.md / .json under peak_hour_scans."""
-    if not FUNNEL_DIR.exists():
-        return None, None
-    mds = sorted(FUNNEL_DIR.glob("php_weekly_*.md"), reverse=True)
-    js = sorted(FUNNEL_DIR.glob("php_weekly_*.json"), reverse=True)
-    return (mds[0] if mds else None), (js[0] if js else None)
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        v = float(x)
+        return v if v == v else default  # NaN check
+    except (TypeError, ValueError):
+        return default
 
 
-def tab_weekly_research() -> None:
-    """Public weekly scoreboard — taken / skipped / outcomes only."""
-    st.subheader("Weekly Review")
-    st.caption("What ran · what we took · wins vs losses — no strategy detail.")
-
-    days = st.selectbox("Window (days)", [7, 14, 30], index=0)
-    rebuild = st.button("Refresh", type="primary")
-
-    card: dict[str, Any] | None = None
-    md_path, json_path = _latest_weekly_files()
-
-    if rebuild:
+def _parse_et_date(val: Any) -> datetime | None:
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        cleaned = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(cleaned[:26] if "T" in cleaned else cleaned)
+        if dt.tzinfo is None:
+            dt = ET.localize(dt)
+        return dt.astimezone(ET)
+    except (ValueError, TypeError):
         try:
-            from uts_v2.php_weekly_funnel import build_weekly_funnel, format_weekly_md
+            return ET.localize(datetime.strptime(s[:10], "%Y-%m-%d"))
+        except (ValueError, TypeError):
+            return None
 
-            card = build_weekly_funnel(days=int(days))
-            md_text = format_weekly_md(card)
-            FUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(ET).strftime("%Y%m%d")
-            out_md = FUNNEL_DIR / f"php_weekly_{stamp}.md"
-            out_js = FUNNEL_DIR / f"php_weekly_{stamp}.json"
-            out_md.write_text(md_text, encoding="utf-8")
-            out_js.write_text(json.dumps(card, indent=2, default=str), encoding="utf-8")
-            st.success("Updated.")
-            json_path = out_js
-        except Exception as exc:
-            st.error(f"Refresh failed: {exc}")
 
-    if card is None and json_path and json_path.exists():
-        try:
-            card = json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception:
-            card = None
-    if card is None and not rebuild:
-        try:
-            from uts_v2.php_weekly_funnel import build_weekly_funnel
+def _ran_up_pct(entry: float, peak: float) -> float | None:
+    if entry <= 0 or peak <= 0:
+        return None
+    return (peak / entry - 1.0) * 100.0
 
-            card = build_weekly_funnel(days=int(days))
-        except Exception as exc:
-            st.warning(f"No weekly data yet. ({exc})")
 
-    if not card:
-        st.info("No weekly data yet.")
+def _in_window(dt: datetime | None, start: datetime) -> bool:
+    return dt is not None and dt >= start
+
+
+def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
+    """
+    Mobile-friendly weekly scoreboard from cloud book data.
+
+    Shows results only — never scores, gates, hours, reject reasons, or research docs.
+    """
+    days = st.selectbox("Last", [7, 14, 30], index=0, format_func=lambda d: f"{d} days")
+    now = datetime.now(ET)
+    start = now - timedelta(days=int(days))
+
+    closed: list[dict] = []
+    opens: list[dict] = []
+    pool: dict = {}
+    err: str | None = None
+    try:
+        sync = get_sync()
+        closed = list(sync.get_tsd_closed_legs() or [])
+        opens = list(sync.get_tsd_positions(status="OPEN") or [])
+        pool = sync.get_latest_tsd_pool() or {}
+    except Exception as exc:
+        err = str(exc)
+
+    if err:
+        st.warning("Could not load book data.")
+        st.caption(err)
         return
 
-    entered = list(card.get("symbols_entered") or [])
-    skipped_n = int(card.get("total_skipped") or 0)
-    if not skipped_n:
-        # Derive from launches − entered when funnel omits explicit skip count
-        launches = int(card.get("total_launches") or 0)
-        skipped_n = max(0, launches - len(entered))
+    # Closed in window (by close time, else entry date)
+    closed_w: list[dict] = []
+    for r in closed:
+        dt = _parse_et_date(r.get("closed_at")) or _parse_et_date(r.get("entry_date"))
+        if _in_window(dt, start):
+            closed_w.append(r)
 
-    outcomes = list(card.get("outcomes") or [])
-    wins = sum(1 for o in outcomes if float(o.get("pnl_dollars") or o.get("pnl") or 0) > 0)
-    losses = sum(1 for o in outcomes if float(o.get("pnl_dollars") or o.get("pnl") or 0) <= 0)
+    wins = [r for r in closed_w if _safe_float(r.get("pnl_dollars")) > 0]
+    losses = [r for r in closed_w if _safe_float(r.get("pnl_dollars")) <= 0]
+    pnl_closed = sum(_safe_float(r.get("pnl_dollars")) for r in closed_w)
+    pnl_open = sum(_safe_float(r.get("pnl_dollars")) for r in opens)
+    wr = (len(wins) / len(closed_w)) if closed_w else None
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Taken", len(entered) or int(card.get("total_entered") or 0))
-    m2.metric("Skipped", skipped_n)
-    m3.metric("Wins", wins if outcomes else "—")
-    m4.metric("Losses", losses if outcomes else "—")
+    avg_win = (sum(_safe_float(r.get("pnl_dollars")) for r in wins) / len(wins)) if wins else None
+    avg_loss = (sum(_safe_float(r.get("pnl_dollars")) for r in losses) / len(losses)) if losses else None
 
-    if entered:
-        st.write("**Taken:** " + ", ".join(entered))
+    # Best run-up among closed + open
+    best_run: tuple[str, float] | None = None
+    for r in list(closed_w) + list(opens):
+        entry = _safe_float(r.get("entry_price"))
+        peak = _safe_float(r.get("peak_high"), float("nan"))
+        mfe = r.get("mfe_pct")
+        if mfe is not None:
+            pct = _safe_float(mfe)
+        else:
+            pct_opt = _ran_up_pct(entry, peak)
+            pct = pct_opt if pct_opt is not None else float("-inf")
+        if pct == float("-inf"):
+            continue
+        sym = str(r.get("symbol") or "").upper()
+        if best_run is None or pct > best_run[1]:
+            best_run = (sym, pct)
 
-    if outcomes:
-        st.write("**Results**")
-        rows = []
-        for o in outcomes:
-            pnl = float(o.get("pnl_dollars") or o.get("pnl") or 0)
-            peak = o.get("mfe_pct") or o.get("ran_up_pct") or o.get("peak_pct")
-            rows.append({
-                "Symbol": o.get("symbol") or o.get("ticker") or "—",
-                "Result": "Win" if pnl > 0 else "Loss",
-                "P&L": f"${pnl:+.2f}",
-                "Ran up": f"{float(peak):+.1f}%" if peak is not None else "—",
-            })
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+    cash = _safe_float(pool.get("pool"), 3000.0)
+    starting = _safe_float(pool.get("starting_pool"), 3000.0)
+    in_mkt = sum(
+        _safe_float(r.get("current_price")) * int(_safe_float(r.get("shares")))
+        for r in opens
+    )
+    equity = cash + in_mkt
+    total_pnl = equity - starting
+
+    with st.container(border=True):
+        section_header("Week", f"Last {int(days)} days")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("P&L (closed)", f"${pnl_closed:+,.2f}")
+        c2.metric("Wins", str(len(wins)))
+        c3.metric("Losses", str(len(losses)))
+        c4.metric("Win rate", f"{wr:.0%}" if wr is not None else "—")
+
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Taken", str(len(closed_w) + len(opens)))
+        d2.metric("Still open", str(len(opens)))
+        d3.metric("Avg win", f"${avg_win:+,.2f}" if avg_win is not None else "—")
+        d4.metric("Avg loss", f"${avg_loss:+,.2f}" if avg_loss is not None else "—")
+
+        e1, e2, e3 = st.columns(3)
+        e1.metric("Book equity", f"${equity:,.2f}")
+        e2.metric("Book P&L", f"${total_pnl:+,.2f}")
+        if best_run:
+            e3.metric("Best run", f"{best_run[0]} {best_run[1]:+.1f}%")
+        else:
+            e3.metric("Best run", "—")
+        if opens:
+            st.caption(f"Open MTM {pnl_open:+,.2f}")
+
+    rows: list[dict[str, str]] = []
+    for r in opens:
+        entry = _safe_float(r.get("entry_price"))
+        peak = _safe_float(r.get("peak_high"), float("nan"))
+        ran = _ran_up_pct(entry, peak)
+        rows.append({
+            "Symbol": str(r.get("symbol") or "").upper(),
+            "Status": "Open",
+            "P&L": f"${_safe_float(r.get('pnl_dollars')):+.2f}",
+            "Ran up": f"{ran:+.1f}%" if ran is not None else "—",
+        })
+    for r in sorted(
+        closed_w,
+        key=lambda x: str(x.get("closed_at") or x.get("entry_date") or ""),
+        reverse=True,
+    ):
+        entry = _safe_float(r.get("entry_price"))
+        peak = _safe_float(r.get("peak_high"), float("nan"))
+        ran = _ran_up_pct(entry, peak)
+        if r.get("mfe_pct") is not None:
+            ran = _safe_float(r.get("mfe_pct"))
+        pnl = _safe_float(r.get("pnl_dollars"))
+        rows.append({
+            "Symbol": str(r.get("symbol") or "").upper(),
+            "Status": "Win" if pnl > 0 else "Loss",
+            "P&L": f"${pnl:+.2f}",
+            "Ran up": f"{ran:+.1f}%" if ran is not None else "—",
+        })
+
+    with st.container(border=True):
+        section_header("Trades", "")
+        if not rows:
+            st.info("No trades in this window yet.")
+        else:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)

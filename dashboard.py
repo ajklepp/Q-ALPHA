@@ -2240,7 +2240,7 @@ def main() -> None:
     with tab6:
         from dashboard_weekly_research import tab_weekly_research
 
-        tab_weekly_research()
+        tab_weekly_research(get_sync)
 
     render_footer()
 

@@ -525,48 +525,47 @@ def render_live_status_tab(
     closed_stats = tsd_closed_stats(tsd_closed)
 
     with st.container(border=True):
-        section_header("Scoreboard", "Wins · losses · equity")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        with col1:
-            st.metric("Equity", f"${total_equity:,.2f}")
-        with col2:
-            st.metric(
-                "Total P&L",
-                f"${total_pnl:+,.2f}",
-                f"{total_pnl_pct:+.1f}%",
-            )
-        with col3:
-            st.metric("Wins", str(closed_stats["winners"]))
-        with col4:
-            st.metric("Losses", str(closed_stats["losers"]))
-        with col5:
+        section_header("Scoreboard", "")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Equity", f"${total_equity:,.2f}")
+        c2.metric(
+            "P&L",
+            f"${total_pnl:+,.2f}",
+            f"{total_pnl_pct:+.1f}%",
+        )
+        c3.metric("Wins", str(closed_stats["winners"]))
+        c4.metric("Losses", str(closed_stats["losers"]))
+
+        d1, d2, d3 = st.columns(3)
+        with d1:
             if closed_stats["total"] and closed_stats["win_rate"] is not None:
                 st.metric("Win rate", f"{closed_stats['win_rate']:.0%}")
             else:
                 st.metric("Win rate", "—")
-        with col6:
+        with d2:
             st.metric("Open", str(open_names))
+        with d3:
+            st.metric("Cash", f"${cash:,.2f}")
         st.caption(
-            f"Cash ${cash:,.2f} · unrealized ${unrealized_pnl:+,.2f} · "
-            f"realized ${realized_pnl:+,.2f} · {closed_stats['total']} closed"
+            f"Unrealized ${unrealized_pnl:+,.2f} · realized ${realized_pnl:+,.2f}"
         )
 
     with st.container(border=True):
-        section_header("Today", "Taken vs skipped")
+        section_header("Today", "")
         board_rows, fallback_cap = _build_peak_hour_launch_board(
             tsd_queue, tsd_rows, tsd_watch,
         )
         if tsd_err and not board_rows:
             st.caption(tsd_err)
         elif not board_rows:
-            st.info("No names yet today.")
+            st.info("Nothing yet today.")
         else:
             if fallback_cap:
                 st.caption(fallback_cap)
             st.dataframe(pd.DataFrame(board_rows), hide_index=True, use_container_width=True)
 
     with st.container(border=True):
-        section_header("Open", "Live positions")
+        section_header("Open", "")
         open_rows = list(tsd_rows)
         open_fallback = False
         if not open_rows:
@@ -653,7 +652,7 @@ def render_tsd_trade_log(
         err = str(exc)
 
     with st.container(border=True):
-        section_header("Trade Log", "Closed trades")
+        section_header("Trade Log", "")
         if err:
             st.caption(f"Closed legs unavailable: {err}")
         elif not closed:
@@ -701,7 +700,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
         err = str(exc)
 
     with st.container(border=True):
-        section_header("Performance", "Wins · losses · equity")
+        section_header("Performance", "")
         if err:
             st.caption(f"Performance unavailable: {err}")
             return
@@ -717,7 +716,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             s4.metric("Win rate", "—")
 
     with st.container(border=True):
-        section_header("Equity", "Pool over time")
+        section_header("Equity", "")
         if pool_history:
             hist_df = pd.DataFrame(pool_history)
             dates = pd.to_datetime(hist_df["snapshot_date"])
@@ -752,7 +751,7 @@ def render_tsd_performance(get_sync: Callable[..., Any]) -> None:
             st.info("No equity history yet.")
 
     with st.container(border=True):
-        section_header("P&L per trade", "Closed only")
+        section_header("P&L per trade", "")
         if closed:
             plot_df = pd.DataFrame(closed)
             plot_df["label"] = (
