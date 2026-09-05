@@ -449,6 +449,33 @@ def _render_gap_open_card(
     st.divider()
 
 
+def _local_thesis_by_symbol() -> dict[str, dict]:
+    """Map SYMBOL -> thesis from local book (Cloud may lack thesis column until SQL)."""
+    out: dict[str, dict] = {}
+    try:
+        import json
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from state_paths import state_path
+
+        book = json.loads(state_path("tsd_book_state.json").read_text(encoding="utf-8"))
+        for pos in book.get("positions") or []:
+            sym = str(pos.get("symbol") or "").upper()
+            for leg in pos.get("legs") or []:
+                th = leg.get("thesis")
+                if sym and isinstance(th, dict):
+                    out[sym] = th
+                    break
+    except Exception:
+        pass
+    return out
+
+
 def _render_tsd_open_card(row: dict) -> None:
     """Public open-leg card — price / P&L / ran-up only (no stop-layer detail)."""
     symbol = str(row.get("symbol") or "")
@@ -470,6 +497,13 @@ def _render_tsd_open_card(row: dict) -> None:
         st.metric("P&L", f"${pnl_dollars:+.2f}")
     with c4:
         st.metric("Ran up", ran)
+
+    from dashboard_thesis import render_thesis_expander
+
+    thesis = row.get("thesis")
+    if not isinstance(thesis, dict):
+        thesis = _local_thesis_by_symbol().get(str(symbol).upper())
+    render_thesis_expander(thesis)
 
     hhmm = _updated_hhmm_et(row.get("last_updated"))
     st.caption(f"Updated: {hhmm} ET" if hhmm else "Updated: —")

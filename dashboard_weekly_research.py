@@ -12,6 +12,7 @@ import pytz
 import streamlit as st
 
 from dashboard_theme import section_header
+from dashboard_thesis import render_thesis_expander
 
 ET = pytz.timezone("America/New_York")
 
@@ -71,6 +72,32 @@ def _local_missed(days: int) -> list[dict[str, Any]]:
         return []
 
 
+def _local_book_thesis_map() -> dict[str, dict]:
+    try:
+        import json
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from state_paths import state_path
+
+        book = json.loads(state_path("tsd_book_state.json").read_text(encoding="utf-8"))
+        out: dict[str, dict] = {}
+        for pos in book.get("positions") or []:
+            sym = str(pos.get("symbol") or "").upper()
+            for leg in pos.get("legs") or []:
+                th = leg.get("thesis")
+                if sym and isinstance(th, dict):
+                    out[sym] = th
+                    break
+        return out
+    except Exception:
+        return {}
+
+
 def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
     """Weekly scoreboard + missed runners for on-the-go review."""
     days = st.selectbox("Last", [7, 14, 30], index=0, format_func=lambda d: f"{d} days")
@@ -98,6 +125,18 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
 
     if not missed:
         missed = _local_missed(int(days))
+
+    local_thesis = _local_book_thesis_map()
+    for r in opens:
+        if not isinstance(r.get("thesis"), dict):
+            th = local_thesis.get(str(r.get("symbol") or "").upper())
+            if th:
+                r["thesis"] = th
+    for r in closed:
+        if not isinstance(r.get("thesis"), dict):
+            th = local_thesis.get(str(r.get("symbol") or "").upper())
+            if th:
+                r["thesis"] = th
 
     closed_w: list[dict] = []
     for r in closed:
@@ -172,18 +211,27 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
                     "Ran up": f"{_safe_float(ran):+.1f}%" if ran is not None else "—",
                 })
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            for m in missed:
+                sym = str(m.get("symbol") or "").upper()
+                day = str(m.get("signal_day") or "")[:10]
+                if m.get("thesis"):
+                    render_thesis_expander(
+                        m.get("thesis"),
+                        label=f"Thesis · {sym}" + (f" · {day}" if day else ""),
+                    )
 
     # --- Taken ---
-    trade_rows: list[dict[str, str]] = []
+    taken_cards: list[dict[str, Any]] = []
     for r in opens:
         entry = _safe_float(r.get("entry_price"))
         peak = _safe_float(r.get("peak_high"), float("nan"))
         ran = _ran_up_pct(entry, peak)
-        trade_rows.append({
+        taken_cards.append({
             "Symbol": str(r.get("symbol") or "").upper(),
             "Status": "Open",
             "P&L": f"${_safe_float(r.get('pnl_dollars')):+.2f}",
             "Ran up": f"{ran:+.1f}%" if ran is not None else "—",
+            "thesis": r.get("thesis"),
         })
     for r in sorted(
         closed_w,
@@ -196,16 +244,27 @@ def tab_weekly_research(get_sync: Callable[..., Any]) -> None:
         if r.get("mfe_pct") is not None:
             ran = _safe_float(r.get("mfe_pct"))
         pnl = _safe_float(r.get("pnl_dollars"))
-        trade_rows.append({
+        taken_cards.append({
             "Symbol": str(r.get("symbol") or "").upper(),
             "Status": "Win" if pnl > 0 else "Loss",
             "P&L": f"${pnl:+.2f}",
             "Ran up": f"{ran:+.1f}%" if ran is not None else "—",
+            "thesis": r.get("thesis"),
         })
 
     with st.container(border=True):
         section_header("Taken", "")
-        if not trade_rows:
+        if not taken_cards:
             st.info("No taken trades in this window.")
         else:
-            st.dataframe(pd.DataFrame(trade_rows), hide_index=True, use_container_width=True)
+            show = [
+                {k: v for k, v in card.items() if k != "thesis"}
+                for card in taken_cards
+            ]
+            st.dataframe(pd.DataFrame(show), hide_index=True, use_container_width=True)
+            for card in taken_cards:
+                if card.get("thesis"):
+                    render_thesis_expander(
+                        card.get("thesis"),
+                        label=f"Thesis · {card.get('Symbol')} · {card.get('Status')}",
+                    )

@@ -210,10 +210,24 @@ def record_entry(
     print_tag: str | None = None,
     outlook: str | None = None,
     structure_level: float | None = None,
+    thesis: dict[str, Any] | None = None,
+    launch_score: float | None = None,
+    phase: str | None = None,
+    pre_catalyst: bool | None = None,
+    buy_signal: bool | None = None,
+    early_bull: bool | None = None,
+    htf_close_above_sma50: bool | None = None,
+    htf_sma20_rising: bool | None = None,
+    htf_range_20d_pct: float | None = None,
+    analog_win_rate: float | None = None,
+    analog_count: int | None = None,
+    news_headline_count_48h: float | None = None,
+    dollar_vol_1h: float | None = None,
 ) -> dict[str, Any]:
     """Book a filled entry into TSD state."""
     from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
     from tsd_scan_pipeline.tsd_trail import init_trail_state
+    from tsd_scan_pipeline.trade_thesis import build_trade_thesis
 
     sym = symbol.upper()
     pos = _position(state, sym)
@@ -241,11 +255,26 @@ def record_entry(
         "print": print_tag,
         "outlook": outlook,
         "structure_level": structure_level,  # research only — not broker kill
+        "launch_score": launch_score,
+        "phase": phase,
+        "pre_catalyst": pre_catalyst,
+        "buy_signal": buy_signal,
+        "early_bull": early_bull,
+        "htf_close_above_sma50": htf_close_above_sma50,
+        "htf_sma20_rising": htf_sma20_rising,
+        "htf_range_20d_pct": htf_range_20d_pct,
+        "analog_win_rate": analog_win_rate,
+        "analog_count": analog_count,
+        "news_headline_count_48h": news_headline_count_48h,
+        "dollar_vol_1h": dollar_vol_1h,
         "status": "OPEN",
         "trail": trail,
         "exits": [],
         **init_leg_session_fields(session),  # type: ignore[arg-type]
     }
+    if thesis is None:
+        thesis = build_trade_thesis({**leg, "symbol": sym, "htf_1h_close": entry_price}, outcome="TAKEN")
+    leg["thesis"] = thesis
     if pos is None:
         state.setdefault("positions", []).append(
             {

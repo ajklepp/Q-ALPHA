@@ -189,6 +189,7 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "phase": leg.get("phase"),
                     "pre_catalyst": bool(leg.get("pre_catalyst")),
                     "mfe_r": mfe_r_val,
+                    "thesis": leg.get("thesis"),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                 }
             )
@@ -257,6 +258,7 @@ def flatten_closed_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "scan_score": scan_score,
                     "launch_score": _finite(leg.get("launch_score")),
                     "phase": leg.get("phase"),
+                    "thesis": leg.get("thesis"),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                 }
             )

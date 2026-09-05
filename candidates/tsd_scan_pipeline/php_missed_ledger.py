@@ -86,6 +86,16 @@ def record_scan_outcomes(
         if prev and prev.get("outcome") == "TAKEN":
             # Never demote a fill to missed same day
             continue
+        try:
+            from tsd_scan_pipeline.trade_thesis import build_trade_thesis
+
+            thesis = build_trade_thesis(
+                {**r, "symbol": sym, "ref_price": ref_f},
+                outcome=outcome,
+                asof=when,
+            )
+        except Exception:
+            thesis = prev.get("thesis") if prev else None
         row = {
             "symbol": sym,
             "signal_at": signal_at,
@@ -95,6 +105,7 @@ def record_scan_outcomes(
             "ran_up_pct": prev.get("ran_up_pct") if prev else None,
             "outcome": outcome,
             "marked_at": prev.get("marked_at") if prev else None,
+            "thesis": thesis if thesis is not None else (prev.get("thesis") if prev else None),
         }
         by_key[key] = row
         n += 1

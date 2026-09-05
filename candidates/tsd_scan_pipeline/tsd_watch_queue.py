@@ -283,6 +283,18 @@ def execute_live_entries(
             print_tag=cand.get("print"),
             outlook=cand.get("outlook"),
             structure_level=cand.get("structure_level"),
+            launch_score=float(cand.get("launch_score") or 0) or None,
+            phase=cand.get("phase") or cand.get("phase_3h"),
+            pre_catalyst=cand.get("pre_catalyst"),
+            buy_signal=cand.get("buy_signal") or cand.get("htf_1h_buy_signal"),
+            early_bull=cand.get("early_bull"),
+            htf_close_above_sma50=cand.get("htf_close_above_sma50"),
+            htf_sma20_rising=cand.get("htf_sma20_rising"),
+            htf_range_20d_pct=cand.get("htf_range_20d_pct"),
+            analog_win_rate=cand.get("analog_win_rate"),
+            analog_count=cand.get("analog_count"),
+            news_headline_count_48h=cand.get("news_headline_count_48h"),
+            dollar_vol_1h=cand.get("dollar_vol_1h"),
         )
         any_fill = True
         results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})

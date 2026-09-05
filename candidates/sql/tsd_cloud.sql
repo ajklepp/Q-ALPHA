@@ -49,6 +49,7 @@ ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS pre_catalyst        BOOLEAN D
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS mfe_r               NUMERIC;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS kill_source         TEXT;
 ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS bar_state           TEXT;
+ALTER TABLE tsd_positions ADD COLUMN IF NOT EXISTS thesis              JSONB;
 
 ALTER TABLE tsd_positions DROP CONSTRAINT IF EXISTS tsd_positions_symbol_leg_opened_at_key;
 ALTER TABLE tsd_positions ADD CONSTRAINT tsd_positions_symbol_leg_opened_at_key
@@ -161,6 +162,7 @@ CREATE TABLE IF NOT EXISTS tsd_closed_legs (
 ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS launch_score   NUMERIC;
 ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS phase          TEXT;
 ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS exit_layer     TEXT;
+ALTER TABLE tsd_closed_legs ADD COLUMN IF NOT EXISTS thesis         JSONB;
 
 CREATE INDEX IF NOT EXISTS tsd_closed_legs_closed_at_idx ON tsd_closed_legs (closed_at DESC);
 
@@ -176,6 +178,7 @@ CREATE TABLE IF NOT EXISTS tsd_missed_moves (
     ran_up_pct      NUMERIC,
     outcome         TEXT DEFAULT 'MISSED',
     marked_at       TIMESTAMPTZ,
+    thesis          JSONB,
     last_updated    TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (symbol, signal_day)
 );

@@ -72,6 +72,43 @@ TRADE_FIELDS = (
     "last_updated",
 )
 
+TSD_POSITION_FIELDS = (
+    "symbol",
+    "entry_date",
+    "leg_opened_at",
+    "entry_price",
+    "shares",
+    "kill_price",
+    "current_price",
+    "pnl_dollars",
+    "pnl_pct",
+    "status",
+    "last_bar_time",
+    "scan_score",
+    "peak_high",
+    "kill_pct",
+    "trail_pct",
+    "trading_day",
+    "t4_only",
+    "tranche_summary",
+    "structure_stop",
+    "rth_armed",
+    "structure_stop_reason",
+    "breakeven_locked",
+    "one_r_locked",
+    "tranche_json",
+    "t1_trigger_price",
+    "next_trail_stop",
+    "launch_score",
+    "phase",
+    "pre_catalyst",
+    "mfe_r",
+    "kill_source",
+    "bar_state",
+    "thesis",
+    "last_updated",
+)
+
 TSD_MISSED_MOVE_FIELDS = (
     "symbol",
     "signal_day",
@@ -81,6 +118,7 @@ TSD_MISSED_MOVE_FIELDS = (
     "ran_up_pct",
     "outcome",
     "marked_at",
+    "thesis",
     "last_updated",
 )
 
@@ -99,6 +137,7 @@ TSD_CLOSED_LEG_FIELDS = (
     "scan_score",
     "launch_score",
     "phase",
+    "thesis",
     "last_updated",
 )
 

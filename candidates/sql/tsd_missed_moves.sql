@@ -10,9 +10,12 @@ CREATE TABLE IF NOT EXISTS tsd_missed_moves (
     ran_up_pct      NUMERIC,
     outcome         TEXT DEFAULT 'MISSED',
     marked_at       TIMESTAMPTZ,
+    thesis          JSONB,
     last_updated    TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (symbol, signal_day)
 );
+
+ALTER TABLE tsd_missed_moves ADD COLUMN IF NOT EXISTS thesis JSONB;
 
 CREATE INDEX IF NOT EXISTS tsd_missed_moves_day_idx ON tsd_missed_moves (signal_day DESC);
 CREATE INDEX IF NOT EXISTS tsd_missed_moves_ran_idx ON tsd_missed_moves (ran_up_pct DESC NULLS LAST);
