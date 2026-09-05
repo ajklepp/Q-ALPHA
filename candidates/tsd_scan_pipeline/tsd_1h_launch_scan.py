@@ -188,7 +188,7 @@ def rank_1h_launches(
             "tws_ok", "tws_headline_count",
             "dist_20d_high_pct", "dist_20d_low_bounce", "dist_20d_low_pct",
             "vol_ratio_20", "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50",
-            "ticker_prior_n",
+            "ticker_prior_n", "ticker_prior_source",
         ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
@@ -204,7 +204,7 @@ def rank_1h_launches(
             "x_posts_24h", "x_sent_lex",
             "tws_ok", "tws_headline_count",
             "dist_20d_high_pct", "dist_20d_low_bounce", "vol_ratio_20",
-            "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50",             "ticker_prior_n",
+            "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50", "ticker_prior_n",
             "ticker_prior_source",
         ):
             if k in merged:
