@@ -177,6 +177,11 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
         else:
             parts.append("social chatter present")
 
+    tws_n = _finite(row.get("tws_headline_count"))
+    if tws_n is not None and tws_n > 0:
+        parts.append("broker news feed active")
+        used = True
+
     if not parts:
         parts.append("catalyst quiet / unknown")
 
@@ -188,10 +193,11 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
 
 
 def _history_text(row: dict[str, Any]) -> tuple[str, bool]:
-    wr = _finite(row.get("analog_win_rate") or row.get("ticker_prior_hit1r_rate"))
-    mfe = _finite(row.get("analog_mfe_p50") or row.get("ticker_prior_mfe_p50"))
-    n_analog = row.get("analog_count") or row.get("n_analogs_measured")
-    used = wr is not None or mfe is not None or _present(n_analog)
+    wr = _finite(row.get("ticker_prior_hit1r_rate") or row.get("analog_win_rate"))
+    mfe = _finite(row.get("ticker_prior_mfe_p50") or row.get("analog_mfe_p50"))
+    n_prior = row.get("ticker_prior_n") or row.get("analog_count") or row.get("n_analogs_measured")
+    src = _finite(row.get("ticker_prior_source"))
+    used = wr is not None or mfe is not None or _present(n_prior)
 
     parts: list[str] = []
     if wr is not None:
@@ -205,11 +211,15 @@ def _history_text(row: dict[str, Any]) -> tuple[str, bool]:
             parts.append("similar past days: mixed-soft")
     if mfe is not None and mfe > 0:
         parts.append("prior runs had follow-through")
-    if _present(n_analog):
+    if _present(n_prior):
         try:
-            n = int(n_analog)
+            n = int(float(n_prior))
             if n <= 0:
                 parts.append("thin history sample")
+            elif src is not None and src >= 2.0:
+                parts.append(f"path history n={n}")
+            elif n > 0:
+                parts.append(f"history sample n={n}")
         except (TypeError, ValueError):
             pass
 
@@ -273,6 +283,8 @@ def _headline_from_bullets(
 
     if "guidance cut" in cat:
         bits.append("guidance caution")
+    elif "broker news" in cat or "recent headlines" in cat:
+        bits.append("catalyst noted")
     elif "no fresh" in cat or "quiet" in cat:
         bits.append("no adverse headline")
     elif "print:" in cat:

@@ -52,6 +52,36 @@ def _row_key(symbol: str, signal_at: str) -> str:
     return f"{symbol.upper()}|{day}"
 
 
+def _evidence_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Compact decision-time fields for ledger / Weekly Review (no look-ahead)."""
+    keys = (
+        "news_velocity_24h",
+        "news_headline_count_48h",
+        "tws_ok",
+        "tws_headline_count",
+        "st_msg_24h",
+        "st_bull_ratio",
+        "dilution_flag",
+        "distress_flag",
+        "print",
+        "outlook",
+        "dist_20d_high_pct",
+        "dist_20d_low_bounce",
+        "vol_ratio_20",
+        "ticker_prior_hit1r_rate",
+        "ticker_prior_mfe_p50",
+        "ticker_prior_n",
+        "ticker_prior_source",
+        "continuation_score",
+        "bar_state",
+    )
+    out: dict[str, Any] = {}
+    for k in keys:
+        if k in row and row.get(k) is not None:
+            out[k] = row.get(k)
+    return out
+
+
 def record_scan_outcomes(
     *,
     now_et: datetime,
@@ -106,6 +136,7 @@ def record_scan_outcomes(
             "outcome": outcome,
             "marked_at": prev.get("marked_at") if prev else None,
             "thesis": thesis if thesis is not None else (prev.get("thesis") if prev else None),
+            "evidence": _evidence_snapshot(r) or (prev.get("evidence") if prev else None),
         }
         by_key[key] = row
         n += 1

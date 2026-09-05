@@ -350,6 +350,15 @@ def execute_live_entries(
             social_missing=cand.get("social_missing"),
             x_posts_24h=cand.get("x_posts_24h"),
             x_sent_lex=cand.get("x_sent_lex"),
+            tws_ok=cand.get("tws_ok"),
+            tws_headline_count=cand.get("tws_headline_count"),
+            dist_20d_high_pct=cand.get("dist_20d_high_pct"),
+            dist_20d_low_bounce=cand.get("dist_20d_low_bounce"),
+            vol_ratio_20=cand.get("vol_ratio_20"),
+            ticker_prior_hit1r_rate=cand.get("ticker_prior_hit1r_rate"),
+            ticker_prior_mfe_p50=cand.get("ticker_prior_mfe_p50"),
+            ticker_prior_n=cand.get("ticker_prior_n"),
+            ticker_prior_source=cand.get("ticker_prior_source"),
         )
         any_fill = True
         results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})
