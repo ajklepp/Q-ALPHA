@@ -1,0 +1,15 @@
+# Modal always for compute
+
+Prefer **Modal** for studies, scans, labeling, backtests, and heavy jobs — the user pays for Modal and wants cloud speed over local CPU.
+
+## Do
+
+- Put new EXP/study runners on Modal (`modal.App`, `debian_slim`, `pip_install`, secrets).
+- Parallelize with `.map` when labeling/API-bound.
+- Secrets: `polygon-api-key`, `q-alpha-secrets` (OPENROUTER etc.).
+- Local machine only launches (`modal run`) and writes results under `experiments/`.
+
+## Don't
+
+- Default to long local Python loops for Polygon/OpenRouter-heavy work.
+- Ask "local or cloud?" — use Modal unless the user says otherwise or the task is a tiny one-off debug.

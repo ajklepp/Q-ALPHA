@@ -1,0 +1,344 @@
+{
+  "generated": "2026-09-05T22:58:42.393004-04:00",
+  "runtime_sec": 88.9,
+  "sample_size": 3353,
+  "symbol_days_labeled": 2509,
+  "labeled_ok": 2509,
+  "label_errors": 0,
+  "label_ok_rate": 0.7680350737345556,
+  "mode_counts": {
+    "hype_soft": 986,
+    "quiet": 949,
+    "digest": 634,
+    "continuation_hard": 337,
+    "anticipation": 249,
+    "junk": 113,
+    "other": 79,
+    "stale_narrative": 6
+  },
+  "family_counts": {
+    "none": 1690,
+    "earnings_results": 781,
+    "legal_regulatory": 326,
+    "m_and_a": 130,
+    "financing_dilution": 122,
+    "price_commentary": 77,
+    "contract_customer": 71,
+    "analyst_action": 54,
+    "product_launch_story": 54,
+    "promo": 36,
+    "guidance_outlook": 12
+  },
+  "hardness_counts": {
+    "soft_narrative": 1373,
+    "unknown": 1065,
+    "hard_quantified": 915
+  },
+  "phase_counts": {
+    "fresh_print": 1312,
+    "quiet": 949,
+    "post_print_digest": 533,
+    "stale_narrative": 415,
+    "pre_event_anticipation": 144
+  },
+  "gap_counts": {
+    "unknown": 2388,
+    "above_hopes": 622,
+    "below_hopes": 278,
+    "in_line": 65
+  },
+  "strata_mode": [
+    {
+      "bucket": "hype_soft",
+      "n": 986,
+      "wr": 0.058823529411764705,
+      "exp": 0.26377902636916833,
+      "med_mfe": 0.0121705
+    },
+    {
+      "bucket": "quiet",
+      "n": 949,
+      "wr": 0.0821917808219178,
+      "exp": 0.2653703898840885,
+      "med_mfe": 0.01273
+    },
+    {
+      "bucket": "digest",
+      "n": 634,
+      "wr": 0.055205047318611984,
+      "exp": 0.2191355520504732,
+      "med_mfe": 0.011094
+    },
+    {
+      "bucket": "continuation_hard",
+      "n": 337,
+      "wr": 0.04747774480712166,
+      "exp": 0.23311632047477743,
+      "med_mfe": 0.008584
+    },
+    {
+      "bucket": "anticipation",
+      "n": 249,
+      "wr": 0.08835341365461848,
+      "exp": 0.2873374297188755,
+      "med_mfe": 0.012829
+    },
+    {
+      "bucket": "junk",
+      "n": 113,
+      "wr": 0.02654867256637168,
+      "exp": 0.26274247787610616,
+      "med_mfe": 0.01017
+    },
+    {
+      "bucket": "other",
+      "n": 79,
+      "wr": 0.05063291139240506,
+      "exp": 0.25111012658227844,
+      "med_mfe": 0.014308
+    },
+    {
+      "bucket": "stale_narrative",
+      "n": 6,
+      "wr": 0.0,
+      "exp": 0.032903333333333284,
+      "med_mfe": 0.011351499999999999
+    }
+  ],
+  "strata_hardness": [
+    {
+      "bucket": "soft_narrative",
+      "n": 1373,
+      "wr": 0.051711580480699196,
+      "exp": 0.25734881281864525,
+      "med_mfe": 0.011658
+    },
+    {
+      "bucket": "unknown",
+      "n": 1065,
+      "wr": 0.09389671361502347,
+      "exp": 0.27651635680751174,
+      "med_mfe": 0.013369
+    },
+    {
+      "bucket": "hard_quantified",
+      "n": 915,
+      "wr": 0.04918032786885246,
+      "exp": 0.22170159562841527,
+      "med_mfe": 0.010065
+    }
+  ],
+  "strata_phase": [
+    {
+      "bucket": "fresh_print",
+      "n": 1312,
+      "wr": 0.06326219512195122,
+      "exp": 0.25153945121951216,
+      "med_mfe": 0.011962500000000001
+    },
+    {
+      "bucket": "quiet",
+      "n": 949,
+      "wr": 0.0821917808219178,
+      "exp": 0.2653703898840885,
+      "med_mfe": 0.01273
+    },
+    {
+      "bucket": "post_print_digest",
+      "n": 533,
+      "wr": 0.0450281425891182,
+      "exp": 0.22500949343339582,
+      "med_mfe": 0.010811
+    },
+    {
+      "bucket": "stale_narrative",
+      "n": 415,
+      "wr": 0.033734939759036145,
+      "exp": 0.2480432289156626,
+      "med_mfe": 0.009878
+    },
+    {
+      "bucket": "pre_event_anticipation",
+      "n": 144,
+      "wr": 0.11805555555555555,
+      "exp": 0.3191843055555556,
+      "med_mfe": 0.014062999999999999
+    }
+  ],
+  "strata_gap": [
+    {
+      "bucket": "unknown",
+      "n": 2388,
+      "wr": 0.06993299832495813,
+      "exp": 0.26585751256281404,
+      "med_mfe": 0.012142
+    },
+    {
+      "bucket": "above_hopes",
+      "n": 622,
+      "wr": 0.04501607717041801,
+      "exp": 0.21436247588424434,
+      "med_mfe": 0.009646
+    },
+    {
+      "bucket": "below_hopes",
+      "n": 278,
+      "wr": 0.0683453237410072,
+      "exp": 0.2423151798561151,
+      "med_mfe": 0.0118585
+    },
+    {
+      "bucket": "in_line",
+      "n": 65,
+      "wr": 0.03076923076923077,
+      "exp": 0.23264584615384615,
+      "med_mfe": 0.01147
+    }
+  ],
+  "strata_family": [
+    {
+      "bucket": "none",
+      "n": 1690,
+      "wr": 0.06982248520710059,
+      "exp": 0.2636155976331361,
+      "med_mfe": 0.0121185
+    },
+    {
+      "bucket": "earnings_results",
+      "n": 781,
+      "wr": 0.05505761843790013,
+      "exp": 0.24169262483994877,
+      "med_mfe": 0.010689
+    },
+    {
+      "bucket": "legal_regulatory",
+      "n": 326,
+      "wr": 0.05214723926380368,
+      "exp": 0.27286036809815944,
+      "med_mfe": 0.01394
+    },
+    {
+      "bucket": "m_and_a",
+      "n": 130,
+      "wr": 0.08461538461538462,
+      "exp": 0.22230169230769228,
+      "med_mfe": 0.009855
+    },
+    {
+      "bucket": "financing_dilution",
+      "n": 122,
+      "wr": 0.11475409836065574,
+      "exp": 0.1789793442622951,
+      "med_mfe": 0.011224999999999999
+    },
+    {
+      "bucket": "price_commentary",
+      "n": 77,
+      "wr": 0.03896103896103896,
+      "exp": 0.3036371428571429,
+      "med_mfe": 0.012078
+    },
+    {
+      "bucket": "contract_customer",
+      "n": 71,
+      "wr": 0.014084507042253521,
+      "exp": 0.19145408450704224,
+      "med_mfe": 0.008079
+    },
+    {
+      "bucket": "analyst_action",
+      "n": 54,
+      "wr": 0.09259259259259259,
+      "exp": 0.2639781481481481,
+      "med_mfe": 0.0094355
+    },
+    {
+      "bucket": "product_launch_story",
+      "n": 54,
+      "wr": 0.05555555555555555,
+      "exp": 0.27663259259259254,
+      "med_mfe": 0.0122165
+    },
+    {
+      "bucket": "promo",
+      "n": 36,
+      "wr": 0.0,
+      "exp": 0.17527333333333328,
+      "med_mfe": 0.0088555
+    },
+    {
+      "bucket": "guidance_outlook",
+      "n": 12,
+      "wr": 0.08333333333333333,
+      "exp": 0.3542666666666667,
+      "med_mfe": 0.015775
+    }
+  ],
+  "baseline_v11": {
+    "n": 720,
+    "wr": 0.10416666666666667,
+    "exp": 0.29731699999999994,
+    "capture": 0.42777777777777776
+  },
+  "bakeoff": {
+    "v11": {
+      "n": 720,
+      "wr": 0.10416666666666667,
+      "exp": 0.29731699999999994,
+      "capture": 0.42777777777777776,
+      "oos": {
+        "n": 228,
+        "wr": 0.12280701754385964,
+        "exp": 0.35721201754385956,
+        "capture": 0.12222222222222222
+      },
+      "pass_vs_v11": true
+    },
+    "belief_v2_adj": {
+      "n": 720,
+      "wr": 0.09583333333333334,
+      "exp": 0.2887311666666666,
+      "capture": 0.40555555555555556,
+      "oos": {
+        "n": 228,
+        "wr": 0.10964912280701754,
+        "exp": 0.32803745614035085,
+        "capture": 0.09444444444444444
+      },
+      "pass_vs_v11": false
+    },
+    "skip_digest": {
+      "n": 706,
+      "wr": 0.10623229461756374,
+      "exp": 0.30808271954674216,
+      "capture": 0.42777777777777776,
+      "oos": {
+        "n": 226,
+        "wr": 0.12831858407079647,
+        "exp": 0.3541155752212389,
+        "capture": 0.1111111111111111
+      },
+      "pass_vs_v11": true
+    },
+    "skip_hype_soft": {
+      "n": 693,
+      "wr": 0.09956709956709957,
+      "exp": 0.2853918614718614,
+      "capture": 0.40555555555555556,
+      "pass_vs_v11": false
+    },
+    "skip_junk": {
+      "n": 719,
+      "wr": 0.10292072322670376,
+      "exp": 0.2878242002781641,
+      "capture": 0.42777777777777776,
+      "pass_vs_v11": false
+    }
+  },
+  "winners": [
+    "skip_digest"
+  ],
+  "best_variant": "skip_digest",
+  "recommendation": "HARD",
+  "recommendation_text": "Best passer: **skip_digest**. Hard filter only if you approve a rewrite."
+}
