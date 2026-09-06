@@ -1,0 +1,239 @@
+{
+  "corpus": "corpus_htf_universe_social.csv",
+  "runtime_sec": 882.4,
+  "n_admits": 3353,
+  "n_symbol_days_cached": 2509,
+  "regime_counts_admits": {
+    "quiet": 1793,
+    "anticipation": 1231,
+    "digest": 187,
+    "reacceleration": 142
+  },
+  "strata_admits": [
+    {
+      "slice": "admits",
+      "regime": "anticipation",
+      "n": 1231,
+      "wr": 0.05361494719740049,
+      "exp": 0.2222075060926076,
+      "med_mfe": 0.010216,
+      "med_day_mfe": 0.010307
+    },
+    {
+      "slice": "admits",
+      "regime": "digest",
+      "n": 187,
+      "wr": 0.0427807486631016,
+      "exp": 0.2486865240641711,
+      "med_mfe": 0.012473,
+      "med_day_mfe": 0.012473
+    },
+    {
+      "slice": "admits",
+      "regime": "quiet",
+      "n": 1793,
+      "wr": 0.07417735638594534,
+      "exp": 0.27449952035694364,
+      "med_mfe": 0.012458,
+      "med_day_mfe": 0.012508
+    },
+    {
+      "slice": "admits",
+      "regime": "reacceleration",
+      "n": 142,
+      "wr": 0.06338028169014084,
+      "exp": 0.27089676056338025,
+      "med_mfe": 0.011959000000000001,
+      "med_day_mfe": 0.011959000000000001
+    }
+  ],
+  "strata_taken_v11": [
+    {
+      "slice": "taken_v11",
+      "regime": "anticipation",
+      "n": 257,
+      "wr": 0.07003891050583658,
+      "exp": 0.22293626459143967,
+      "med_mfe": 0.013225,
+      "med_day_mfe": 0.013225
+    },
+    {
+      "slice": "taken_v11",
+      "regime": "digest",
+      "n": 51,
+      "wr": 0.09803921568627451,
+      "exp": 0.3822,
+      "med_mfe": 0.022062,
+      "med_day_mfe": 0.022062
+    },
+    {
+      "slice": "taken_v11",
+      "regime": "quiet",
+      "n": 374,
+      "wr": 0.12834224598930483,
+      "exp": 0.3357450802139037,
+      "med_mfe": 0.017064,
+      "med_day_mfe": 0.017496
+    },
+    {
+      "slice": "taken_v11",
+      "regime": "reacceleration",
+      "n": 38,
+      "wr": 0.10526315789473684,
+      "exp": 0.30823052631578934,
+      "med_mfe": 0.0107525,
+      "med_day_mfe": 0.0107525
+    }
+  ],
+  "theory_ok": true,
+  "theory_notes": [
+    "anticipation not clearly > digest"
+  ],
+  "ai_validation": {
+    "n": 300,
+    "agree": 172,
+    "agreement_rate": 0.5733333333333334,
+    "trust_rule_bakeoffs": false,
+    "confusion_rule_to_ai": {
+      "digest": {
+        "anticipation": 11,
+        "digest": 5,
+        "reacceleration": 2
+      },
+      "quiet": {
+        "quiet": 91,
+        "reacceleration": 16,
+        "anticipation": 47,
+        "digest": 11
+      },
+      "anticipation": {
+        "anticipation": 69,
+        "quiet": 1,
+        "reacceleration": 19,
+        "digest": 4
+      },
+      "reacceleration": {
+        "reacceleration": 7,
+        "digest": 6,
+        "anticipation": 11
+      }
+    },
+    "agreement_floor": 0.6
+  },
+  "baseline_v11": {
+    "n": 720,
+    "wr": 0.10416666666666667,
+    "exp": 0.29731699999999994,
+    "capture": 0.42777777777777776,
+    "med_mfe": 0.015112500000000001,
+    "med_day_mfe": 0.015511
+  },
+  "bakeoff": {
+    "v11": {
+      "n": 720,
+      "wr": 0.10416666666666667,
+      "exp": 0.29731699999999994,
+      "capture": 0.42777777777777776,
+      "med_mfe": 0.015112500000000001,
+      "med_day_mfe": 0.015511,
+      "oos": {
+        "n": 228,
+        "wr": 0.12280701754385964,
+        "exp": 0.35721201754385956,
+        "capture": 0.12222222222222222,
+        "med_mfe": 0.0149605,
+        "med_day_mfe": 0.0160005
+      },
+      "pass_vs_v11": true
+    },
+    "demote_digest": {
+      "n": 720,
+      "wr": 0.10555555555555556,
+      "exp": 0.2941258333333333,
+      "capture": 0.43333333333333335,
+      "med_mfe": 0.014547000000000001,
+      "med_day_mfe": 0.014742000000000002,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.34816368421052624,
+        "capture": 0.12222222222222222,
+        "med_mfe": 0.014329499999999998,
+        "med_day_mfe": 0.014646
+      },
+      "pass_vs_v11": false
+    },
+    "boost_reaccel": {
+      "n": 720,
+      "wr": 0.10138888888888889,
+      "exp": 0.28876941666666667,
+      "capture": 0.42777777777777776,
+      "med_mfe": 0.014742000000000002,
+      "med_day_mfe": 0.015112500000000001,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.3568857017543859,
+        "capture": 0.11666666666666667,
+        "med_mfe": 0.014329499999999998,
+        "med_day_mfe": 0.014471999999999999
+      },
+      "pass_vs_v11": false
+    },
+    "boost_anticip": {
+      "n": 720,
+      "wr": 0.10694444444444444,
+      "exp": 0.2734860277777778,
+      "capture": 0.4166666666666667,
+      "med_mfe": 0.013835,
+      "med_day_mfe": 0.01394,
+      "oos": {
+        "n": 228,
+        "wr": 0.11403508771929824,
+        "exp": 0.3199226315789474,
+        "capture": 0.09444444444444444,
+        "med_mfe": 0.013162,
+        "med_day_mfe": 0.0132205
+      },
+      "pass_vs_v11": false
+    },
+    "prefer_belief": {
+      "n": 720,
+      "wr": 0.10555555555555556,
+      "exp": 0.26259602777777774,
+      "capture": 0.4111111111111111,
+      "med_mfe": 0.013246,
+      "med_day_mfe": 0.013449,
+      "oos": {
+        "n": 228,
+        "wr": 0.10526315789473684,
+        "exp": 0.3028677192982456,
+        "capture": 0.08888888888888889,
+        "med_mfe": 0.012667000000000001,
+        "med_day_mfe": 0.012896000000000001
+      },
+      "pass_vs_v11": false
+    },
+    "skip_digest": {
+      "n": 718,
+      "wr": 0.10584958217270195,
+      "exp": 0.2925303342618384,
+      "capture": 0.42777777777777776,
+      "med_mfe": 0.0144865,
+      "med_day_mfe": 0.0146245,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.3484387719298246,
+        "capture": 0.12222222222222222,
+        "med_mfe": 0.014329499999999998,
+        "med_day_mfe": 0.014646
+      },
+      "pass_vs_v11": false
+    }
+  },
+  "winners_vs_v11": [],
+  "best_variant": null,
+  "recommendation": "MORE_LABELS",
+  "recommendation_text": "Rule\u2194AI agreement below 60% \u2014 do **not** trust rule-only bakeoffs. Expand AI labeling before any soft/hard ship."
+}
