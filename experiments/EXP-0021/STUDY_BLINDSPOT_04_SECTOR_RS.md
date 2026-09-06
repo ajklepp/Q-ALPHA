@@ -2,9 +2,9 @@
 
 **Generated:** 2026-09-06T00:13:22.926793-04:00
 **Runtime:** 24.9s (Modal)
-**Recommendation:** **SOFT**
+**Recommendation:** **ADD soft (user 2026-09-06)**
 
-Best real passer: **boost_rs_spy_lead**. Soft overlay only if you approve.
+Live: `continuation_score` **v1.3** soft-boosts RS vs SPY and vs sector ETF (5d prior closes). Peer hard filters **not** shipped.
 
 ## Coverage
 
@@ -65,8 +65,10 @@ Best real passer: **boost_rs_spy_lead**. Soft overlay only if you approve.
 
 ## Decision needed
 
-- Reply: **ADD soft / ADD hard / HOLD**
-- No live rewrite from this run.
+- **ADD soft (done)** — RS vs SPY + RS vs sector soft terms in live v1.3.
+- Peer alone-up / breadth hard filters: **not** shipped.
+- Next: blind-spot #5 (event distance) after you say go.
+- No further rewrite from this note.
 
 ## Notes
 

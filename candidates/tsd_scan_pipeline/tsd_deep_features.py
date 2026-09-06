@@ -398,6 +398,12 @@ def attach_deep_features(
                 merged.update(prior_from_profile(sym))
             except Exception:
                 pass
+        try:
+            from tsd_scan_pipeline.tsd_sector_rs import sector_rs_features
+
+            merged.update(sector_rs_features(sym, api_key=key, as_of=as_of))
+        except Exception:
+            pass
         if merged.get("tsd_profile") is None:
             prof = _load_tsd_profile(sym)
             if prof:

@@ -62,10 +62,21 @@ BAR_STATE_PTS_V1 = {
     "extended": -20.0,
 }
 RANKER_LIST_LAUNCH_FLOOR = 40.0  # admit if launch>=40 OR scan<=55
-CONTINUATION_SCORE_VERSION = "v1.2"  # v1.1 + soft demote extreme gaps (>=5%)
-# Blind-spot #2: soft-skip extreme overnight gaps (hard skip won bakeoff; soft demote keeps rare names rankable)
+CONTINUATION_SCORE_VERSION = "v1.3"  # v1.2 + soft RS vs SPY/sector (blind-spot #4)
+# Blind-spot #2: soft-skip extreme overnight gaps
 EXTREME_GAP_PCT = 0.05
 EXTREME_GAP_SOFT_PENALTY = 20.0
+# Blind-spot #4: soft RS overlays (study winners; peer hard filters not shipped)
+RS_SPY_LEAD_STRONG = 0.05
+RS_SPY_LEAD_MILD = 0.03
+RS_SPY_LAG = -0.05
+RS_SPY_LEAD_STRONG_PTS = 10.0
+RS_SPY_LEAD_MILD_PTS = 5.0
+RS_SPY_LAG_PENALTY = 10.0
+RS_SECTOR_LEAD = 0.04
+RS_SECTOR_LAG = -0.04
+RS_SECTOR_LEAD_PTS = 8.0
+RS_SECTOR_LAG_PENALTY = 8.0
 
 
 def signal_bar_red(row: dict[str, Any]) -> bool:
@@ -312,6 +323,7 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
       - keep 20d room (blend/52w did not beat this grid)
 
     v1.2: soft-skip extreme gaps (gap_pct >= 5%) — blind-spot #2 bakeoff.
+    v1.3: soft RS vs SPY / sector ETF (5d, prior closes) — blind-spot #4.
     """
     hour = _row_hour(row)
     peak = 25.0 if hour is not None and hour in PEAK_HOUR_BONUS_HOURS else 0.0
@@ -397,11 +409,34 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     if gap >= EXTREME_GAP_PCT:
         score -= EXTREME_GAP_SOFT_PENALTY
 
+    # Soft RS vs SPY / sector (blind-spot #4; both soft variants passed ship gate)
+    if int(row.get("rs_ok") or 0) == 1:
+        try:
+            rs_spy = float(row.get("rs_spy_5d"))
+        except (TypeError, ValueError):
+            rs_spy = None
+        try:
+            rs_sec = float(row.get("rs_sector_5d"))
+        except (TypeError, ValueError):
+            rs_sec = None
+        if rs_spy is not None:
+            if rs_spy >= RS_SPY_LEAD_STRONG:
+                score += RS_SPY_LEAD_STRONG_PTS
+            elif rs_spy >= RS_SPY_LEAD_MILD:
+                score += RS_SPY_LEAD_MILD_PTS
+            elif rs_spy <= RS_SPY_LAG:
+                score -= RS_SPY_LAG_PENALTY
+        if rs_sec is not None:
+            if rs_sec >= RS_SECTOR_LEAD:
+                score += RS_SECTOR_LEAD_PTS
+            elif rs_sec <= RS_SECTOR_LAG:
+                score -= RS_SECTOR_LAG_PENALTY
+
     return round(score, 2)
 
 
 def compute_continuation_score(row: dict[str, Any]) -> float:
-    """Live ranker entrypoint — currently v1.1."""
+    """Live ranker entrypoint — currently v1.3."""
     return compute_continuation_score_v1_1(row)
 
 

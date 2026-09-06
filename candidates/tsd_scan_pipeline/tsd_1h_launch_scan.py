@@ -191,6 +191,7 @@ def rank_1h_launches(
             "vol_ratio_20", "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50",
             "ticker_prior_n", "ticker_prior_source",
             "gap_pct", "prior_close", "day_open",
+            "rs_spy_5d", "rs_sector_5d", "rs_ok", "sector_etf", "sic_code",
         ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
@@ -209,6 +210,7 @@ def rank_1h_launches(
             "ticker_prior_hit1r_rate", "ticker_prior_mfe_p50", "ticker_prior_n",
             "ticker_prior_source",
             "gap_pct", "prior_close", "day_open",
+            "rs_spy_5d", "rs_sector_5d", "rs_ok", "sector_etf", "sic_code",
         ):
             if k in merged:
                 row[k] = merged.get(k)
