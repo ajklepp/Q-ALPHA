@@ -13,3 +13,4 @@ Prefer **Modal** for studies, scans, labeling, backtests, and heavy jobs — the
 
 - Default to long local Python loops for Polygon/OpenRouter-heavy work.
 - Ask "local or cloud?" — use Modal unless the user says otherwise or the task is a tiny one-off debug.
+- **Exception:** anything that needs **TWS / IBKR** (`127.0.0.1:7497`) must run locally — Modal cannot reach TWS.
