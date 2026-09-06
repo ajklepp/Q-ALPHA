@@ -1,7 +1,8 @@
 """
 EXP-0021 — Belief labels v2 on Modal (structured AI tags; no live rewrite).
 
-Schema from quant literature:
+Status: RESEARCH ONLY (user 2026-09-05). Do not wire into live scoring.
+Keep collecting labels for thesis/further study; live stays on continuation_score_v1.1.
   event_family × info_hardness × story_phase × expectation_gap (+ attrs)
 
 Runs on Modal (parallel OpenRouter labeling). Local PC only launches the job.

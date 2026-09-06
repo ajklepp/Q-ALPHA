@@ -2,9 +2,9 @@
 
 **Generated:** 2026-09-05T22:58:42.393004-04:00
 **Runtime:** 88.9s · sample=3353 · labeled_ok=2509 · label_ok_rate=76.8%
-**Recommendation:** **HARD**
+**Recommendation:** **HOLD (research only)**
 
-Best passer: **skip_digest**. Hard filter only if you approve a rewrite.
+Bakeoff best passer was `skip_digest`, but **user decision 2026-09-05: do not use belief labels in live scoring.** Keep collecting labels for thesis/research as we progress; revisit only with fresh OOS evidence.
 
 ## Schema
 
@@ -59,8 +59,9 @@ Orthogonal AI tags: `event_family` × `info_hardness` × `story_phase` × `expec
 
 ## Recommended live action
 
-- **HARD** — Best passer: **skip_digest**. Hard filter only if you approve a rewrite.
-- No live rewrite from this run.
+- **HOLD (research only)** — Live stays on `continuation_score_v1.1`.
+- Belief labels / `skip_digest` stay offline for thesis and further study.
+- No live rewrite.
 
 ## Note on compute
 

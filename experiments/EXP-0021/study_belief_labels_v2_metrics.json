@@ -339,6 +339,8 @@
     "skip_digest"
   ],
   "best_variant": "skip_digest",
-  "recommendation": "HARD",
-  "recommendation_text": "Best passer: **skip_digest**. Hard filter only if you approve a rewrite."
+  "recommendation": "HOLD",
+  "recommendation_text": "User decision 2026-09-05: research only. Live stays on v1.1; do not wire belief labels into scoring.",
+  "bakeoff_best_variant": "skip_digest",
+  "user_decision": "research_only"
 }
