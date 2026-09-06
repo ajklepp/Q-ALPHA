@@ -1,0 +1,1615 @@
+{
+  "cache": {
+    "ABCL": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ABTC": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "ACHR": {
+      "sic": "3721",
+      "sic2": "37",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "ACHV": {
+      "sic": "2835",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AEM": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AGCO": {
+      "sic": "3523",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "AGEN": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AGRO": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ALM": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ALMR": {
+      "sic": "3826",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "ALNY": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AMLX": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AMPL": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "AMR": {
+      "sic": "1221",
+      "sic2": "12",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "ANDG": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "ANF": {
+      "sic": "5651",
+      "sic2": "56",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "ANRO": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "APA": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "APPN": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "APPS": {
+      "sic": "6794",
+      "sic2": "67",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "AQST": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ARCT": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ARIS": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ARX": {
+      "sic": "6411",
+      "sic2": "64",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "ASMB": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ASST": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "ATRC": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "AU": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AUGO": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "AVAH": {
+      "sic": "8082",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "BBNX": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "BDC": {
+      "sic": "3357",
+      "sic2": "33",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "BE": {
+      "sic": "3620",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "BETA": {
+      "sic": "3721",
+      "sic2": "37",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "BHVN": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "BKKT": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "BL": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "BLSH": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "BMNR": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "BOXL": {
+      "sic": "8200",
+      "sic2": "82",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "BRZE": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "BTDR": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "BTG": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "BTGO": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "BTU": {
+      "sic": "1221",
+      "sic2": "12",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "BULL": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "BWMN": {
+      "sic": "8742",
+      "sic2": "87",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "BXC": {
+      "sic": "5031",
+      "sic2": "50",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "CADL": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CAI": {
+      "sic": "8071",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "CBLL": {
+      "sic": "3845",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "CDE": {
+      "sic": "1040",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "CELH": {
+      "sic": "2086",
+      "sic2": "20",
+      "etf": "XLP",
+      "ok": 1
+    },
+    "CENX": {
+      "sic": "3334",
+      "sic2": "33",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "CGEM": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CHPT": {
+      "sic": "3690",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CLMT": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "CLYM": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CNH": {
+      "sic": "3531",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CNXC": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "COIN": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "CRCL": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "CRGY": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "CRM": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CRMD": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CRML": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CRSR": {
+      "sic": "3577",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CRWD": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CTEV": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "CTNM": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "CVI": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "DELL": {
+      "sic": "3571",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "DFDV": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "DINO": {
+      "sic": "4610",
+      "sic2": "46",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "DK": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "DOCS": {
+      "sic": "7371",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "DPRO": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "DUOL": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "EDRY": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EGO": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EIKN": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EL": {
+      "sic": "2844",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EMBC": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "EOLS": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EPAM": {
+      "sic": "7371",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "EQX": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ERO": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ESTC": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "ETON": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EXK": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "EZPW": {
+      "sic": "5900",
+      "sic2": "59",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "FDMT": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "FGI": {
+      "sic": "3430",
+      "sic2": "34",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "FIG": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "FIGR": {
+      "sic": "6163",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "FIVN": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "FLXS": {
+      "sic": "2510",
+      "sic2": "25",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "FMC": {
+      "sic": "2800",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "FSM": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "FUBO": {
+      "sic": "7812",
+      "sic2": "78",
+      "etf": "XLC",
+      "ok": 1
+    },
+    "FWDI": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "FWRD": {
+      "sic": "4731",
+      "sic2": "47",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "GAP": {
+      "sic": "5651",
+      "sic2": "56",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "GENB": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "GLXY": {
+      "sic": "6211",
+      "sic2": "62",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "GO": {
+      "sic": "5411",
+      "sic2": "54",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "GPRK": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "GRAL": {
+      "sic": "8071",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "GTLB": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "GWRE": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "HAE": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "HCC": {
+      "sic": "1220",
+      "sic2": "12",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "HELP": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "HL": {
+      "sic": "1400",
+      "sic2": "14",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "HNST": {
+      "sic": "5961",
+      "sic2": "59",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "HOOD": {
+      "sic": "6211",
+      "sic2": "62",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "HP": {
+      "sic": "1381",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "HPE": {
+      "sic": "3570",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "HRB": {
+      "sic": "7200",
+      "sic2": "72",
+      "etf": "XLC",
+      "ok": 1
+    },
+    "HTFL": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "HUBS": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "HYMC": {
+      "sic": "1040",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "HZO": {
+      "sic": "5531",
+      "sic2": "55",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "IAG": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "IDR": {
+      "sic": "1040",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "IMMX": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "IMXI": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "INBX": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "INFQ": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "IOVA": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "IPI": {
+      "sic": "1400",
+      "sic2": "14",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "IREN": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "JANX": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "KGC": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "KURA": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "KVYO": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "LFST": {
+      "sic": "8000",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "LIFE": {
+      "sic": "6411",
+      "sic2": "64",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "LITE": {
+      "sic": "3669",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "LPG": {
+      "sic": "4412",
+      "sic2": "44",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "MASS": {
+      "sic": "3826",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "MDB": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "METC": {
+      "sic": "1220",
+      "sic2": "12",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "MLAB": {
+      "sic": "3823",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "MMED": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "MNDY": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "MNTN": {
+      "sic": "7310",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "MP": {
+      "sic": "1000",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "MPC": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "MRNA": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "MRVI": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "MRX": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "MSTR": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "MTA": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "MTDR": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "NCI": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "NCNO": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NEO": {
+      "sic": "8734",
+      "sic2": "87",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "NESR": {
+      "sic": "1389",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "NG": {
+      "sic": "1040",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "NGNE": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "NIQ": {
+      "sic": "7370",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NMAX": {
+      "sic": "4833",
+      "sic2": "48",
+      "etf": "XLC",
+      "ok": 1
+    },
+    "NOG": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "NOW": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NTAP": {
+      "sic": "3572",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NTSK": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NUAI": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "NUTX": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "NUVB": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "NVAX": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "OBE": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "OCUL": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "OKTA": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "OMER": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "OOMA": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "OSCR": {
+      "sic": "6324",
+      "sic2": "63",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "P": {
+      "sic": "3572",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PATH": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PBF": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "PD": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PDS": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "PDYN": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PEGA": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PESI": {
+      "sic": "4955",
+      "sic2": "49",
+      "etf": "XLU",
+      "ok": 1
+    },
+    "PGEN": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "PLPC": {
+      "sic": "1623",
+      "sic2": "16",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "PLSE": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "PNRG": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "PPC": {
+      "sic": "2015",
+      "sic2": "20",
+      "etf": "XLP",
+      "ok": 1
+    },
+    "PRE": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "PSIX": {
+      "sic": "3510",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "PSNL": {
+      "sic": "8071",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "PSX": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "PTEN": {
+      "sic": "1381",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "PURR": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "QMCO": {
+      "sic": "3572",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "RBRK": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "REPL": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "REPX": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "RHLD": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "RIGL": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "RNG": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "RPD": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "RSKD": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "RUM": {
+      "sic": "7370",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "RXST": {
+      "sic": "3851",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "SB": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SBET": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "SCZM": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SENEA": {
+      "sic": "2033",
+      "sic2": "20",
+      "etf": "XLP",
+      "ok": 1
+    },
+    "SENS": {
+      "sic": "3823",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "SGML": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SGMT": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SLDB": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SLS": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SM": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "SMCI": {
+      "sic": "3571",
+      "sic2": "35",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "SMTC": {
+      "sic": "3674",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "SMWB": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SNOW": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "SPT": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "SRPT": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "SSRM": {
+      "sic": "6795",
+      "sic2": "67",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "TALO": {
+      "sic": "1311",
+      "sic2": "13",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "TARS": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TBBB": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TDW": {
+      "sic": "4400",
+      "sic2": "44",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "TEAM": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "TEM": {
+      "sic": "7370",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "TH": {
+      "sic": "7000",
+      "sic2": "70",
+      "etf": "XLRE",
+      "ok": 1
+    },
+    "TITN": {
+      "sic": "5990",
+      "sic2": "59",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "TJGC": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TK": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TNDM": {
+      "sic": "3841",
+      "sic2": "38",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "TNK": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TNXP": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TRLV": {
+      "sic": "2833",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TWST": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "TYL": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "UEC": {
+      "sic": "1090",
+      "sic2": "10",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "UMAC": {
+      "sic": "3663",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "VEEV": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "VIA": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "VIR": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "VIRT": {
+      "sic": "6211",
+      "sic2": "62",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "VLO": {
+      "sic": "2911",
+      "sic2": "29",
+      "etf": "XLE",
+      "ok": 1
+    },
+    "VREX": {
+      "sic": "3679",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "VSTM": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "WDAY": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "WEAV": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "WGS": {
+      "sic": "8000",
+      "sic2": "80",
+      "etf": "XLV",
+      "ok": 1
+    },
+    "WIX": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "WK": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "WNC": {
+      "sic": "3715",
+      "sic2": "37",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "WPM": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "XE": {
+      "sic": "3443",
+      "sic2": "34",
+      "etf": "XLI",
+      "ok": 1
+    },
+    "XHLD": {
+      "sic": "7389",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "XNCR": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "XP": {
+      "sic": null,
+      "sic2": null,
+      "etf": "SPY",
+      "ok": 1
+    },
+    "XPON": {
+      "sic": "3690",
+      "sic2": "36",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "XXI": {
+      "sic": "6199",
+      "sic2": "61",
+      "etf": "XLF",
+      "ok": 1
+    },
+    "YEXT": {
+      "sic": "7374",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "YSWY": {
+      "sic": "5411",
+      "sic2": "54",
+      "etf": "XLY",
+      "ok": 1
+    },
+    "ZETA": {
+      "sic": "7372",
+      "sic2": "73",
+      "etf": "XLK",
+      "ok": 1
+    },
+    "ZURA": {
+      "sic": "2836",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    },
+    "ZYME": {
+      "sic": "2834",
+      "sic2": "28",
+      "etf": "SPY",
+      "ok": 1
+    }
+  },
+  "meta": {
+    "symbols": 267,
+    "meta_ok": 267,
+    "fetch_errors": 0,
+    "admit_rows": 3353,
+    "rs_labeled": 3353,
+    "rs_coverage": 1.0,
+    "alone_up_rate": 0.053683268714583954
+  }
+}
