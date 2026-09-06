@@ -2,9 +2,9 @@
 
 **Generated:** 2026-09-06T00:08:44.854683-04:00
 **Runtime:** 1375.4s (local TWS)
-**Recommendation:** **HOLD**
+**Recommendation:** **HOLD (user 2026-09-06)**
 
-No TWS IV variant beat v1.2 on the ship gate. Keep options/IV research-only.
+No TWS IV variant beat v1.2 on the ship gate. Options/IV stay research-only.
 
 ## Coverage
 
@@ -66,7 +66,8 @@ No TWS IV variant beat v1.2 on the ship gate. Keep options/IV research-only.
 
 ## Decision needed
 
-- Reply: **ADD soft / ADD hard / HOLD**
+- **HOLD (user 2026-09-06)** — not wired into live score.
+- Next: blind-spot #4 (sector RS / peer co-move).
 - No live rewrite from this run.
 
 ## Notes
