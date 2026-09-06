@@ -302,8 +302,9 @@
     "skip_si_ge_35"
   ],
   "best_variant": "skip_si_ge_35",
-  "recommendation": "HARD",
-  "recommendation_text": "Best passer: **skip_si_ge_35**. Hard filter only if you approve.",
+  "recommendation": "HOLD",
+  "recommendation_text": "No true SI/float edge vs v1.1. skip_si_ge_35 was a vacuous no-op (identical to baseline). Keep research-only.",
+  "vacuous_winners": ["skip_si_ge_35"],
   "notes": [
     "Shares outstanding from ticker-details snapshot (not perfect PIT float).",
     "SI causal lag: settlement_date + 10d <= signal_date.",
