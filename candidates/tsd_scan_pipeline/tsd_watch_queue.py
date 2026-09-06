@@ -215,6 +215,15 @@ def add_to_watch_queue(
             "tws_headline_count": float(
                 qh_row.get("tws_headline_count") or cand.get("tws_headline_count") or 0
             ),
+            "deep_summary_line": qh_row.get("deep_summary_line") or "",
+            "deep_narrative": qh_row.get("deep_narrative") or "",
+            "catalyst_mode": qh_row.get("catalyst_mode") or "",
+            "expectation_pending": int(qh_row.get("expectation_pending") or 0),
+            "expectation_what": qh_row.get("expectation_what") or "",
+            "expectation_window": qh_row.get("expectation_window") or "unknown",
+            "stale_relevant": int(qh_row.get("stale_relevant") or 0),
+            "fresh_catalyst": int(qh_row.get("fresh_catalyst") or 0),
+            "deep_catalyst": qh_row.get("deep_catalyst") or {},
             "dist_20d_high_pct": qh_row.get("dist_20d_high_pct", cand.get("dist_20d_high_pct")),
             "dist_20d_low_bounce": qh_row.get("dist_20d_low_bounce", cand.get("dist_20d_low_bounce")),
             "vol_ratio_20": qh_row.get("vol_ratio_20", cand.get("vol_ratio_20")),

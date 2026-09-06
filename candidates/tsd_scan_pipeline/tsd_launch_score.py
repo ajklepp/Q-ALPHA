@@ -378,6 +378,12 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     if str(row.get("phase") or row.get("phase_3h") or "") == "EXTENSION":
         score -= 15.0
 
+    # Deep lookback narrative (soft): older story / pending expectation — not 48h-only
+    if int(row.get("expectation_pending") or 0) == 1:
+        score += 8.0
+    if int(row.get("stale_relevant") or 0) == 1 and int(row.get("fresh_catalyst") or 0) == 0:
+        score += 5.0
+
     return round(score, 2)
 
 

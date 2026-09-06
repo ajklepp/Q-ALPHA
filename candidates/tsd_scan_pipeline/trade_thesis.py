@@ -137,6 +137,10 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
     st_msg = _finite(row.get("st_msg_24h"))
     st_bull = _finite(row.get("st_bull_ratio"))
     cat_type = row.get("catalyst_type")
+    deep_line = row.get("deep_summary_line") or row.get("deep_narrative")
+    expect = int(row.get("expectation_pending") or 0) == 1
+    stale = int(row.get("stale_relevant") or 0) == 1
+    mode = str(row.get("catalyst_mode") or "").lower()
     used = (
         _present(print_tag)
         or _present(outlook)
@@ -144,9 +148,24 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
         or "guidance_cut" in row
         or st_msg is not None
         or _present(cat_type)
+        or _present(deep_line)
+        or expect
+        or stale
     )
 
     parts: list[str] = []
+    if _present(deep_line):
+        parts.append(str(deep_line)[:140])
+    elif expect:
+        what = str(row.get("expectation_what") or "upcoming clarity").strip()
+        window = str(row.get("expectation_window") or "undated")
+        parts.append(f"expectation: {what} ({window})")
+    elif stale:
+        parts.append("older development news still in play")
+
+    if mode and mode not in ("unknown", "quiet", ""):
+        parts.append(f"mode={mode}")
+
     if guidance or outlook in ("lowered", "withdrawn"):
         parts.append("guidance cut — caution")
     elif outlook in ("raised", "increased", "positive"):
@@ -161,7 +180,7 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
 
     if _present(print_tag) and str(print_tag).lower() not in ("unknown", "none", "null"):
         parts.append(f"print: {str(print_tag).replace('_', ' ')}")
-    elif news_n is not None and news_n <= 0:
+    elif news_n is not None and news_n <= 0 and not _present(deep_line):
         parts.append("no fresh headlines in window")
     elif news_n is not None and news_n > 0:
         parts.append(f"recent headlines present ({int(news_n)})")
@@ -335,7 +354,7 @@ def build_trade_thesis(
     source_labels = {
         "Tape": "intraday tape",
         "Trend": "daily structure",
-        "Catalyst": "news window",
+        "Catalyst": "deep catalyst lookback",
         "History": "ticker history",
         "Liquidity": "liquidity / size",
     }

@@ -14,7 +14,8 @@
 | `tsd_social` (Polygon + TWS news + StockTwits; X off) | Soft continuation terms + thesis; never hard-vetoes |
 | `tsd_deep_features` (20d room/bounce + 1H path prior) | Path prior when n≥3; else profile analog fallback |
 | Missed ledger `evidence` + thesis | Frozen decision snapshot for Weekly Review |
-| `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Headline → print/outlook; ~pennies/day; free optional via env |
+| `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Thin PRINT/OUTLOOK from recent headlines |
+| `tsd_catalyst_deep` (90d lookback) | Narrative + stale-relevant + undated expectations; soft score; thesis |
 | `tsd_trail_monitor` | Kill until +1R → BE → trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |

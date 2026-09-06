@@ -400,9 +400,10 @@ def enrich_queue_row(
     fetch_news: bool = True,
 ) -> tuple[dict[str, Any], bool, dict[str, bool], list[str]]:
     """
-    Full Phase 2 pipeline: quality gate → news context → soft tags.
+    Full Phase 2 pipeline: quality gate → thin news → soft tags → deep lookback.
 
-    Returns (row, passed, gates, reasons).
+    Deep lookback (90d) finds older development news + undated expectations.
+    Soft context only — never vetoes admission.
     """
     passed, gates, reasons = evaluate_quality_history_gate(candidate)
     if not passed:
@@ -429,6 +430,34 @@ def enrich_queue_row(
             }
 
     row = apply_soft_tags(row, news_ctx)
+    # Deep lookback: older development news + undated expectations (soft only)
+    try:
+        from tsd_scan_pipeline.tsd_catalyst_deep import research_deep_catalyst
+
+        brief = research_deep_catalyst(
+            str(row.get("symbol") or ""),
+            api_key=polygon_key,
+        )
+        row["deep_catalyst"] = brief
+        row["catalyst_mode"] = brief.get("catalyst_mode")
+        row["expectation_pending"] = int(brief.get("expectation_pending") or 0)
+        row["expectation_what"] = brief.get("expectation_what") or ""
+        row["expectation_window"] = brief.get("expectation_window") or "unknown"
+        row["stale_relevant"] = int(brief.get("stale_relevant") or 0)
+        row["fresh_catalyst"] = int(brief.get("fresh_catalyst") or 0)
+        row["deep_summary_line"] = brief.get("deep_summary_line") or ""
+        row["deep_narrative"] = brief.get("narrative") or ""
+        if "dilution" in (brief.get("risk_flags") or []):
+            row["dilution_flag"] = 1
+        if "distress" in (brief.get("risk_flags") or []):
+            row["distress_flag"] = 1
+        if "guidance_cut" in (brief.get("risk_flags") or []):
+            row["guidance_cut"] = True
+        # Re-score so expectation / stale soft terms land on continuation_score
+        row = enrich_launch_fields(row)
+    except Exception as exc:
+        print(f"  deep catalyst skipped: {exc}")
+
     row["quality_gates"] = gates
     row["analog_count"] = _analog_count(row, _profile_from_candidate(row))
     row["analog_win_rate"] = compute_analog_win_rate(_profile_from_candidate(row))
