@@ -80,9 +80,9 @@ Bakeoff auto-flagged `skip_si_ge_35`, but it is a **no-op** (identical metrics t
 
 ## Decision needed
 
-- **HOLD research (suggested)** — no true edge vs v1.1; `skip_si_ge_35` was vacuous.
+- **HOLD research (user 2026-09-05)** — held off; not wired into live score.
 - Soft boosts failed. Strata hint: SI 20–35% and float &lt;15M look *better* on raw admits (not slot bakeoff).
-- Reply: **ADD soft / ADD hard / HOLD** then we move to blind-spot #2 (gap + overnight).
+- Next: blind-spot #2 (gap + overnight).
 - No live rewrite from this run.
 
 ## Notes
