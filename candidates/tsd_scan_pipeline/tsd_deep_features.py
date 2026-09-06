@@ -269,15 +269,22 @@ def room_bounce_from_daily(
     api_key: str | None = None,
     as_of: datetime | None = None,
 ) -> dict[str, float]:
-    """20d room / bounce from prior daily bars only (no same-day look-ahead)."""
+    """20d room / bounce from prior daily bars only (no same-day look-ahead).
+
+    Also attaches prior_close / day_open / gap_pct for extreme-gap soft demote (v1.2).
+    """
+    _empty = {
+        "dist_20d_high_pct": 0.0,
+        "dist_52w_high_pct": 0.0,
+        "dist_20d_low_bounce": 0.0,
+        "dist_20d_low_pct": 0.0,
+        "vol_ratio_20": 1.0,
+        "prior_close": 0.0,
+        "day_open": 0.0,
+        "gap_pct": 0.0,
+    }
     if signal_close <= 0:
-        return {
-            "dist_20d_high_pct": 0.0,
-            "dist_52w_high_pct": 0.0,
-            "dist_20d_low_bounce": 0.0,
-            "dist_20d_low_pct": 0.0,
-            "vol_ratio_20": 1.0,
-        }
+        return dict(_empty)
 
     now = as_of or datetime.now(ET)
     if now.tzinfo is None:
@@ -285,7 +292,7 @@ def room_bounce_from_daily(
     else:
         now = now.astimezone(ET)
     as_of_date = now.date()
-    cache_key = f"room:{symbol.upper()}:{as_of_date.isoformat()}:{round(signal_close, 2)}"
+    cache_key = f"room_v2:{symbol.upper()}:{as_of_date.isoformat()}:{round(signal_close, 2)}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -303,22 +310,12 @@ def room_bounce_from_daily(
         time.sleep(0.12)
         results = data.get("results") or []
     except Exception:
-        out = {
-            "dist_20d_high_pct": 0.0,
-            "dist_20d_low_bounce": 0.0,
-            "dist_20d_low_pct": 0.0,
-            "vol_ratio_20": 1.0,
-        }
+        out = dict(_empty)
         _cache_set(cache_key, out)
         return out
 
     if len(results) < 20:
-        out = {
-            "dist_20d_high_pct": 0.0,
-            "dist_20d_low_bounce": 0.0,
-            "dist_20d_low_pct": 0.0,
-            "vol_ratio_20": 1.0,
-        }
+        out = dict(_empty)
         _cache_set(cache_key, out)
         return out
 
@@ -335,6 +332,25 @@ def room_bounce_from_daily(
     avg_vol = sum(vols[-20:]) / 20.0 if vols else 0.0
     last_vol = vols[-1] if vols else 0.0
     vol_ratio = (last_vol / avg_vol) if avg_vol > 0 else 1.0
+    prior_close = float(results[-1].get("c") or 0)
+
+    # Today's regular-session open for gap_pct (soft extreme-gap demote in v1.2)
+    gap_pct = 0.0
+    day_open = 0.0
+    try:
+        url_today = (
+            f"{POLYGON_BASE}/v2/aggs/ticker/{symbol.upper()}/range/1/day/"
+            f"{as_of_date.isoformat()}/{as_of_date.isoformat()}"
+        )
+        today_data = polygon_get(url_today, {"adjusted": "true", "limit": 1}, key)
+        time.sleep(0.12)
+        today_bars = today_data.get("results") or []
+        if today_bars:
+            day_open = float(today_bars[0].get("o") or 0)
+        if prior_close > 0 and day_open > 0:
+            gap_pct = (day_open - prior_close) / prior_close
+    except Exception:
+        pass
 
     out = {
         "dist_20d_high_pct": float(room),
@@ -342,6 +358,9 @@ def room_bounce_from_daily(
         "dist_20d_low_pct": float(dist_low),
         "dist_20d_low_bounce": float(bounce),
         "vol_ratio_20": float(vol_ratio),
+        "prior_close": float(prior_close),
+        "day_open": float(day_open),
+        "gap_pct": float(gap_pct),
     }
     _cache_set(cache_key, out)
     return out

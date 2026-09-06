@@ -2,9 +2,9 @@
 
 **Generated:** 2026-09-05T23:26:59.853398-04:00
 **Runtime:** 1.6s (Modal)
-**Recommendation:** **HARD**
+**Recommendation:** **ADD soft (user 2026-09-05)**
 
-Best real passer: **skip_gap_ge_5pct**. Hard filter only if you approve.
+Live: `continuation_score` **v1.2** soft-demotes `gap_pct >= 5%` by −20 (not a hard block). Soft mid-gap boosts from the bakeoff were **not** shipped.
 
 ## Coverage
 
@@ -79,8 +79,10 @@ Best real passer: **skip_gap_ge_5pct**. Hard filter only if you approve.
 
 ## Decision needed
 
-- Reply: **ADD soft / ADD hard / HOLD**
-- No live rewrite from this run.
+- **ADD soft (done)** — extreme gaps ≥5% demoted −20 in live v1.2; not hard-blocked.
+- Soft mid-gap / overnight overlays from bakeoff: **not** shipped.
+- Next blind-spot: #3 Options (after you say go).
+- No further rewrite from this note.
 
 ## Notes
 

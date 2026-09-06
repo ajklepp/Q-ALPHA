@@ -62,7 +62,10 @@ BAR_STATE_PTS_V1 = {
     "extended": -20.0,
 }
 RANKER_LIST_LAUNCH_FLOOR = 40.0  # admit if launch>=40 OR scan<=55
-CONTINUATION_SCORE_VERSION = "v1.1"  # ship gate PASS: prior↑ + scan/launch↓ (20d room)
+CONTINUATION_SCORE_VERSION = "v1.2"  # v1.1 + soft demote extreme gaps (>=5%)
+# Blind-spot #2: soft-skip extreme overnight gaps (hard skip won bakeoff; soft demote keeps rare names rankable)
+EXTREME_GAP_PCT = 0.05
+EXTREME_GAP_SOFT_PENALTY = 20.0
 
 
 def signal_bar_red(row: dict[str, Any]) -> bool:
@@ -307,6 +310,8 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
       - scan + launch downweighted — removing them raised slot expectancy
       - softer scan>55 pile-on (-10 vs -20)
       - keep 20d room (blend/52w did not beat this grid)
+
+    v1.2: soft-skip extreme gaps (gap_pct >= 5%) — blind-spot #2 bakeoff.
     """
     hour = _row_hour(row)
     peak = 25.0 if hour is not None and hour in PEAK_HOUR_BONUS_HOURS else 0.0
@@ -383,6 +388,14 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
         score += 8.0
     if int(row.get("stale_relevant") or 0) == 1 and int(row.get("fresh_catalyst") or 0) == 0:
         score += 5.0
+
+    # Soft-skip extreme gaps (user: soft skip; bakeoff preferred hard skip ≥5%)
+    try:
+        gap = float(row.get("gap_pct") or 0.0)
+    except (TypeError, ValueError):
+        gap = 0.0
+    if gap >= EXTREME_GAP_PCT:
+        score -= EXTREME_GAP_SOFT_PENALTY
 
     return round(score, 2)
 
