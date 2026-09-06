@@ -242,6 +242,11 @@ def record_entry(
     ticker_prior_mfe_p50: float | None = None,
     ticker_prior_n: float | None = None,
     ticker_prior_source: float | None = None,
+    gap_pct: float | None = None,
+    rs_spy_5d: float | None = None,
+    rs_sector_5d: float | None = None,
+    rs_ok: int | None = None,
+    sector_etf: str | None = None,
 ) -> dict[str, Any]:
     """Book a filled entry into TSD state."""
     from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
@@ -305,6 +310,11 @@ def record_entry(
         "ticker_prior_mfe_p50": ticker_prior_mfe_p50,
         "ticker_prior_n": ticker_prior_n,
         "ticker_prior_source": ticker_prior_source,
+        "gap_pct": gap_pct,
+        "rs_spy_5d": rs_spy_5d,
+        "rs_sector_5d": rs_sector_5d,
+        "rs_ok": rs_ok,
+        "sector_etf": sector_etf,
         "status": "OPEN",
         "trail": trail,
         "exits": [],

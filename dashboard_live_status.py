@@ -23,6 +23,24 @@ PHP_LAUNCH_HOURS_ET = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 PHP_LAUNCH_LAG_MIN = 15
 ET = pytz.timezone("America/New_York")
 
+
+def _continuation_score_version() -> str:
+    """Live continuation rank version label (e.g. score v1.4)."""
+    try:
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from tsd_scan_pipeline.tsd_launch_score import CONTINUATION_SCORE_VERSION
+
+        return f"v{CONTINUATION_SCORE_VERSION.lstrip('v')}"
+    except Exception:
+        return "v1.4"
+
+
 # Legacy 3H watchlist labels — ignore for Peak Hour launches board.
 _LEGACY_WATCH_LABELS = {
     "watching", "profiler ok", "trade pick", "in book",
@@ -582,6 +600,7 @@ def render_live_status_tab(
             st.metric("Cash", f"${cash:,.2f}")
         st.caption(
             f"Unrealized ${unrealized_pnl:+,.2f} · realized ${realized_pnl:+,.2f}"
+            f" · score {_continuation_score_version()}"
         )
 
     with st.container(border=True):

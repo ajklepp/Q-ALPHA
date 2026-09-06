@@ -43,7 +43,15 @@ def _tape_text(row: dict[str, Any]) -> tuple[str, bool]:
     bar = str(row.get("bar_state") or "").lower()
     buy = bool(row.get("buy_signal") or row.get("htf_1h_buy_signal"))
     early = bool(row.get("early_bull"))
-    used = bool(bar) or buy or early or row.get("open") is not None or row.get("close") is not None
+    gap = _finite(row.get("gap_pct"))
+    used = (
+        bool(bar)
+        or buy
+        or early
+        or row.get("open") is not None
+        or row.get("close") is not None
+        or gap is not None
+    )
 
     parts: list[str] = []
     if bar == "yellow":
@@ -71,6 +79,10 @@ def _tape_text(row: dict[str, Any]) -> tuple[str, bool]:
         elif scan <= 55:
             parts.append("not extended")
 
+    # Soft rank: extreme overnight gap demoted (continuation_score v1.2+)
+    if gap is not None and gap >= 0.05:
+        parts.append("extreme overnight gap — soft-skip")
+
     if not parts:
         return ("tape fields thin / unknown", used)
     return (" · ".join(parts), used)
@@ -88,6 +100,8 @@ def _trend_text(row: dict[str, Any]) -> tuple[str, bool]:
             "close_vs_sma50",
             "phase",
             "phase_3h",
+            "rs_spy_5d",
+            "rs_sector_5d",
         )
     )
     parts: list[str] = []
@@ -123,6 +137,24 @@ def _trend_text(row: dict[str, Any]) -> tuple[str, bool]:
             parts.append("neutral structure")
         elif "EXT" in phase:
             parts.append("later-phase structure")
+
+    # Soft rank: RS vs SPY / sector (continuation_score v1.3+)
+    if int(row.get("rs_ok") or 0) == 1:
+        rs_spy = _finite(row.get("rs_spy_5d"))
+        rs_sec = _finite(row.get("rs_sector_5d"))
+        if rs_spy is not None:
+            if rs_spy >= 0.05:
+                parts.append("leading SPY (5d)")
+            elif rs_spy >= 0.03:
+                parts.append("mild SPY lead (5d)")
+            elif rs_spy <= -0.05:
+                parts.append("lagging SPY (5d)")
+        if rs_sec is not None:
+            etf = str(row.get("sector_etf") or "sector").upper()
+            if rs_sec >= 0.04:
+                parts.append(f"leading {etf} (5d)")
+            elif rs_sec <= -0.04:
+                parts.append(f"lagging {etf} (5d)")
 
     if not parts:
         return ("trend context incomplete", used)
@@ -187,6 +219,8 @@ def _catalyst_text(row: dict[str, Any]) -> tuple[str, bool]:
 
     if _present(cat_type) and str(cat_type).lower() not in ("none", "unknown", "null", ""):
         parts.append(f"catalyst type: {str(cat_type)}")
+        if str(cat_type).lower() == "earnings":
+            parts.append("earnings tag — soft-boost")
 
     if st_msg is not None and st_msg > 0:
         if st_bull is not None and st_bull >= 0.6:
@@ -286,7 +320,9 @@ def _headline_from_bullets(
     liq = by.get("Liquidity", "")
 
     bits: list[str] = []
-    if "constructive" in tape or "strong green" in tape or "trigger" in tape:
+    if "extreme overnight gap" in tape:
+        bits.append("extreme gap soft-skip")
+    elif "constructive" in tape or "strong green" in tape or "trigger" in tape:
         bits.append("Constructive tape")
     elif "quiet" in tape or "doji" in tape:
         bits.append("Quiet base / soft tape")
@@ -299,9 +335,15 @@ def _headline_from_bullets(
         bits.append("trend intact")
     elif "below mid" in trend:
         bits.append("trend soft")
+    if "leading " in trend or "mild SPY lead" in trend:
+        bits.append("relative strength lead")
+    if "lagging " in trend:
+        bits.append("relative strength lag")
 
     if "guidance cut" in cat:
         bits.append("guidance caution")
+    elif "earnings tag" in cat or "catalyst type: earnings" in cat:
+        bits.append("earnings catalyst")
     elif "broker news" in cat or "recent headlines" in cat:
         bits.append("catalyst noted")
     elif "no fresh" in cat or "quiet" in cat:

@@ -368,6 +368,11 @@ def execute_live_entries(
             ticker_prior_mfe_p50=cand.get("ticker_prior_mfe_p50"),
             ticker_prior_n=cand.get("ticker_prior_n"),
             ticker_prior_source=cand.get("ticker_prior_source"),
+            gap_pct=cand.get("gap_pct"),
+            rs_spy_5d=cand.get("rs_spy_5d"),
+            rs_sector_5d=cand.get("rs_sector_5d"),
+            rs_ok=cand.get("rs_ok"),
+            sector_etf=cand.get("sector_etf"),
         )
         any_fill = True
         results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})
