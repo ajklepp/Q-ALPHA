@@ -2,9 +2,9 @@
 
 **Generated:** 2026-09-06T00:21:08.706030-04:00
 **Runtime:** 14.7s (Modal)
-**Recommendation:** **SOFT**
+**Recommendation:** **ADD soft (user 2026-09-06)**
 
-Best real passer: **boost_catalyst_earn**. Soft overlay only if you approve.
+Live: `continuation_score` **v1.4** soft-boosts `catalyst_type=earnings` by +6. Filing-window hard filters **not** shipped.
 
 ## Coverage
 
@@ -74,8 +74,10 @@ Best real passer: **boost_catalyst_earn**. Soft overlay only if you approve.
 
 ## Decision needed
 
-- Reply: **ADD soft / ADD hard / HOLD**
-- No live rewrite from this run.
+- **ADD soft (done)** — earnings catalyst +6 in live v1.4.
+- Pre/post filing-window hard filters: **not** shipped (proxy calendar only).
+- Blind-spot series #1–#5 complete for this pass.
+- No further rewrite from this note.
 
 ## Notes
 
