@@ -109,18 +109,31 @@ def occupied_symbols() -> set[str]:
 
 
 def fetch_regime_bull(*, polygon_key: str | None = None) -> tuple[bool, str, dict[str, Any]]:
-    """SPY >= SMA50 — dashboard context only; does not gate entries."""
-    key = polygon_key or os.environ.get("POLYGON_API_KEY", "")
-    if not key:
-        return False, "NO_KEY", {}
-    try:
-        from pre_market_scanner import fetch_spy_regime
+    """
+    SPY HMM regime (EXP-0023 research) for dashboard / snapshot context.
 
-        reg = fetch_spy_regime(key)
-        bull = reg.get("spy_regime") == "BULL"
-        return bull, str(reg.get("spy_regime", "?")), reg
+    Does **not** gate entries. Label is always BULL or BEAR (never UNKNOWN).
+    """
+    key = polygon_key or os.environ.get("POLYGON_API_KEY", "")
+    try:
+        from tsd_scan_pipeline.spy_hmm_regime import fetch_spy_hmm_regime, normalize_regime_label
+
+        reg = fetch_spy_hmm_regime(key or None)
+        label = normalize_regime_label(reg.get("spy_regime"))
+        bull = label == "BULL"
+        return bull, label, reg
     except Exception as exc:
-        return False, f"ERR:{exc}", {}
+        # Last-resort SMA50 via legacy helper — still never UNKNOWN
+        try:
+            from pre_market_scanner import fetch_spy_regime
+
+            legacy = fetch_spy_regime(key) if key else {}
+            label = str(legacy.get("spy_regime") or "BEAR").upper()
+            if label not in ("BULL", "BEAR"):
+                label = "BEAR"
+            return label == "BULL", label, {**legacy, "source": "sma50_fallback", "hmm_error": str(exc)[:120]}
+        except Exception:
+            return False, "BEAR", {"source": "fallback_default", "hmm_error": str(exc)[:120]}
 
 
 def infer_signal_lane(candidate: dict[str, Any]) -> str:

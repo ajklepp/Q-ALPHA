@@ -75,7 +75,6 @@ from dashboard_theme import (
     inject_theme,
     lab_ahead_banner,
     lab_sim_banner,
-    regime_banner,
     section_header,
     status_panel,
 )

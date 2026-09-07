@@ -12,7 +12,17 @@ import pandas as pd
 import pytz
 import streamlit as st
 
-from dashboard_theme import MUTED, NEGATIVE, POSITIVE, ACCENT, BG, BORDER, TEXT, section_header
+from dashboard_theme import (
+    MUTED,
+    NEGATIVE,
+    POSITIVE,
+    ACCENT,
+    BG,
+    BORDER,
+    TEXT,
+    regime_banner,
+    section_header,
+)
 from dashboard_tsd_helpers import (
     hold_time_display,
 )
@@ -39,6 +49,68 @@ def _continuation_score_version() -> str:
         return f"v{CONTINUATION_SCORE_VERSION.lstrip('v')}"
     except Exception:
         return "v1.4"
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_spy_hmm_regime() -> dict[str, Any]:
+    """SPY HMM regime for Live Status (research display only; 15m cache)."""
+    try:
+        from dashboard_shared import ensure_polygon_key_from_secrets
+
+        ensure_polygon_key_from_secrets()
+    except Exception:
+        pass
+    try:
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        cand = root / "candidates"
+        if str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+        from tsd_scan_pipeline.spy_hmm_regime import fetch_spy_hmm_regime, normalize_regime_label
+
+        reg = fetch_spy_hmm_regime()
+        label = normalize_regime_label(reg.get("spy_regime"))
+        vix = str(reg.get("vix_regime") or "NORMAL").upper()
+        if vix not in ("NORMAL", "ELEVATED"):
+            vix = "NORMAL"
+        return {
+            "spy_regime": label,
+            "vix_regime": vix,
+            "sizing_pct": str(reg.get("sizing_pct") or "100%"),
+            "source": str(reg.get("source") or "spy_hmm"),
+            "bull_prob": reg.get("bull_prob"),
+        }
+    except Exception:
+        return {
+            "spy_regime": "BEAR",
+            "vix_regime": "NORMAL",
+            "sizing_pct": "—",
+            "source": "fallback_default",
+            "bull_prob": None,
+        }
+
+
+def _render_spy_hmm_regime_banner(tsd_pool: dict | None = None) -> None:
+    """Show HMM BULL/BEAR on Live Status — never UNKNOWN."""
+    reg = _cached_spy_hmm_regime()
+    # Prefer live HMM; pool snapshot only fills gaps if cache somehow empty
+    pool = tsd_pool or {}
+    spy = reg.get("spy_regime") or pool.get("spy_regime") or "BEAR"
+    if str(spy).upper() not in ("BULL", "BEAR"):
+        spy = "BEAR"
+    vix = reg.get("vix_regime") or pool.get("vix_regime") or "NORMAL"
+    sizing = reg.get("sizing_pct") or pool.get("sizing_pct") or "100%"
+    src = str(reg.get("source") or "")
+    bp = reg.get("bull_prob")
+    if src == "spy_hmm" and bp is not None:
+        sub = f"SPY HMM · P(bull)={float(bp):.0%} · research display (not an entry gate)"
+    elif src.startswith("sma50"):
+        sub = "SPY SMA50 fallback · research display (not an entry gate)"
+    else:
+        sub = "SPY HMM · research display (not an entry gate)"
+    regime_banner(str(spy), str(vix), str(sizing), subtitle=sub)
 
 
 # Legacy 3H watchlist labels — ignore for Peak Hour launches board.
@@ -575,6 +647,8 @@ def render_live_status_tab(
     total_pnl = total_equity - starting
     total_pnl_pct = (total_pnl / starting * 100.0) if starting > 0 else 0.0
     closed_stats = tsd_closed_stats(tsd_closed)
+
+    _render_spy_hmm_regime_banner(tsd_pool)
 
     with st.container(border=True):
         section_header("Scoreboard", "")

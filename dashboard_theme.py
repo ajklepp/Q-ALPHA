@@ -485,18 +485,28 @@ def brand_block(live_et: str = "", subtitle: str = "") -> None:
     )
 
 
-def regime_banner(spy_regime: str, vix_regime: str, sizing_pct: str) -> None:
+def regime_banner(spy_regime: str, vix_regime: str, sizing_pct: str, *, subtitle: str = "") -> None:
     """Live Status regime strip — class modifiers only (no inline CSS vars)."""
-    is_bull = spy_regime == "BULL"
+    label = str(spy_regime or "").strip().upper()
+    if label not in ("BULL", "BEAR"):
+        # Never show UNKNOWN / NO_KEY / ERR in the UI
+        label = "BEAR"
+    is_bull = label == "BULL"
     side = "up" if is_bull else "down"
     emoji = "🐂" if is_bull else "🐻"
-    vix_cls = "warn" if vix_regime == "ELEVATED" else "up"
+    vix = str(vix_regime or "NORMAL").strip().upper()
+    if vix not in ("NORMAL", "ELEVATED"):
+        vix = "NORMAL"
+    vix_cls = "warn" if vix == "ELEVATED" else "up"
+    sub = subtitle or "SPY HMM · research display (not an entry gate)"
     _md_html(
         f'<div class="qa-panel qa-panel-row qa-panel-{side}">'
-        f'<div class="qa-panel-headline {side}">{emoji} {escape(spy_regime)} MARKET</div>'
+        f'<div class="qa-panel-headline {side}">{emoji} {escape(label)} MARKET</div>'
         f'<div class="qa-panel-body">VIX: <b class="qa-panel-headline {vix_cls}">'
-        f"{escape(vix_regime)}</b> · Sizing: "
-        f'<span class="qa-mono">{escape(sizing_pct)}</span></div></div>'
+        f"{escape(vix)}</b> · Sizing: "
+        f'<span class="qa-mono">{escape(str(sizing_pct or "—"))}</span>'
+        f'<div style="opacity:0.75;margin-top:4px">{escape(sub)}</div>'
+        f"</div></div>"
     )
 
 

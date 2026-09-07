@@ -317,12 +317,18 @@ def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
     cash = float(pool_doc.get("pool") or 0.0)
     deployed = float(pool_doc.get("deployed") or 0.0)
     starting = float(pool_doc.get("starting_pool") or 3000.0)
-    spy_regime = "UNKNOWN"
+    spy_regime = "BEAR"
+    vix_regime = "NORMAL"
+    sizing_pct = "100%"
     try:
         from tsd_scan_pipeline.tsd_entry_gates import fetch_regime_bull
 
-        bull, label, _ = fetch_regime_bull()
-        spy_regime = str(label) if label else ("BULL" if bull else "BEAR")
+        bull, label, detail = fetch_regime_bull()
+        spy_regime = str(label) if label in ("BULL", "BEAR") else ("BULL" if bull else "BEAR")
+        vix_regime = str(detail.get("vix_regime") or "NORMAL")
+        if vix_regime not in ("NORMAL", "ELEVATED"):
+            vix_regime = "NORMAL"
+        sizing_pct = str(detail.get("sizing_pct") or ("100%" if spy_regime == "BULL" else "research: defensive"))
     except Exception:
         pass
     return {
@@ -333,8 +339,8 @@ def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
         "open_names": len(open_symbols(book)),
         "starting_pool": starting,
         "spy_regime": spy_regime,
-        "vix_regime": "NORMAL",
-        "sizing_pct": "100%",
+        "vix_regime": vix_regime,
+        "sizing_pct": sizing_pct,
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
