@@ -2217,13 +2217,14 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Live Status",
         "📋 Trade Log",
         "📈 Performance",
         "🔧 System Health",
         "📓 Daily Reviews",
         "📚 Weekly Review",
+        "📖 Glossary",
     ])
 
     with tab1:
@@ -2240,6 +2241,8 @@ def main() -> None:
         from dashboard_weekly_research import tab_weekly_research
 
         tab_weekly_research(get_sync)
+    with tab7:
+        tab_glossary()
 
     render_footer()
 
