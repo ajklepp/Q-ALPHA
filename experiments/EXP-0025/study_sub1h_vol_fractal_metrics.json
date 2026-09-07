@@ -1,0 +1,212 @@
+{
+  "generated": "2026-09-07T04:26:31.953279+00:00",
+  "runtime_sec": 22.0,
+  "coverage": {
+    "requested": 1400,
+    "ok": 730,
+    "pct": 0.521
+  },
+  "baseline": {
+    "n": 730,
+    "wr": 0.036986301369863014,
+    "mfe": 0.014787823287671231
+  },
+  "signatures": {
+    "baseline_admits": {
+      "n": 730,
+      "wr": 0.036986301369863014,
+      "mfe": 0.014787823287671231
+    },
+    "vol_cluster_high": {
+      "n": 365,
+      "wr": 0.043835616438356165,
+      "mfe": 0.01486081917808219
+    },
+    "vol_cluster_low": {
+      "n": 365,
+      "wr": 0.030136986301369864,
+      "mfe": 0.014714827397260273
+    },
+    "vol_expanding": {
+      "n": 88,
+      "wr": 0.07954545454545454,
+      "mfe": 0.021305295454545455
+    },
+    "hurst_persist": {
+      "n": 0,
+      "wr": 0.0,
+      "mfe": 0.0
+    },
+    "hurst_chop": {
+      "n": 0,
+      "wr": 0.0,
+      "mfe": 0.0
+    },
+    "alive_cluster_expand": {
+      "n": 41,
+      "wr": 0.12195121951219512,
+      "mfe": 0.021910975609756096
+    },
+    "dead_chop_or_dying_vol": {
+      "n": 532,
+      "wr": 0.02443609022556391,
+      "mfe": 0.013242127819548873
+    }
+  },
+  "lift": {
+    "wr_gap_alive_minus_dead": 0.0975,
+    "mfe_gap_alive_minus_dead": 0.0087,
+    "alive_n": 41,
+    "dead_n": 532
+  },
+  "strata": {
+    "acf_r2": [
+      {
+        "bucket": "(-0.5, -0.0529]",
+        "n": 183,
+        "wr": 0.02185792349726776,
+        "mfe": 0.013897956284153006,
+        "med_mfe": 0.009728
+      },
+      {
+        "bucket": "(-0.0529, 0.0468]",
+        "n": 182,
+        "wr": 0.038461538461538464,
+        "mfe": 0.015536186813186813,
+        "med_mfe": 0.0102685
+      },
+      {
+        "bucket": "(0.0468, 0.224]",
+        "n": 182,
+        "wr": 0.04395604395604396,
+        "mfe": 0.014972335164835164,
+        "med_mfe": 0.0090075
+      },
+      {
+        "bucket": "(0.224, 1.957]",
+        "n": 183,
+        "wr": 0.04371584699453552,
+        "mfe": 0.014749912568306012,
+        "med_mfe": 0.01134
+      }
+    ],
+    "rv_ratio": [
+      {
+        "bucket": "(0.0898, 0.449]",
+        "n": 183,
+        "wr": 0.01639344262295082,
+        "mfe": 0.012896737704918036,
+        "med_mfe": 0.010287
+      },
+      {
+        "bucket": "(0.449, 0.635]",
+        "n": 182,
+        "wr": 0.03296703296703297,
+        "mfe": 0.012818818681318681,
+        "med_mfe": 0.007248
+      },
+      {
+        "bucket": "(0.635, 0.867]",
+        "n": 182,
+        "wr": 0.03296703296703297,
+        "mfe": 0.015245609890109892,
+        "med_mfe": 0.0100495
+      },
+      {
+        "bucket": "(0.867, 2.327]",
+        "n": 183,
+        "wr": 0.06557377049180328,
+        "mfe": 0.018181868852459017,
+        "med_mfe": 0.012027
+      }
+    ],
+    "rv_slope": [
+      {
+        "bucket": "(-0.837, -0.538]",
+        "n": 183,
+        "wr": 0.02185792349726776,
+        "mfe": 0.013288797814207649,
+        "med_mfe": 0.009451
+      },
+      {
+        "bucket": "(-0.538, -0.367]",
+        "n": 182,
+        "wr": 0.04395604395604396,
+        "mfe": 0.015100340659340662,
+        "med_mfe": 0.010248
+      },
+      {
+        "bucket": "(-0.367, -0.0922]",
+        "n": 182,
+        "wr": 0.016483516483516484,
+        "mfe": 0.01226345054945055,
+        "med_mfe": 0.008213999999999999
+      },
+      {
+        "bucket": "(-0.0922, 11.573]",
+        "n": 183,
+        "wr": 0.06557377049180328,
+        "mfe": 0.018486617486338796,
+        "med_mfe": 0.01223
+      }
+    ],
+    "hurst_5m": []
+  },
+  "bakeoff": {
+    "base_scan": {
+      "n": 375,
+      "wr": 0.056,
+      "mfe": 0.017082762666666668,
+      "oos_n": 152,
+      "oos_wr": 0.06578947368421052,
+      "oos_mfe": 0.018543605263157893
+    },
+    "boost_alive_vol": {
+      "n": 375,
+      "wr": 0.058666666666666666,
+      "mfe": 0.01713871733333333,
+      "oos_n": 152,
+      "oos_wr": 0.06578947368421052,
+      "oos_mfe": 0.018350460526315792
+    },
+    "boost_hurst": {
+      "n": 375,
+      "wr": 0.056,
+      "mfe": 0.017082762666666668,
+      "oos_n": 152,
+      "oos_wr": 0.06578947368421052,
+      "oos_mfe": 0.018543605263157893
+    },
+    "boost_cluster": {
+      "n": 375,
+      "wr": 0.056,
+      "mfe": 0.017044376,
+      "oos_n": 152,
+      "oos_wr": 0.06578947368421052,
+      "oos_mfe": 0.018053605263157895
+    },
+    "boost_combo": {
+      "n": 375,
+      "wr": 0.058666666666666666,
+      "mfe": 0.01713871733333333,
+      "oos_n": 152,
+      "oos_wr": 0.06578947368421052,
+      "oos_mfe": 0.018350460526315792
+    }
+  },
+  "winners": [
+    "boost_alive_vol",
+    "boost_hurst",
+    "boost_cluster",
+    "boost_combo"
+  ],
+  "recommendation": "PROMISING",
+  "recommendation_text": "Sub-1H vol-cluster/fractal soft boosts that beat scan baseline: ['boost_alive_vol', 'boost_hurst', 'boost_cluster', 'boost_combo']. Research-only \u2014 candidate soft weight under 1H, not a hard filter yet.",
+  "notes": [
+    "5m bars strictly before signal_ts (no look-ahead into the signal hour).",
+    "Vol clustering \u2248 ACF(r^2); expanding tape \u2248 rv_ratio>1 & rv_slope>0.",
+    "Fractal persist H>0.55 / chop H<0.45 on pre-signal 5m returns.",
+    "Continuation label = hit_1r / day_mfe from EXP-0021 corpus.",
+    "Long-only research. No Peak Hour live edits."
+  ]
+}
