@@ -54,10 +54,11 @@ def _continuation_score_version() -> str:
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_spy_hmm_regime() -> dict[str, Any]:
     """SPY HMM regime for Live Status (research display only; 15m cache)."""
+    polygon_key = None
     try:
         from dashboard_shared import ensure_polygon_key_from_secrets
 
-        ensure_polygon_key_from_secrets()
+        polygon_key = ensure_polygon_key_from_secrets()
     except Exception:
         pass
     try:
@@ -70,8 +71,10 @@ def _cached_spy_hmm_regime() -> dict[str, Any]:
             sys.path.insert(0, str(cand))
         from tsd_scan_pipeline.spy_hmm_regime import fetch_spy_hmm_regime, normalize_regime_label
 
-        reg = fetch_spy_hmm_regime()
-        label = normalize_regime_label(reg.get("spy_regime"))
+        reg = fetch_spy_hmm_regime(polygon_key)
+        source = str(reg.get("source") or "")
+        valid = source in ("spy_hmm", "sma50_fallback")
+        label = normalize_regime_label(reg.get("spy_regime")) if valid else None
         vix = str(reg.get("vix_regime") or "NORMAL").upper()
         if vix not in ("NORMAL", "ELEVATED"):
             vix = "NORMAL"
@@ -79,37 +82,59 @@ def _cached_spy_hmm_regime() -> dict[str, Any]:
             "spy_regime": label,
             "vix_regime": vix,
             "sizing_pct": str(reg.get("sizing_pct") or "100%"),
-            "source": str(reg.get("source") or "spy_hmm"),
+            "source": source,
             "bull_prob": reg.get("bull_prob"),
+            "valid": valid,
         }
     except Exception:
         return {
-            "spy_regime": "BEAR",
+            "spy_regime": None,
             "vix_regime": "NORMAL",
             "sizing_pct": "—",
             "source": "fallback_default",
             "bull_prob": None,
+            "valid": False,
         }
 
 
 def _render_spy_hmm_regime_banner(tsd_pool: dict | None = None) -> None:
     """Show HMM BULL/BEAR on Live Status — never UNKNOWN."""
     reg = _cached_spy_hmm_regime()
-    # Prefer live HMM; pool snapshot only fills gaps if cache somehow empty
     pool = tsd_pool or {}
-    spy = reg.get("spy_regime") or pool.get("spy_regime") or "BEAR"
-    if str(spy).upper() not in ("BULL", "BEAR"):
-        spy = "BEAR"
-    vix = reg.get("vix_regime") or pool.get("vix_regime") or "NORMAL"
-    sizing = reg.get("sizing_pct") or pool.get("sizing_pct") or "100%"
-    src = str(reg.get("source") or "")
-    bp = reg.get("bull_prob")
-    if src == "spy_hmm" and bp is not None:
-        sub = f"SPY HMM · P(bull)={float(bp):.0%} · research display (not an entry gate)"
-    elif src.startswith("sma50"):
-        sub = "SPY SMA50 fallback · research display (not an entry gate)"
+
+    # Never manufacture BEAR from an API/key failure. Prefer the live model,
+    # then the synchronized pool snapshot, then this session's last good model.
+    pool_label = str(pool.get("spy_regime") or "").upper()
+    last_good = st.session_state.get("_last_good_spy_hmm_regime", {})
+    if reg.get("valid"):
+        display = reg
+        st.session_state["_last_good_spy_hmm_regime"] = dict(reg)
+    elif pool_label in ("BULL", "BEAR"):
+        display = {
+            "spy_regime": pool_label,
+            "vix_regime": pool.get("vix_regime") or "NORMAL",
+            "sizing_pct": pool.get("sizing_pct") or "100%",
+            "source": "synced_hmm",
+            "bull_prob": None,
+        }
+        st.session_state["_last_good_spy_hmm_regime"] = dict(display)
+    elif str(last_good.get("spy_regime") or "").upper() in ("BULL", "BEAR"):
+        display = last_good
     else:
-        sub = "SPY HMM · research display (not an entry gate)"
+        st.caption("SPY HMM data unavailable")
+        return
+
+    spy = str(display.get("spy_regime") or "BULL").upper()
+    vix = display.get("vix_regime") or "NORMAL"
+    sizing = display.get("sizing_pct") or "100%"
+    src = str(display.get("source") or "")
+    bp = display.get("bull_prob")
+    if src == "spy_hmm" and bp is not None:
+        sub = f"SPY HMM · P(bull)={float(bp):.0%}"
+    elif src.startswith("sma50"):
+        sub = "SPY HMM"
+    else:
+        sub = "SPY HMM"
     regime_banner(str(spy), str(vix), str(sizing), subtitle=sub)
 
 

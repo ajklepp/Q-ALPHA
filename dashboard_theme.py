@@ -498,7 +498,7 @@ def regime_banner(spy_regime: str, vix_regime: str, sizing_pct: str, *, subtitle
     if vix not in ("NORMAL", "ELEVATED"):
         vix = "NORMAL"
     vix_cls = "warn" if vix == "ELEVATED" else "up"
-    sub = subtitle or "SPY HMM · research display (not an entry gate)"
+    sub = subtitle or "SPY HMM"
     _md_html(
         f'<div class="qa-panel qa-panel-row qa-panel-{side}">'
         f'<div class="qa-panel-headline {side}">{emoji} {escape(label)} MARKET</div>'

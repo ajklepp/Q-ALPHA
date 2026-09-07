@@ -312,23 +312,38 @@ def _assert_tsd_tables(sync) -> None:
         raise
 
 
-def _pool_snapshot_from_local(book: dict[str, Any]) -> dict[str, Any]:
+def _pool_snapshot_from_local(
+    book: dict[str, Any],
+    previous_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build pool snapshot while retaining the last valid HMM regime on fetch failure."""
     pool_doc = load_pool()
     cash = float(pool_doc.get("pool") or 0.0)
     deployed = float(pool_doc.get("deployed") or 0.0)
     starting = float(pool_doc.get("starting_pool") or 3000.0)
-    spy_regime = "BEAR"
-    vix_regime = "NORMAL"
-    sizing_pct = "100%"
+    previous = previous_snapshot or {}
+    previous_label = str(previous.get("spy_regime") or "").upper()
+    spy_regime: str | None = (
+        previous_label if previous_label in ("BULL", "BEAR") else None
+    )
+    vix_regime = str(previous.get("vix_regime") or "NORMAL").upper()
+    if vix_regime not in ("NORMAL", "ELEVATED"):
+        vix_regime = "NORMAL"
+    sizing_pct = str(previous.get("sizing_pct") or "100%")
     try:
         from tsd_scan_pipeline.tsd_entry_gates import fetch_regime_bull
 
         bull, label, detail = fetch_regime_bull()
-        spy_regime = str(label) if label in ("BULL", "BEAR") else ("BULL" if bull else "BEAR")
-        vix_regime = str(detail.get("vix_regime") or "NORMAL")
-        if vix_regime not in ("NORMAL", "ELEVATED"):
-            vix_regime = "NORMAL"
-        sizing_pct = str(detail.get("sizing_pct") or ("100%" if spy_regime == "BULL" else "research: defensive"))
+        source = str(detail.get("source") or "")
+        if source in ("spy_hmm", "sma50_fallback"):
+            spy_regime = (
+                str(label) if label in ("BULL", "BEAR")
+                else ("BULL" if bull else "BEAR")
+            )
+            vix_regime = str(detail.get("vix_regime") or "NORMAL")
+            if vix_regime not in ("NORMAL", "ELEVATED"):
+                vix_regime = "NORMAL"
+            sizing_pct = str(detail.get("sizing_pct") or "100%")
     except Exception:
         pass
     return {
@@ -798,7 +813,8 @@ def sync_tsd_positions_to_supabase(
         summary["verify_errors"].append(f"tsd_prune:{exc}")
 
     try:
-        pool_snap = _pool_snapshot_from_local(book)
+        previous_pool = sync.get_latest_tsd_pool() or {}
+        pool_snap = _pool_snapshot_from_local(book, previous_pool)
         sync.upsert_tsd_pool_snapshot(pool_snap)
         summary["pool_synced"] = True
         print(
