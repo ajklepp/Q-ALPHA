@@ -187,8 +187,12 @@ Plain-English guide to the specialized terms used in the dashboard, Strategy Lab
 **Plain English:** Each strategy’s play-money bankroll. Same starting size so A vs B is a fair fight.
 
 ### Regime (BULL / BEAR)
-**Definition:** Market-environment label (agent uses SPY vs SMA50-style logic; Lab may tag regimes on historical rows).  
+**Definition:** Market-environment label. Live Status displays the SPY HMM regime; older agent paths and historical Lab rows may still use SPY vs SMA50.  
 **Plain English:** “Risk-on” vs “risk-off” backdrop. Momentum systems often behave differently in each.
+
+### SPY HMM
+**Definition:** The Live Status regime model from EXP-0023. It fits a two-state Gaussian Hidden Markov Model to recent daily SPY returns, calls the higher-return state “bull,” and displays **BULL** when its filtered bull probability is at least 55%; otherwise it displays **BEAR**. It is retained as research/dashboard context and does not change the continuation score, entry gates, or position sizing.  
+**Plain English:** A probability model that estimates whether SPY currently behaves more like its stronger or weaker market state. It replaces the old SMA50 regime label on the dashboard without changing which Peak Hour trades are taken.
 
 ### VIX
 **Definition:** CBOE Volatility Index — implied volatility of near-term S&P 500 options.  
