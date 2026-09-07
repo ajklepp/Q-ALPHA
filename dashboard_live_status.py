@@ -121,7 +121,7 @@ def _render_spy_hmm_regime_banner(tsd_pool: dict | None = None) -> None:
     elif str(last_good.get("spy_regime") or "").upper() in ("BULL", "BEAR"):
         display = last_good
     else:
-        st.caption("SPY HMM data unavailable")
+        # Do not replace the styled regime strip with a loose/ambiguous caption.
         return
 
     spy = str(display.get("spy_regime") or "BULL").upper()
