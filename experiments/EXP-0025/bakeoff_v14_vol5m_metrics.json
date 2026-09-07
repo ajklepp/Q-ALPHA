@@ -1,0 +1,143 @@
+{
+  "generated": "2026-09-07T04:36:32.945971+00:00",
+  "runtime_sec": 18.5,
+  "score_version": "v1.4",
+  "design": {
+    "admits": 3353,
+    "symbols": 267,
+    "symbols_5m_ok": 267,
+    "lookback_min": 180,
+    "slots": 2,
+    "oos_cut": "2026-08-11",
+    "expand_pts": 10.0,
+    "alive_pts": 12.0,
+    "dead_pts": 12.0
+  },
+  "signatures": {
+    "n_admit": 3353,
+    "n_vol5_ok": 1695,
+    "pct_vol5_ok": 0.506,
+    "expand_n": 210,
+    "expand_wr": 0.09047619047619047,
+    "alive_n": 97,
+    "alive_wr": 0.12371134020618557,
+    "dead_n": 1240,
+    "dead_wr": 0.029838709677419355,
+    "base_wr": 0.06441992245750075,
+    "med_acf_train": 0.050772509076590464,
+    "med_rv_train": 0.6401111295093891
+  },
+  "bakeoff": {
+    "v14": {
+      "n": 720,
+      "wr": 0.10277777777777777,
+      "exp": 0.2975879166666666,
+      "mfe": 0.023074981944444448,
+      "capture": 0.43333333333333335,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.3513121929824561,
+        "mfe": 0.02676117543859649,
+        "capture": 0.4
+      },
+      "pass_vs_v14": true,
+      "vacuous": false
+    },
+    "v14_expand": {
+      "n": 720,
+      "wr": 0.10416666666666667,
+      "exp": 0.2947497777777777,
+      "mfe": 0.022829212499999998,
+      "capture": 0.4166666666666667,
+      "oos": {
+        "n": 228,
+        "wr": 0.11403508771929824,
+        "exp": 0.3385510526315789,
+        "mfe": 0.02587601315789474,
+        "capture": 0.34545454545454546
+      },
+      "pass_vs_v14": false,
+      "vacuous": false,
+      "oos_ok": true
+    },
+    "v14_alive": {
+      "n": 720,
+      "wr": 0.1111111111111111,
+      "exp": 0.28566697222222215,
+      "mfe": 0.022668012499999998,
+      "capture": 0.4166666666666667,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.3056312280701754,
+        "mfe": 0.02472478947368421,
+        "capture": 0.34545454545454546
+      },
+      "pass_vs_v14": false,
+      "vacuous": false,
+      "oos_ok": false
+    },
+    "v14_cluster": {
+      "n": 720,
+      "wr": 0.10833333333333334,
+      "exp": 0.28726916666666663,
+      "mfe": 0.02308242361111111,
+      "capture": 0.43333333333333335,
+      "oos": {
+        "n": 228,
+        "wr": 0.11842105263157894,
+        "exp": 0.33131,
+        "mfe": 0.025763425438596495,
+        "capture": 0.36363636363636365
+      },
+      "pass_vs_v14": false,
+      "vacuous": false,
+      "oos_ok": false
+    },
+    "v14_rv_quartile": {
+      "n": 720,
+      "wr": 0.10555555555555556,
+      "exp": 0.29832855555555554,
+      "mfe": 0.023086555555555555,
+      "capture": 0.4222222222222222,
+      "oos": {
+        "n": 228,
+        "wr": 0.12280701754385964,
+        "exp": 0.3524887719298246,
+        "mfe": 0.026993407894736837,
+        "capture": 0.4
+      },
+      "pass_vs_v14": false,
+      "vacuous": false,
+      "oos_ok": true
+    },
+    "v14_combo": {
+      "n": 720,
+      "wr": 0.1111111111111111,
+      "exp": 0.28397819444444444,
+      "mfe": 0.02256912222222222,
+      "capture": 0.39444444444444443,
+      "oos": {
+        "n": 228,
+        "wr": 0.11403508771929824,
+        "exp": 0.30432605263157897,
+        "mfe": 0.024422828947368424,
+        "capture": 0.2909090909090909
+      },
+      "pass_vs_v14": false,
+      "vacuous": false,
+      "oos_ok": false
+    }
+  },
+  "winners": [],
+  "recommendation": "HOLD_DIAGNOSTIC",
+  "recommendation_text": "Expanding-vol strata still richer than baseline, but soft score variants did not clear ship gate vs v1.4 on full-corpus slots. HOLD \u2014 do not wire.",
+  "notes": [
+    "Full all_hours_admit corpus (3353) \u2014 larger than EXP-0025 sample (1400).",
+    "5m fetched per symbol once; pre-signal slice only.",
+    "Missing 5m \u21d2 neutral (no boost/demote) so v1.4 still ranks them.",
+    "Research only \u2014 no live tsd_launch_score edit in this run."
+  ],
+  "cache_n": 3353
+}
