@@ -438,9 +438,49 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         print(f"CONNECT FAILED: {error}")
         return {"error": error, "checked_at": now.isoformat()}
 
+    try:
+        broker_positions: dict[str, float] = {}
+        for broker_pos in ib.positions() or []:
+            broker_symbol = str(
+                getattr(broker_pos.contract, "symbol", "") or ""
+            ).upper()
+            if broker_symbol:
+                broker_positions[broker_symbol] = (
+                    broker_positions.get(broker_symbol, 0.0)
+                    + float(broker_pos.position or 0)
+                )
+    except Exception as exc:
+        print(f"BROKER POSITION CHECK FAILED: {exc}")
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+        return {"error": str(exc), "checked_at": now.isoformat()}
+
+    if not dry_run:
+        try:
+            from tws_intraday_sync import _reconcile_tsd_broker_kills
+
+            reconciled = _reconcile_tsd_broker_kills(ib, broker_positions)
+            if reconciled:
+                print(f"Broker kills reconciled before trail: {reconciled}")
+                state = load_state()
+                opens = [
+                    pos for pos in state.get("positions") or []
+                    if str(pos.get("status", "OPEN")).upper() == "OPEN"
+                ]
+        except Exception as exc:
+            print(f"  broker-kill reconcile warn: {exc}")
+
     actions: list[dict[str, Any]] = []
     for pos in opens:
         sym = pos["symbol"]
+        if not dry_run and float(broker_positions.get(sym, 0.0)) <= 0:
+            # Never submit a SELL unless IBKR confirms a live long. A broker
+            # kill may have filled while the local loop was disconnected.
+            print(f"\n--- {sym} ---")
+            print(f"  {sym}: broker flat — trail SELL blocked")
+            continue
         print(f"\n--- {sym} ---")
         leg_results = _process_position(ib, pos, dry_run=dry_run)
         actions.extend(leg_results)

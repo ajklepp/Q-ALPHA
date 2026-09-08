@@ -222,6 +222,121 @@ def _collect_symbol_fills(ib, symbol: str, since_date: str) -> tuple[list[dict],
     return buys, sells
 
 
+def _reconcile_tsd_broker_kills(
+    ib: Any,
+    broker_positions: dict[str, float],
+) -> list[str]:
+    """
+    Close stale local TSD legs when their broker kill order filled.
+
+    This is deliberately strict: the symbol must be flat at IBKR and a SELL
+    execution must match the leg's stored kill_order_id. That repairs missed
+    broker-stop callbacks without guessing about manual or unrelated sells.
+    """
+    from tsd_scan_pipeline.tsd_capacity import load_state, save_state
+    from tsd_scan_pipeline.tsd_pool import release_on_exit
+    from tsd_scan_pipeline.tsd_trail import remaining_shares
+
+    book = load_state()
+    reconciled: list[str] = []
+    changed = False
+
+    for pos in book.get("positions") or []:
+        if str(pos.get("status") or "").upper() != "OPEN":
+            continue
+        symbol = str(pos.get("symbol") or "").upper()
+        if not symbol or abs(float(broker_positions.get(symbol, 0.0))) >= 1e-6:
+            continue
+
+        open_legs = [
+            (idx, leg)
+            for idx, leg in enumerate(pos.get("legs") or [])
+            if str(leg.get("status") or "").upper() == "OPEN"
+        ]
+        if not open_legs:
+            continue
+
+        since_date = min(
+            (str(leg.get("time") or "")[:10] for _, leg in open_legs),
+            default="",
+        )
+        _buys, sells = _collect_symbol_fills(ib, symbol, since_date)
+        pos_changed = False
+
+        for _leg_index, leg in open_legs:
+            kill_order_id = leg.get("kill_order_id")
+            if kill_order_id is None:
+                continue
+            matched = [
+                fill for fill in sells
+                if str(fill.get("order_id")) == str(kill_order_id)
+            ]
+            if not matched:
+                continue
+
+            trail = leg.get("trail") or {}
+            shares = int(remaining_shares(trail))
+            sold_qty = int(round(sum(float(fill.get("qty") or 0) for fill in matched)))
+            if shares <= 0 or sold_qty < shares:
+                print(
+                    f"  TSD broker-flat {symbol}: kill oid={kill_order_id} "
+                    f"sell qty={sold_qty} remaining={shares} — not auto-closing"
+                )
+                continue
+
+            exit_price = _vwap(matched)
+            if exit_price is None or exit_price <= 0:
+                continue
+            exit_time = str(matched[-1].get("time") or datetime.now(ET).isoformat())
+
+            for tranche in trail.get("tranches") or []:
+                if bool(tranche.get("closed")):
+                    continue
+                tranche["closed"] = True
+                tranche["trailing"] = False
+                tranche["exit_price"] = round(exit_price, 4)
+                tranche["exit_time"] = exit_time
+                tranche["exit_reason"] = "broker_kill_fill"
+
+            leg.setdefault("exits", []).append({
+                "time": exit_time,
+                "shares": shares,
+                "exit_price": round(exit_price, 4),
+                "reason": "broker_kill_fill",
+                "tranche_id": "KILL",
+                "order_id": kill_order_id,
+            })
+            leg["status"] = "CLOSED"
+            trail["kill_stop_cancelled"] = True
+            leg["trail"] = trail
+            entry_price = _finite(trail.get("entry_price")) or _finite(leg.get("price"))
+            release_on_exit(
+                shares,
+                exit_price,
+                entry_price=entry_price,
+                symbol=symbol,
+            )
+            changed = True
+            pos_changed = True
+            print(
+                f"  >>> TSD BROKER KILL RECONCILED {symbol} "
+                f"{shares} @ ${exit_price:.4f} oid={kill_order_id}"
+            )
+
+        if pos_changed and all(
+            str(leg.get("status") or "").upper() == "CLOSED"
+            for leg in pos.get("legs") or []
+        ):
+            pos["status"] = "CLOSED"
+            pos["closed_at"] = datetime.now(ET).isoformat()
+            if symbol not in reconciled:
+                reconciled.append(symbol)
+
+    if changed:
+        save_state(book)
+    return reconciled
+
+
 def _vwap(fills: list[dict]) -> float | None:
     if not fills:
         return None
@@ -628,6 +743,7 @@ def run_tws_intraday_sync(
         "closed": [],
         "repaired": [],
         "reconciled": [],
+        "tsd_reconciled": [],
         "errors": [],
         "sync_errors": [],
         "repair": repair,
@@ -666,6 +782,12 @@ def run_tws_intraday_sync(
         pos_map = _ib_position_map(ib)
         print(f"  TWS positions: {pos_map or '(flat)'}")
 
+        try:
+            summary["tsd_reconciled"] = _reconcile_tsd_broker_kills(ib, pos_map)
+        except Exception as exc:
+            print(f"  TSD broker-kill reconcile warn: {exc}")
+            summary["sync_errors"].append(f"tsd_reconcile:{exc}")
+
         # --- TSD sync first (clean MD subscriptions before gap-agent marks) ---
         try:
             from tsd_supabase_sync import sync_tsd_positions_to_supabase
@@ -695,6 +817,7 @@ def run_tws_intraday_sync(
                 "\nDONE TSD-only "
                 f"open={summary.get('tsd_upserted', 0)} "
                 f"closed={summary.get('tsd_closed', 0)} "
+                f"reconciled={summary.get('tsd_reconciled') or []} "
                 f"pool={summary.get('tsd_pool', False)} "
                 f"sync_errors={summary['sync_errors'] or 'none'}"
             )

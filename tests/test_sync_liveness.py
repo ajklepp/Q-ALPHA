@@ -40,6 +40,9 @@ class _FakeIB:
     def reqExecutions(self):
         return []
 
+    def positions(self):
+        return []
+
     def sleep(self, _seconds):
         return None
 
@@ -90,6 +93,28 @@ class TestTrailMonitorLiveness(unittest.TestCase):
         self.assertNotIn("error", result)
         self.assertEqual(result["client_id"], 85)
 
+    def test_live_trail_never_sells_a_broker_flat_symbol(self):
+        fake = _FakeIB()
+        state = {
+            "positions": [
+                {"symbol": "TEST", "status": "OPEN", "legs": []},
+            ],
+        }
+        with (
+            patch.object(tsd_trail_monitor, "IB", return_value=fake),
+            patch.object(tsd_trail_monitor, "load_state", return_value=state),
+            patch.object(tsd_trail_monitor, "open_symbols", return_value=["TEST"]),
+            patch.object(tsd_trail_monitor, "_process_position") as process_position,
+            patch.object(tsd_trail_monitor, "save_state"),
+            patch.object(tsd_trail_monitor, "_save_snapshot", return_value=Path("test.json")),
+            patch.object(tws_intraday_sync, "_reconcile_tsd_broker_kills", return_value=[]),
+            patch("tsd_supabase_sync.push_dashboard_best_effort"),
+        ):
+            result = tsd_trail_monitor.run_monitor()
+
+        self.assertNotIn("error", result)
+        process_position.assert_not_called()
+
     def test_extended_sleep_does_not_trigger_backup_client(self):
         now = datetime.now(ET)
         with patch.object(
@@ -108,6 +133,72 @@ class TestTrailMonitorLiveness(unittest.TestCase):
 
 
 class TestScheduledTwsSyncLiveness(unittest.TestCase):
+    def test_broker_kill_fill_closes_stale_tsd_leg(self):
+        tranches = [
+            {
+                "id": f"T{idx}",
+                "shares": shares,
+                "weight": weight,
+                "trigger_pct": trigger,
+                "trigger_price": 22.51 * (1 + trigger),
+                "trail_pct": 0.04,
+                "closed": False,
+            }
+            for idx, shares, weight, trigger in (
+                (1, 5, 0.4, 0.03),
+                (2, 4, 0.3, 0.05),
+                (3, 2, 0.2, 0.08),
+                (4, 1, 0.1, 0.10),
+            )
+        ]
+        leg = {
+            "time": "2026-09-08T10:21:00-04:00",
+            "price": 22.51,
+            "shares": 12,
+            "kill_order_id": 41856,
+            "status": "OPEN",
+            "trail": {
+                "entry_price": 22.51,
+                "kill_price": 21.3845,
+                "kill_pct": 0.05,
+                "trail_pct": 0.04,
+                "tranches": tranches,
+            },
+            "exits": [],
+        }
+        position = {"symbol": "BETA", "status": "OPEN", "legs": [leg]}
+        book = {"positions": [position]}
+        sells = [{
+            "side": "SLD",
+            "price": 21.36,
+            "qty": 12.0,
+            "order_id": 41856,
+            "time": "2026-09-08 18:48:53+00:00",
+        }]
+
+        with (
+            patch("tsd_scan_pipeline.tsd_capacity.load_state", return_value=book),
+            patch("tsd_scan_pipeline.tsd_capacity.save_state") as save_state,
+            patch("tsd_scan_pipeline.tsd_pool.release_on_exit") as release,
+            patch.object(
+                tws_intraday_sync,
+                "_collect_symbol_fills",
+                return_value=([], sells),
+            ),
+        ):
+            reconciled = tws_intraday_sync._reconcile_tsd_broker_kills(
+                object(),
+                {},
+            )
+
+        self.assertEqual(reconciled, ["BETA"])
+        self.assertEqual(position["status"], "CLOSED")
+        self.assertEqual(leg["status"], "CLOSED")
+        self.assertTrue(all(row["closed"] for row in tranches))
+        self.assertEqual(leg["exits"][0]["exit_price"], 21.36)
+        release.assert_called_once()
+        save_state.assert_called_once_with(book)
+
     def test_tsd_only_returns_before_legacy_gap_ledger(self):
         fake = _FakeIB()
         tsd_summary = {
@@ -126,6 +217,7 @@ class TestScheduledTwsSyncLiveness(unittest.TestCase):
             patch("ib_insync.IB", return_value=fake),
             patch.object(tws_intraday_sync, "_connect_ib", return_value=96),
             patch.object(tws_intraday_sync, "_ib_position_map", return_value={}),
+            patch.object(tws_intraday_sync, "_reconcile_tsd_broker_kills", return_value=[]),
             patch(
                 "tsd_supabase_sync.sync_tsd_positions_to_supabase",
                 return_value=tsd_summary,
