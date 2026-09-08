@@ -3,9 +3,9 @@
 # Local Live TWS sync (Mon–Fri): marks + filled-flat→CLOSED → Supabase.
 # Modal CANNOT reach TWS — this must run on the PC with TWS paper open.
 #
-# Syncs each run (via tws_intraday_sync.py → sync_tsd_positions_to_supabase):
+# Syncs each scheduled run (via tws_intraday_sync.py --tsd-only):
 #   TSD open legs + TWS marks, closed legs, pool snapshot, watchlist, watch queue
-#   + gap-agent paper marks (unchanged)
+# Legacy gap-ledger repair remains available through manual non-tsd-only runs.
 #
 # Peak Hour on-fill also pushes Supabase immediately (execute_live_entries /
 # trail exits). This job is the 30-min refresh for marks/closes through the day.
@@ -54,7 +54,10 @@ $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Add-Content -LiteralPath $LogFile -Value ""
 Add-Content -LiteralPath $LogFile -Value "======== LIVE TWS SYNC START $stamp ========"
 
-& $Python $Runner 2>&1 | Out-File -FilePath $LogFile -Append -Encoding utf8
+# Unbuffered TSD-only mode keeps this 30-minute freshness job bounded. The
+# legacy gap-ledger reconciliation previously hung after the TSD push and
+# prevented every later scheduled refresh from starting.
+& $Python -u $Runner --tsd-only 2>&1 | Out-File -FilePath $LogFile -Append -Encoding utf8
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 

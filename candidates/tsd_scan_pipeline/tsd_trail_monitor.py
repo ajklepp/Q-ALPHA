@@ -20,10 +20,12 @@ from pathlib import Path
 from typing import Any
 
 import pytz
-from ib_insync import IB, Stock, util
+from ib_insync import IB, Stock
 
 PIPELINE_DIR = Path(__file__).resolve().parent
 CANDIDATES_DIR = PIPELINE_DIR.parent
+LOOP_START_HOUR_ET = 4
+LOOP_STOP_HOUR_ET = 20
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
@@ -387,7 +389,6 @@ def _process_position(
 
 def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     """Single monitor pass over all open TSD book positions."""
-    util.startLoop()
     ib = IB()
     now = datetime.now(ET)
     mode = "DRY_RUN" if dry_run else "LIVE"
@@ -413,6 +414,13 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         ib.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID, timeout=12)
     except Exception as exc:
         print(f"CONNECT FAILED: {exc}")
+        # A timed-out ib_insync connect can leave its socket/clientId alive.
+        # Always tear it down before the loop retries or the process can
+        # conflict with itself forever on clientId 95.
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
         return {"error": str(exc), "checked_at": now.isoformat()}
 
     actions: list[dict[str, Any]] = []
@@ -515,6 +523,13 @@ def main() -> int:
     if args.loop:
         print("Loop mode: Ctrl+C to stop")
         while True:
+            now_et = datetime.now(ET)
+            if now_et.hour >= LOOP_STOP_HOUR_ET or now_et.hour < LOOP_START_HOUR_ET:
+                print(
+                    f"Loop window closed at {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+                    f"(active {LOOP_START_HOUR_ET:02d}:00–{LOOP_STOP_HOUR_ET:02d}:00 ET)"
+                )
+                break
             try:
                 from tsd_scan_pipeline.scheduler import heartbeat_trail_loop
 

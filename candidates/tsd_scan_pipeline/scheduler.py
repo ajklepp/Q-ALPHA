@@ -47,7 +47,10 @@ TICK_WINDOW_MIN = 8
 # Backup trail from --tick only in this window if dedicated loop is down
 TRAIL_BACKUP_HOUR_START = 4   # 04:00 ET (matches trail task start)
 TRAIL_BACKUP_HOUR_END = 20    # stop overnight spam after extended
-TRAIL_BACKUP_MIN_GAP_SEC = 240  # at most one backup trail per ~4 min
+# Dedicated loop sleeps up to 5m outside RTH; allow connect/processing margin
+# before the scheduler starts a second clientId=95 process.
+TRAIL_LOOP_HEARTBEAT_STALE_MIN = 7
+TRAIL_BACKUP_MIN_GAP_SEC = 420
 
 
 def _load_state() -> dict[str, Any]:
@@ -257,7 +260,9 @@ def _trail_loop_active() -> bool:
             ts = ET.localize(ts)
         else:
             ts = ts.astimezone(ET)
-        return (datetime.now(ET) - ts) < timedelta(minutes=3)
+        return (datetime.now(ET) - ts) < timedelta(
+            minutes=TRAIL_LOOP_HEARTBEAT_STALE_MIN
+        )
     except Exception:
         return False
 

@@ -75,6 +75,11 @@ foreach ($tn in @("QAlpha TSD Scheduler", "QAlpha TSD Trail Monitor", "QAlpha TS
     $settings = $task.Settings
     $settings.DisallowStartIfOnBatteries = $false
     $settings.StopIfGoingOnBatteries = $false
+    if ($tn -eq "QAlpha TSD Trail Monitor") {
+        # The loop should end at 20:00 ET; this prevents a stale process from
+        # blocking the next day's 04:00 restart if it ever fails to exit.
+        $settings.ExecutionTimeLimit = New-TimeSpan -Hours 17
+    }
     Set-ScheduledTask -TaskName $tn -Settings $settings | Out-Null
     Write-Host "  Battery OK: $tn"
 }

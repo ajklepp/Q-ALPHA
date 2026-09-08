@@ -51,6 +51,17 @@ schtasks /Change /TN "QAlpha Autonomous Agent" /DISABLE 2>$null
 # Peak Hour marks — 07:00 start / 30m / through RTH (matches start_tws_intraday_scheduled.ps1)
 schtasks /Create /F /TN "QAlpha Live TWS Sync" /TR $trTws /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 07:00 /RI 30 /DU 09:30 /RL LIMITED
 $results["QAlpha Live TWS Sync"] = ($LASTEXITCODE -eq 0)
+if ($results["QAlpha Live TWS Sync"]) {
+    $task = Get-ScheduledTask -TaskName "QAlpha Live TWS Sync" -ErrorAction SilentlyContinue
+    if ($task) {
+        $settings = $task.Settings
+        # A stale updater must not suppress every later 30-minute refresh.
+        $settings.ExecutionTimeLimit = New-TimeSpan -Minutes 10
+        $settings.DisallowStartIfOnBatteries = $false
+        $settings.StopIfGoingOnBatteries = $false
+        Set-ScheduledTask -TaskName "QAlpha Live TWS Sync" -Settings $settings | Out-Null
+    }
+}
 
 Write-Host ""
 Write-Host "Results:"

@@ -609,14 +609,19 @@ def _notify_connect_failed(tried: tuple[int, ...] | list[int], exc: Exception) -
         print(f"  telegram warn: {notify_exc}")
 
 
-def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
+def run_tws_intraday_sync(
+    *,
+    repair: bool = False,
+    tsd_only: bool = False,
+) -> dict[str, Any]:
     """
-    Connect TWS → mark opens still long → CLOSE filled-then-flat →
-    repair wrong exit px on already-CLOSED flats → rebuild pool → sync Supabase.
-    """
-    from ib_insync import IB, util
+    Refresh broker state; scheduled runs may stop after the primary TSD sync.
 
-    util.startLoop()
+    Full/manual mode also marks legacy gap opens, closes filled-then-flat rows,
+    repairs exit prices, rebuilds that pool, and syncs Supabase.
+    """
+    from ib_insync import IB
+
     ib = IB()
     summary: dict[str, Any] = {
         "marked": [],
@@ -685,6 +690,27 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
             print(f"  TSD sync warn: {exc}")
             summary["sync_errors"].append(f"tsd_sync:{exc}")
 
+        if tsd_only:
+            print(
+                "\nDONE TSD-only "
+                f"open={summary.get('tsd_upserted', 0)} "
+                f"closed={summary.get('tsd_closed', 0)} "
+                f"pool={summary.get('tsd_pool', False)} "
+                f"sync_errors={summary['sync_errors'] or 'none'}"
+            )
+            try:
+                from supabase_sync import SupabaseSync
+
+                SupabaseSync().log_health(
+                    "tws_sync",
+                    "OK" if not summary["sync_errors"] else "WARN",
+                    f"TSD-only open={summary.get('tsd_upserted', 0)} "
+                    f"errors={len(summary.get('sync_errors') or [])}",
+                )
+            except Exception:
+                pass
+            return summary
+
         store = PaperTradesStore()
         data = store.load()
         trades = data.get("trades") or []
@@ -738,10 +764,11 @@ def run_tws_intraday_sync(*, repair: bool = False) -> dict[str, Any]:
                     )
                 continue
 
-            # Skip historical CLOSED under --repair before expensive reqExecutions.
+            # Historical CLOSED rows are immutable during routine refreshes.
+            # Re-querying every old symbol can hang reqExecutions and suppress
+            # all later Task Scheduler runs.
             if (
                 status == "CLOSED"
-                and repair
                 and entry_date
                 and entry_date != today_et
             ):
@@ -938,10 +965,18 @@ def main() -> int:
         action="store_true",
         help="Re-price CLOSED exits from TWS sells + force Supabase upsert.",
     )
+    parser.add_argument(
+        "--tsd-only",
+        action="store_true",
+        help="Refresh primary Peak Hour TSD marks/cloud state, then exit.",
+    )
     args = parser.parse_args()
     if args.repair:
         print("  --repair: re-price CLOSED from TWS sell fills + full sync")
-    result = run_tws_intraday_sync(repair=bool(args.repair))
+    result = run_tws_intraday_sync(
+        repair=bool(args.repair),
+        tsd_only=bool(args.tsd_only),
+    )
     if result.get("sync_errors"):
         return 1
     if result.get("errors") and not (
