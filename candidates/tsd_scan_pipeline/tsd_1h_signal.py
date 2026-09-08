@@ -37,6 +37,9 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 
 ET = pytz.timezone("America/New_York")
 HTF_1H_BARS_MIN = 80
+H1_LOOKBACK_DAYS = 45  # >80 hourly bars without Polygon's 50k base-bar cap.
+MAX_AGG_PAGES = 10  # Safety cap for unexpected Polygon cursor depth.
+MAX_COMPLETED_BAR_AGE = timedelta(minutes=90)
 # Through 15:00 bar close → 15:15 scan; premarket 05/06/08/09 from EXP-0021 hitch study
 ALLOWED_HOURS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 BAR_SOURCE = "polygon_1h_aggs_start_labeled"
@@ -73,14 +76,33 @@ def _as_et(now: datetime | None) -> datetime:
     return dt.astimezone(ET)
 
 
-def _bars_1h_polygon(symbol: str, *, api_key: str, days: int = 90) -> pd.DataFrame:
+def _bars_1h_polygon(
+    symbol: str,
+    *,
+    api_key: str,
+    days: int = H1_LOOKBACK_DAYS,
+) -> pd.DataFrame:
+    """Fetch the complete Polygon window, following aggregate cursor pages."""
     sym = symbol.upper()
     end = datetime.now(ET).date()
     start = end - timedelta(days=days)
     url = f"{POLYGON_BASE}/v2/aggs/ticker/{sym}/range/1/hour/{start}/{end}"
     params = {"adjusted": "true", "sort": "asc", "limit": 50000}
-    data = polygon_get(url, params, api_key)
-    results = data.get("results") or []
+    results_by_time: dict[int, dict[str, Any]] = {}
+    pages = 0
+    while url and pages < MAX_AGG_PAGES:
+        data = polygon_get(url, params, api_key)
+        for bar in data.get("results") or []:
+            if bar.get("t") is not None:
+                results_by_time[int(bar["t"])] = bar
+        pages += 1
+        url = str(data.get("next_url") or "")
+        params = {}
+    if url:
+        raise RuntimeError(
+            f"Polygon 1H pagination exceeded {MAX_AGG_PAGES} pages for {sym}"
+        )
+    results = [results_by_time[key] for key in sorted(results_by_time)]
     if not results:
         return pd.DataFrame()
 
@@ -191,6 +213,21 @@ def evaluate_1h_buy_signal(
             "htf_1h_buy_signal": False,
             "source": "insufficient_1h_bars",
             "symbol": sym,
+        }
+
+    now_et = _as_et(now)
+    latest_start = pd.Timestamp(completed.index[-1])
+    latest_end = latest_start + pd.Timedelta(hours=1)
+    bar_age = now_et - latest_end.to_pydatetime()
+    if bar_age > MAX_COMPLETED_BAR_AGE:
+        return False, {
+            "htf_1h_buy_signal": False,
+            "source": "stale_1h_bars",
+            "reject_reason": "stale_1h_bars",
+            "symbol": sym,
+            "htf_1h_bar_time": latest_start,
+            "htf_1h_bar_hour": bar_close_hour_et(latest_start),
+            "bar_age_minutes": round(bar_age.total_seconds() / 60.0, 1),
         }
 
     enriched = enrich_tsd(completed)
