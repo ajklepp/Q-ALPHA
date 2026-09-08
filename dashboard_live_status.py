@@ -25,12 +25,14 @@ from dashboard_theme import (
 )
 from dashboard_tsd_helpers import (
     hold_time_display,
+    mark_age_minutes,
 )
 
 TSD_STARTING_POOL = 3000.0
 # Peak Hour Performers scan slots (bar close + lag) — used for countdown only
 PHP_LAUNCH_HOURS_ET = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 PHP_LAUNCH_LAG_MIN = 15
+LIVE_MARK_STALE_MIN = 5
 ET = pytz.timezone("America/New_York")
 
 
@@ -598,8 +600,18 @@ def _render_tsd_open_card(row: dict) -> None:
     peak_high = _safe_float(row.get("peak_high"), float("nan"))
     current_price = _safe_float(row.get("current_price"), entry_price)
     shares = int(_safe_float(row.get("shares"), 0.0))
-    pnl_dollars = _safe_float(row.get("pnl_dollars"), 0.0)
-    pnl_pct_val = _safe_float(row.get("pnl_pct"), 0.0)
+    calculated_pnl = (
+        (current_price - entry_price) * shares
+        if entry_price > 0 and current_price > 0 and shares > 0
+        else 0.0
+    )
+    calculated_pct = (
+        (current_price - entry_price) / entry_price
+        if entry_price > 0 and current_price > 0
+        else 0.0
+    )
+    pnl_dollars = _safe_float(row.get("pnl_dollars"), calculated_pnl)
+    pnl_pct_val = _safe_float(row.get("pnl_pct"), calculated_pct)
     ran = _ran_up_label(entry_price, peak_high)
 
     c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
@@ -621,7 +633,18 @@ def _render_tsd_open_card(row: dict) -> None:
     render_thesis_expander(thesis)
 
     hhmm = _updated_hhmm_et(row.get("last_updated"))
-    st.caption(f"Updated: {hhmm} ET" if hhmm else "Updated: —")
+    mark_age = mark_age_minutes(row.get("last_updated"))
+    now_et = datetime.now(ET)
+    should_be_live = now_et.weekday() < 5 and 4 <= now_et.hour < 20
+    if (
+        hhmm
+        and mark_age is not None
+        and mark_age > LIVE_MARK_STALE_MIN
+        and should_be_live
+    ):
+        st.caption(f"Updated: {hhmm} ET · ⚠️ STALE MARK ({mark_age:.0f}m)")
+    else:
+        st.caption(f"Updated: {hhmm} ET" if hhmm else "Updated: —")
     st.divider()
 
 

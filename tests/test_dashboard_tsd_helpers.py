@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from datetime import datetime
 
 import pandas as pd
 
@@ -12,6 +13,7 @@ from dashboard_tsd_helpers import (
     format_trail_stop_cell,
     hold_time_display,
     map_exit_layer,
+    mark_age_minutes,
     mfe_in_r,
     next_trail_stop,
     progress_fraction,
@@ -21,6 +23,11 @@ from dashboard_tsd_helpers import (
 
 
 class TestDashboardHelpers(unittest.TestCase):
+    def test_mark_age_minutes(self):
+        now = datetime.fromisoformat("2026-09-08T10:06:00-04:00")
+        age = mark_age_minutes("2026-09-08T10:00:00-04:00", now=now)
+        self.assertEqual(age, 6.0)
+
     def test_format_level(self):
         self.assertEqual(format_level(7.45, 7.31), "$7.45 (+1.9% entry)")
 

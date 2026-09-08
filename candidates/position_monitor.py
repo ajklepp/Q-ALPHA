@@ -375,15 +375,53 @@ class PositionMonitor:
         }
 
 
+def _fetch_tsd_eod_snapshot() -> dict:
+    """Read Peak Hour cloud state so EOD never reports only the legacy book."""
+    try:
+        from supabase_sync import SupabaseSync
+
+        sync = SupabaseSync()
+        rows = sync.get_tsd_positions(status="OPEN")
+        pool = sync.get_latest_tsd_pool() or {}
+        return {"available": True, "positions": rows, "pool": pool}
+    except Exception as exc:
+        print(f"  Peak Hour EOD snapshot unavailable: {exc}")
+        return {"available": False, "positions": [], "pool": {}, "error": str(exc)}
+
+
 def format_eod_telegram(result: dict) -> str:
-    """Build EOD Telegram summary message."""
+    """Build EOD Telegram summary with Peak Hour as the primary live book."""
     date = result["date"]
     events = result.get("events", [])
     pool = result.get("pool", {})
     summary = result.get("summary", {})
+    tsd = result.get("tsd_eod") or {}
+    tsd_positions = tsd.get("positions") or []
+
+    if tsd.get("available") and tsd_positions:
+        symbols = sorted(
+            str(row.get("symbol") or "").upper()
+            for row in tsd_positions
+            if row.get("symbol")
+        )
+        open_pnl = sum(float(row.get("pnl_dollars") or 0) for row in tsd_positions)
+        tsd_pool = tsd.get("pool") or {}
+        return "\n".join([
+            f"📊 PEAK HOUR EOD — {date}",
+            "──────────────────────────────",
+            f"Open positions:  {len(tsd_positions)}",
+            f"Open P&L:        ${open_pnl:+.2f}",
+            f"Cash:            ${float(tsd_pool.get('pool') or 0):,.2f}",
+            f"Deployed:        ${float(tsd_pool.get('deployed') or 0):,.2f}",
+            f"Names:           {', '.join(symbols)}",
+        ])
 
     if not events and summary.get("open_trades", 0) == 0:
-        return "📊 Q-ALPHA EOD: No open positions. Waiting for signals."
+        if tsd.get("available"):
+            return "📊 PEAK HOUR EOD: No open positions. Waiting for signals."
+        if tsd:
+            return "⚠️ PEAK HOUR EOD: Cloud position status unavailable; not reporting flat."
+        return "📊 LEGACY EOD: No open legacy positions."
 
     lines = [
         f"📊 Q-ALPHA EOD REPORT — {date}",
@@ -441,6 +479,7 @@ def run_monitor_core(
     """Execute monitor pipeline."""
     monitor = PositionMonitor(api_key, test_mode=test_mode)
     result = monitor.run()
+    result["tsd_eod"] = _fetch_tsd_eod_snapshot()
 
     if bot_token and chat_id and not test_mode:
         tg = TelegramClient(bot_token, chat_id)

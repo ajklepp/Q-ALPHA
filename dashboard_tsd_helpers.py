@@ -23,6 +23,26 @@ def _sf(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def mark_age_minutes(
+    value: Any,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    """Return non-negative age of a cloud mark timestamp in minutes."""
+    if not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = ET.localize(stamp)
+        current = now or datetime.now(ET)
+        if current.tzinfo is None:
+            current = ET.localize(current)
+        return max(0.0, (current.astimezone(ET) - stamp.astimezone(ET)).total_seconds() / 60)
+    except (TypeError, ValueError):
+        return None
+
+
 def pct_from_entry(price: float, entry: float) -> float | None:
     """Fractional change from entry (0.019 = +1.9%)."""
     if entry <= 0 or price <= 0:
