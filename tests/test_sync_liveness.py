@@ -60,7 +60,35 @@ class TestTrailMonitorLiveness(unittest.TestCase):
             result = tsd_trail_monitor.run_monitor()
 
         self.assertIn("error", result)
-        self.assertEqual(fake.disconnect_calls, 1)
+        self.assertEqual(
+            fake.disconnect_calls,
+            len(tsd_trail_monitor.TWS_CLIENT_ID_FALLBACKS),
+        )
+
+    def test_trail_connect_falls_back_from_stale_primary_client_id(self):
+        class _FallbackIB(_FakeIB):
+            def connect(self, *_args, **kwargs):
+                if kwargs.get("clientId") == 95:
+                    raise TimeoutError("primary stale")
+                return True
+
+        fake = _FallbackIB()
+        state = {
+            "positions": [
+                {"symbol": "TEST", "status": "OPEN", "legs": []},
+            ],
+        }
+        with (
+            patch.object(tsd_trail_monitor, "IB", return_value=fake),
+            patch.object(tsd_trail_monitor, "load_state", return_value=state),
+            patch.object(tsd_trail_monitor, "open_symbols", return_value=["TEST"]),
+            patch.object(tsd_trail_monitor, "_process_position", return_value=[]),
+            patch.object(tsd_trail_monitor, "_save_snapshot", return_value=Path("test.json")),
+        ):
+            result = tsd_trail_monitor.run_monitor(dry_run=True)
+
+        self.assertNotIn("error", result)
+        self.assertEqual(result["client_id"], 85)
 
     def test_extended_sleep_does_not_trigger_backup_client(self):
         now = datetime.now(ET)

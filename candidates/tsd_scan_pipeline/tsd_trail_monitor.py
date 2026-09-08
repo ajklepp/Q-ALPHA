@@ -62,6 +62,7 @@ from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
 TWS_HOST = "127.0.0.1"
 TWS_PORT = 7497
 TWS_CLIENT_ID = 95
+TWS_CLIENT_ID_FALLBACKS = (TWS_CLIENT_ID, 85, 75)
 ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 
@@ -397,7 +398,10 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     print("=" * 64)
     print(f"Q-ALPHA TSD TRAIL MONITOR - {mode}")
     print("Structure: KILL ONLY until +1R")
-    print(f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} clientId={TWS_CLIENT_ID}")
+    print(
+        f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} "
+        f"clientIds={list(TWS_CLIENT_ID_FALLBACKS)}"
+    )
     print("=" * 64)
 
     state = load_state()
@@ -410,18 +414,29 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         _save_snapshot(payload)
         return payload
 
-    try:
-        ib.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID, timeout=12)
-    except Exception as exc:
-        print(f"CONNECT FAILED: {exc}")
-        # A timed-out ib_insync connect can leave its socket/clientId alive.
-        # Always tear it down before the loop retries or the process can
-        # conflict with itself forever on clientId 95.
+    last_connect_error: Exception | None = None
+    used_client_id: int | None = None
+    for client_id in TWS_CLIENT_ID_FALLBACKS:
         try:
-            ib.disconnect()
-        except Exception:
-            pass
-        return {"error": str(exc), "checked_at": now.isoformat()}
+            ib.connect(TWS_HOST, TWS_PORT, clientId=client_id, timeout=12)
+            used_client_id = client_id
+            print(f"CONNECTED clientId={client_id}")
+            break
+        except Exception as exc:
+            last_connect_error = exc
+            print(f"CONNECT FAIL clientId={client_id}: {exc}")
+            # A timed-out ib_insync connect can leave its socket/clientId alive.
+            # Tear it down before trying the fallback or the loop can conflict
+            # with itself forever.
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
+            time.sleep(0.25)
+    if used_client_id is None:
+        error = str(last_connect_error or "all client IDs unavailable")
+        print(f"CONNECT FAILED: {error}")
+        return {"error": error, "checked_at": now.isoformat()}
 
     actions: list[dict[str, Any]] = []
     for pos in opens:
@@ -478,6 +493,7 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     payload = {
         "mode": mode,
         "session": session,
+        "client_id": used_client_id,
         "checked_at": now.isoformat(),
         "open_count": len(opens),
         "actions": actions,
