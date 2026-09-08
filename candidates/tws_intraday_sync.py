@@ -265,14 +265,33 @@ def _reconcile_tsd_broker_kills(
 
         for _leg_index, leg in open_legs:
             kill_order_id = leg.get("kill_order_id")
-            if kill_order_id is None:
-                continue
             matched = [
                 fill for fill in sells
                 if str(fill.get("order_id")) == str(kill_order_id)
-            ]
+            ] if kill_order_id is not None else []
+            exit_reason = "broker_kill_fill"
+            # A failed trail loop may have overwritten kill_order_id after the
+            # original stop filled. For a single-leg, broker-flat position,
+            # accept only SELL executions at/after this leg's open timestamp.
             if not matched:
-                continue
+                if len(open_legs) != 1:
+                    continue
+                try:
+                    opened_at = datetime.fromisoformat(str(leg.get("time") or ""))
+                    if opened_at.tzinfo is None:
+                        opened_at = ET.localize(opened_at)
+                    opened_utc = opened_at.astimezone(timezone.utc)
+                    matched = [
+                        fill for fill in sells
+                        if datetime.fromisoformat(
+                            str(fill.get("time") or "").replace("Z", "+00:00")
+                        ).astimezone(timezone.utc) >= opened_utc
+                    ]
+                except (TypeError, ValueError):
+                    matched = []
+                if not matched:
+                    continue
+                exit_reason = "broker_flat_sell_fill"
 
             trail = leg.get("trail") or {}
             shares = int(remaining_shares(trail))
@@ -296,15 +315,16 @@ def _reconcile_tsd_broker_kills(
                 tranche["trailing"] = False
                 tranche["exit_price"] = round(exit_price, 4)
                 tranche["exit_time"] = exit_time
-                tranche["exit_reason"] = "broker_kill_fill"
+                tranche["exit_reason"] = exit_reason
 
+            execution_order_id = matched[-1].get("order_id")
             leg.setdefault("exits", []).append({
                 "time": exit_time,
                 "shares": shares,
                 "exit_price": round(exit_price, 4),
-                "reason": "broker_kill_fill",
+                "reason": exit_reason,
                 "tranche_id": "KILL",
-                "order_id": kill_order_id,
+                "order_id": execution_order_id,
             })
             leg["status"] = "CLOSED"
             trail["kill_stop_cancelled"] = True
@@ -320,7 +340,8 @@ def _reconcile_tsd_broker_kills(
             pos_changed = True
             print(
                 f"  >>> TSD BROKER KILL RECONCILED {symbol} "
-                f"{shares} @ ${exit_price:.4f} oid={kill_order_id}"
+                f"{shares} @ ${exit_price:.4f} oid={execution_order_id} "
+                f"reason={exit_reason}"
             )
 
         if pos_changed and all(

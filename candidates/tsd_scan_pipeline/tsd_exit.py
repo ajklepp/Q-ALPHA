@@ -86,6 +86,23 @@ def sync_kill_quantity(
                 return True
         return True
 
+    # Long-only invariant: never create or enlarge a SELL stop unless IBKR
+    # confirms enough live long shares. Local state can lag a broker kill fill.
+    try:
+        broker_qty = sum(
+            float(pos.position or 0)
+            for pos in (ib.positions() or [])
+            if str(getattr(pos.contract, "symbol", "") or "").upper()
+            == symbol.upper()
+        )
+    except Exception as exc:
+        print(f"  {symbol} kill sync blocked: broker position unavailable ({exc})")
+        return False
+    if broker_qty <= 0:
+        print(f"  {symbol} kill sync blocked: broker flat")
+        return False
+    remaining = min(remaining, int(broker_qty))
+
     if kill_oid is None:
         return False
 

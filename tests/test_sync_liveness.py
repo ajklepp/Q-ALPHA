@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "candidates"))
 import pytz
 
 import tws_intraday_sync
-from tsd_scan_pipeline import scheduler, tsd_trail_monitor
+from tsd_scan_pipeline import scheduler, tsd_exit, tsd_trail_monitor
 
 ET = pytz.timezone("America/New_York")
 
@@ -115,6 +115,18 @@ class TestTrailMonitorLiveness(unittest.TestCase):
         self.assertNotIn("error", result)
         process_position.assert_not_called()
 
+    def test_kill_sync_does_not_replace_sell_when_broker_flat(self):
+        fake = _FakeIB()
+        leg = {
+            "shares": 12,
+            "kill_order_id": 41875,
+            "trail": {"tranches": []},
+        }
+        with patch.object(tsd_exit, "remaining_shares", return_value=12):
+            result = tsd_exit.sync_kill_quantity(fake, leg, "BETA")
+
+        self.assertFalse(result)
+
     def test_extended_sleep_does_not_trigger_backup_client(self):
         now = datetime.now(ET)
         with patch.object(
@@ -155,7 +167,7 @@ class TestScheduledTwsSyncLiveness(unittest.TestCase):
             "time": "2026-09-08T10:21:00-04:00",
             "price": 22.51,
             "shares": 12,
-            "kill_order_id": 41856,
+            "kill_order_id": 41875,
             "status": "OPEN",
             "trail": {
                 "entry_price": 22.51,
@@ -196,6 +208,8 @@ class TestScheduledTwsSyncLiveness(unittest.TestCase):
         self.assertEqual(leg["status"], "CLOSED")
         self.assertTrue(all(row["closed"] for row in tranches))
         self.assertEqual(leg["exits"][0]["exit_price"], 21.36)
+        self.assertEqual(leg["exits"][0]["order_id"], 41856)
+        self.assertEqual(leg["exits"][0]["reason"], "broker_flat_sell_fill")
         release.assert_called_once()
         save_state.assert_called_once_with(book)
 
