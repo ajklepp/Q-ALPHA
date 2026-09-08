@@ -1,0 +1,15 @@
+---
+description: Auto commit and push completed work without asking the user
+alwaysApply: true
+---
+
+# Auto commit + push
+
+When you finish a task that changes the repo:
+
+1. **Commit and push automatically** — do not ask the user to confirm push or run git tasks manually.
+2. **Scope commits** to files related to the completed work only (no unrelated WIP).
+3. **Never commit**: `.env`, secrets, runtime state (`tsd_book_state.json`, `tsd_pool_state.json`, `pool_state.json`), generated scan/cache JSON, or `strategy_lab/results/*` unless the task explicitly requires it.
+4. **Never** `git push --force` to `main`/`master`. If push is rejected, `git pull --rebase origin main` then push again.
+5. Use clear commit messages (1–2 sentences, focus on why).
+6. Report the commit hash and that push succeeded — no "say the word to push" prompts.
