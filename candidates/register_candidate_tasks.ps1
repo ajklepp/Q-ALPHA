@@ -56,7 +56,7 @@ if ($results["QAlpha Live TWS Sync"]) {
     if ($task) {
         $settings = $task.Settings
         # A stale updater must not suppress every later 30-minute refresh.
-        $settings.ExecutionTimeLimit = New-TimeSpan -Minutes 10
+        $settings.ExecutionTimeLimit = "PT10M"
         $settings.DisallowStartIfOnBatteries = $false
         $settings.StopIfGoingOnBatteries = $false
         Set-ScheduledTask -TaskName "QAlpha Live TWS Sync" -Settings $settings | Out-Null
