@@ -57,6 +57,13 @@ app = modal.App("qalpha-scheduler")
 volume = modal.Volume.from_name("qalpha-state", create_if_missing=True)
 VOLUME_PATH = "/state"
 CANDIDATES_MOUNT = "/root/candidates"
+MODAL_CODE_IGNORE = [
+    "**/__pycache__/**",
+    "logs/**",
+    "**/results/**",
+    "*_state.json",
+    "paper_trades.json",
+]
 
 qalpha_secrets = modal.Secret.from_name("q-alpha-secrets")
 
@@ -72,7 +79,11 @@ image = (
         "tzdata",
         "pytz",
     ])
-    .add_local_dir(str(CANDIDATES_DIR), remote_path=CANDIDATES_MOUNT)
+    .add_local_dir(
+        str(CANDIDATES_DIR),
+        remote_path=CANDIDATES_MOUNT,
+        ignore=MODAL_CODE_IGNORE,
+    )
 )
 
 
