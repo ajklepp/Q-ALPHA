@@ -9,13 +9,15 @@ Gates (Peak Hour — not gap Lane A):
   - min_wait 2 minutes after signal
   - ABORT if low pierces structure (or −1.5% from signal close)
   - CONFIRM if holding near signal close with constructive 1m close
-  - TIMEOUT → SKIP (do not chase)
+  - Do not chase: wait for pullback if extended >+1.5% above signal
+  - Dead-tape RVOL skip when enough 1m bars exist
+  - TIMEOUT → SKIP (do not chase); EH/sparse may use live TWS last to hold-confirm
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from typing import Any, Literal
 
 import pytz
@@ -25,10 +27,15 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 ET = pytz.timezone("America/New_York")
 
 MIN_WAIT_MIN = 2
-MAX_WAIT_MIN = 10  # wall clock after queue; premarket may be sparse
+MAX_WAIT_MIN = 10  # wall clock after queue (RTH)
+MAX_WAIT_MIN_EH = 20  # extended hours: sparse 1m bars, give more time
 DUMP_PCT = 0.015  # −1.5% from signal = abort
 STRUCTURE_BUFFER = 0.002  # 0.2% under structure
 HOLD_PCT = 0.003  # must be within −0.3% of signal to confirm
+CHASE_PCT = 0.015  # >+1.5% above signal → wait for pullback (no chase)
+MIN_MICRO_RVOL = 0.40  # post-signal vol vs prior 1m median (enough bars only)
+MICRO_RVOL_MIN_BARS = 5
+SPARSE_BARS_MAX = 2  # ≤ this → prefer live quote over TIMEOUT when holding
 # Also inspect tape from 1H bar close → scan (:00→:15) before buying
 PRE_SCAN_ABORT = True
 
@@ -43,6 +50,24 @@ class MicroBar:
     low: float
     close: float
     volume: float
+
+
+def is_extended_hours(now: datetime | None = None) -> bool:
+    """True outside RTH 09:30–16:00 ET weekdays (pre/AH/overnight)."""
+    dt = now or datetime.now(ET)
+    if dt.tzinfo is None:
+        dt = ET.localize(dt)
+    else:
+        dt = dt.astimezone(ET)
+    if dt.weekday() >= 5:
+        return True
+    t = dt.time()
+    return not (dtime(9, 30) <= t < dtime(16, 0))
+
+
+def post_queue_max_wait(now: datetime | None = None) -> float:
+    """Wall-clock minutes after queue before TIMEOUT."""
+    return float(MAX_WAIT_MIN_EH if is_extended_hours(now) else MAX_WAIT_MIN)
 
 
 def fetch_1m_bars(
@@ -98,6 +123,59 @@ def bars_since(
     return out
 
 
+def micro_rvol(
+    all_bars: list[MicroBar],
+    window: list[MicroBar],
+    *,
+    signal_end: datetime,
+) -> float | None:
+    """
+    Post-signal avg 1m volume / median of prior 20 one-minute bars.
+
+    Returns None when not enough history to judge (do not gate).
+    """
+    if len(window) < MICRO_RVOL_MIN_BARS:
+        return None
+    prior = [b for b in all_bars if b.ts <= signal_end][-20:]
+    if len(prior) < 10:
+        return None
+    vols = sorted(float(b.volume or 0) for b in prior)
+    mid = vols[len(vols) // 2]
+    if mid <= 0:
+        return None
+    avg_win = sum(float(b.volume or 0) for b in window) / len(window)
+    return avg_win / mid
+
+
+def pullback_limit_price(
+    signal_close: float,
+    *,
+    last_close: float | None = None,
+    structure_level: float | None = None,
+) -> float:
+    """
+    Passive BUY limit: prefer near signal, not chase of last print.
+
+    If extended above signal, limit sits just above signal (wait for dip).
+    """
+    sig = float(signal_close)
+    if sig <= 0:
+        return 0.0
+    last = float(last_close) if last_close and last_close > 0 else sig
+    # Cap: never pay more than +0.2% over signal on the limit
+    cap = round(sig * 1.002, 2)
+    if last > sig * (1.0 + CHASE_PCT * 0.5):
+        # Extended — sit at signal + 0.1% and wait for pullback fill
+        lmt = round(sig * 1.001, 2)
+    else:
+        lmt = round(min(last, sig) * 1.002, 2)
+    if structure_level and float(structure_level) > 0:
+        # Do not place limit under structure (would be a thesis break buy)
+        floor = round(float(structure_level) * (1.0 + STRUCTURE_BUFFER), 2)
+        lmt = max(lmt, floor)
+    return min(lmt, cap) if cap > 0 else lmt
+
+
 def evaluate_micro_confirm(
     *,
     signal_close: float,
@@ -106,6 +184,8 @@ def evaluate_micro_confirm(
     minutes_elapsed: float,
     min_wait: float = MIN_WAIT_MIN,
     max_wait: float = MAX_WAIT_MIN,
+    micro_rvol_ratio: float | None = None,
+    vol_ratio_20: float | None = None,
 ) -> tuple[MicroVerdict, str]:
     """
     Pure decision from post-signal 1-min bars.
@@ -139,10 +219,27 @@ def evaluate_micro_confirm(
     last = bars_after[-1]
     # Holding near signal
     hold_floor = signal_close * (1.0 - HOLD_PCT)
+    chase_ceil = signal_close * (1.0 + CHASE_PCT)
     if last.close < hold_floor:
         if minutes_elapsed >= max_wait:
             return "TIMEOUT", f"weak_hold_close={last.close:.4f}"
         return "PENDING", f"below_hold_close={last.close:.4f}"
+
+    # No chase: wait for pullback into band
+    if last.close > chase_ceil:
+        if minutes_elapsed >= max_wait:
+            return "TIMEOUT", f"chase_skip_close={last.close:.4f}"
+        return "PENDING", f"waiting_pullback_close={last.close:.4f}"
+
+    # Dead tape: skip when we have enough 1m evidence (or daily vol_ratio soft)
+    if micro_rvol_ratio is not None and micro_rvol_ratio < MIN_MICRO_RVOL:
+        if minutes_elapsed >= max_wait:
+            return "TIMEOUT", f"dead_tape_rvol={micro_rvol_ratio:.2f}"
+        return "PENDING", f"waiting_rvol={micro_rvol_ratio:.2f}"
+    if vol_ratio_20 is not None and 0 < vol_ratio_20 < 0.45:
+        if minutes_elapsed >= max_wait:
+            return "TIMEOUT", f"dead_vol_ratio_20={vol_ratio_20:.2f}"
+        return "PENDING", f"waiting_vol_ratio_20={vol_ratio_20:.2f}"
 
     # Constructive tape: last bar green OR close >= prior close OR reclaim after dip
     constructive = last.close >= last.open
@@ -161,18 +258,39 @@ def evaluate_micro_confirm(
     return "CONFIRM", f"hold_ok_close={last.close:.4f}"
 
 
+def _live_last_hold_ok(
+    *,
+    signal_close: float,
+    structure_level: float | None,
+    live_last: float,
+) -> bool:
+    """True if TWS/live last is holding (not dumping) near signal."""
+    if live_last <= 0 or signal_close <= 0:
+        return False
+    dump_floor = signal_close * (1.0 - DUMP_PCT)
+    if structure_level and structure_level > 0:
+        dump_floor = max(dump_floor, float(structure_level) * (1.0 - STRUCTURE_BUFFER))
+    if live_last <= dump_floor:
+        return False
+    hold_floor = signal_close * (1.0 - HOLD_PCT)
+    chase_ceil = signal_close * (1.0 + CHASE_PCT)
+    return hold_floor <= live_last <= chase_ceil
+
+
 def confirm_peak_hour_entry(
     row: dict[str, Any],
     *,
     now: datetime | None = None,
     bars: list[MicroBar] | None = None,
     api_key: str | None = None,
+    live_last: float | None = None,
 ) -> tuple[MicroVerdict, str, dict[str, Any]]:
     """
     Evaluate one WATCHING Peak Hour row.
 
     Expects: symbol, signal_close/htf_1h_close, structure_level,
     htf_1h_bar_hour (close hour), queued_at/scan_at.
+    Optional live_last: TWS last used on sparse/TIMEOUT to avoid false skips.
     """
     now_et = now or datetime.now(ET)
     if now_et.tzinfo is None:
@@ -192,6 +310,11 @@ def confirm_peak_hour_entry(
         structure_f = float(structure) if structure is not None else None
     except (TypeError, ValueError):
         structure_f = None
+
+    try:
+        vol_ratio_20 = float(row.get("vol_ratio_20")) if row.get("vol_ratio_20") is not None else None
+    except (TypeError, ValueError):
+        vol_ratio_20 = None
 
     queued_raw = row.get("queued_at") or row.get("scan_at") or row.get("added_at")
     try:
@@ -215,12 +338,30 @@ def confirm_peak_hour_entry(
 
     elapsed = (now_et - queued).total_seconds() / 60.0
     day = signal_end.strftime("%Y-%m-%d")
+    queue_max = post_queue_max_wait(now_et)
+    signal_max = 15.0 + queue_max
 
     if bars is None:
         try:
             all_bars = fetch_1m_bars(sym, day=day, api_key=api_key)
         except Exception as exc:
-            if elapsed >= MAX_WAIT_MIN:
+            if elapsed >= queue_max:
+                # Sparse EH: live quote can still confirm hold
+                if live_last is not None and _live_last_hold_ok(
+                    signal_close=signal, structure_level=structure_f, live_last=live_last,
+                ):
+                    meta = {
+                        "symbol": sym,
+                        "elapsed_min": round(elapsed, 2),
+                        "n_bars": 0,
+                        "live_last": live_last,
+                        "verdict": "CONFIRM",
+                        "reason": f"tws_hold_after_fetch_fail:{exc}",
+                        "limit_price": pullback_limit_price(
+                            signal, last_close=live_last, structure_level=structure_f,
+                        ),
+                    }
+                    return "CONFIRM", meta["reason"], meta
                 return "TIMEOUT", f"bar_fetch_fail:{exc}", {}
             return "PENDING", f"bar_fetch_retry:{exc}", {}
     else:
@@ -228,42 +369,78 @@ def confirm_peak_hour_entry(
 
     # Include pre-scan tape (bar close → now) so dump between :00 and :15 aborts
     window = bars_since(all_bars, after=signal_end, until=now_et)
-    # Elapsed for min_wait counts from signal bar end (not just queue)
     elapsed_from_signal = (now_et - signal_end).total_seconds() / 60.0
+    rvol = micro_rvol(all_bars, window, signal_end=signal_end)
 
     verdict, reason = evaluate_micro_confirm(
         signal_close=signal,
         structure_level=structure_f,
         bars_after=window,
         minutes_elapsed=elapsed_from_signal,
-        min_wait=MIN_WAIT_MIN + 0,  # already ~15m at scan; 2m after signal_end is trivial
-        max_wait=15.0 + MAX_WAIT_MIN,  # :00→:15 plus post-queue watch
+        min_wait=MIN_WAIT_MIN,
+        max_wait=signal_max,
+        micro_rvol_ratio=rvol,
+        vol_ratio_20=vol_ratio_20,
     )
-    # At first scan moment, if already aborted on pre-scan tape — done
-    # If PENDING only because waiting constructive but we have 15m tape, be stricter:
+    # If PENDING only because waiting constructive but we have 15m tape, re-eval
     if verdict == "PENDING" and elapsed_from_signal >= 15.0 and window:
-        # Re-eval with min_wait satisfied using queue elapsed for timeout
         verdict2, reason2 = evaluate_micro_confirm(
             signal_close=signal,
             structure_level=structure_f,
             bars_after=window,
             minutes_elapsed=max(elapsed_from_signal, MIN_WAIT_MIN + 0.1),
             min_wait=MIN_WAIT_MIN,
-            max_wait=15.0 + MAX_WAIT_MIN,
+            max_wait=signal_max,
+            micro_rvol_ratio=rvol,
+            vol_ratio_20=vol_ratio_20,
         )
         verdict, reason = verdict2, reason2
 
-    if verdict == "PENDING" and elapsed >= MAX_WAIT_MIN:
+    if verdict == "PENDING" and elapsed >= queue_max:
         # Wall-clock post-queue timeout
         if window:
             last = window[-1]
             hold_floor = signal * (1.0 - HOLD_PCT)
-            if last.close >= hold_floor:
-                verdict, reason = "CONFIRM", f"timeout_hold_close={last.close:.4f}"
+            chase_ceil = signal * (1.0 + CHASE_PCT)
+            if hold_floor <= last.close <= chase_ceil:
+                # Re-check dead tape at timeout
+                if rvol is not None and rvol < MIN_MICRO_RVOL:
+                    verdict, reason = "TIMEOUT", f"post_queue_dead_tape_rvol={rvol:.2f}"
+                elif vol_ratio_20 is not None and 0 < vol_ratio_20 < 0.45:
+                    verdict, reason = "TIMEOUT", f"post_queue_dead_vol_ratio_20={vol_ratio_20:.2f}"
+                else:
+                    verdict, reason = "CONFIRM", f"timeout_hold_close={last.close:.4f}"
             else:
                 verdict, reason = "TIMEOUT", f"post_queue_timeout_close={last.close:.4f}"
         else:
             verdict, reason = "TIMEOUT", "post_queue_no_bars"
+
+    # Sparse / no-bars TIMEOUT → TWS last hold (do not loosen dump abort)
+    sparse = len(window) <= SPARSE_BARS_MAX
+    if (
+        verdict == "TIMEOUT"
+        and live_last is not None
+        and (sparse or "no_bars" in reason or "bar_fetch" in reason)
+        and _live_last_hold_ok(
+            signal_close=signal, structure_level=structure_f, live_last=live_last,
+        )
+    ):
+        # Still require no dump in whatever bars we have
+        dump_ok = True
+        abort_px = signal * (1.0 - DUMP_PCT)
+        if structure_f and structure_f > 0:
+            abort_px = max(abort_px, structure_f * (1.0 - STRUCTURE_BUFFER))
+        for b in window:
+            if b.low <= abort_px:
+                dump_ok = False
+                break
+        if dump_ok:
+            verdict, reason = "CONFIRM", f"tws_hold_last={live_last:.4f}"
+
+    last_close = window[-1].close if window else live_last
+    limit_px = pullback_limit_price(
+        signal, last_close=last_close, structure_level=structure_f,
+    ) if signal > 0 else None
 
     meta = {
         "symbol": sym,
@@ -271,7 +448,12 @@ def confirm_peak_hour_entry(
         "elapsed_from_signal_min": round(elapsed_from_signal, 2),
         "n_bars": len(window),
         "last_close": window[-1].close if window else None,
+        "live_last": live_last,
+        "micro_rvol": round(rvol, 3) if rvol is not None else None,
+        "vol_ratio_20": vol_ratio_20,
         "signal_end": signal_end.isoformat(),
+        "queue_max_wait": queue_max,
+        "limit_price": limit_px,
         "verdict": verdict,
         "reason": reason,
     }

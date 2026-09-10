@@ -77,14 +77,27 @@ def build_entry_order(
     session: SessionKind,
     shares: int,
     ref_price: float,
+    *,
+    limit_price: float | None = None,
+    prefer_limit: bool = False,
 ) -> MarketOrder | LimitOrder:
-    """Build session-appropriate BUY order."""
-    if session == "RTH":
+    """
+    Build session-appropriate BUY order.
+
+    prefer_limit / limit_price: pullback entry — sit near signal instead of
+    chasing last (RTH uses LimitOrder when set; EH always limit).
+    """
+    if limit_price is not None and limit_price > 0:
+        lmt = round(float(limit_price), 2)
+    else:
+        lmt = round(ref_price * 1.002, 2)
+
+    if session == "RTH" and not prefer_limit and limit_price is None:
         return MarketOrder(action="BUY", totalQuantity=shares, tif="DAY")
 
-    lmt = round(ref_price * 1.002, 2)
     order = LimitOrder(action="BUY", totalQuantity=shares, lmtPrice=lmt, tif="DAY")
-    order.outsideRth = True
+    if session != "RTH":
+        order.outsideRth = True
     return order
 
 
@@ -129,9 +142,14 @@ def place_tsd_entry(
     entry_price: float | None = None,
     pool: float | None = None,
     kill_pct: float | None = None,
+    limit_price: float | None = None,
+    prefer_limit: bool = False,
 ) -> dict[str, Any]:
     """
     Place session-aware BUY, emergency kill stop, and update pool on fill.
+
+    limit_price / prefer_limit: micro-confirm pullback — LimitOrder near signal
+    instead of market-chasing an extended print.
     """
     sym = symbol.upper()
     pool_val = pool if pool is not None else load_tsd_pool()
@@ -158,17 +176,22 @@ def place_tsd_entry(
     equity = cash + deployed
     open_n = full_slots_used(load_state())
     budget = deploy_budget(equity, cash, open_n)
-    shares = shares_for_budget(budget, px)
+    size_px = float(limit_price) if limit_price and limit_price > 0 else px
+    shares = shares_for_budget(budget, size_px)
     if shares <= 0:
         return {"status": "REJECTED", "reason": "shares_zero", "symbol": sym, "price": px}
 
     session = classify_session()
-    order = build_entry_order(session, shares, px)
+    # Pullback limits need a bit longer to rest on the book
+    fill_wait = FILL_WAIT_SEC + (30 if (prefer_limit or limit_price) else 0)
+    order = build_entry_order(
+        session, shares, px, limit_price=limit_price, prefer_limit=prefer_limit,
+    )
     trade = ib.placeOrder(contract, order)
 
     import time as time_mod
 
-    deadline = time_mod.time() + FILL_WAIT_SEC
+    deadline = time_mod.time() + fill_wait
     filled = 0.0
     avg_fill = px
     while time_mod.time() < deadline:

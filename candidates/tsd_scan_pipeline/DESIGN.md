@@ -13,7 +13,7 @@
 | `tsd_popularity` | Multi-day Polygon movers + $vol leaders + live gainers + TWS MOST_ACTIVE/TOP_PERC_GAIN |
 | `tsd_attention` | Attention Pool: top continuation ∪ tradable_popular ∪ soft-extension (ST optional) |
 | `tsd_case_review` | ENTER / WAIT / REJECT — score alone cannot buy |
-| `tsd_watch_queue` + micro-confirm + `execute_live_entries` | Admit → 1m tape confirm → BUY **case-ENTER only** |
+| `tsd_watch_queue` + micro-confirm + `execute_live_entries` | Admit → 1m tape confirm (+RVOL/no-chase) → pullback Limit BUY |
 | `tsd_social` (Polygon + TWS news + StockTwits; X off) | Rank soft terms + case dossier evidence |
 | `tsd_deep_features` (20d room/bounce + 1H path prior) | Path prior when n≥3; else profile analog fallback |
 | Missed ledger `evidence` + thesis | Frozen decision snapshot for Weekly Review |
@@ -31,7 +31,7 @@
 3. **Momentum / popularity** — ask “is this a popular stock to trade?” via recent multi-day leaderboard history (not first 1H print alone), TWS scanners, live gainers; StockTwits is optional only.  
 4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT.  
 5. **BUY only case-ENTER**, still capped at 2/scan + capacity.  
-6. **Micro-confirm before BUY** — after case ENTER, watch 1-min tape from the 1H bar close; ABORT if dumping through −1.5%/structure; CONFIRM only if holding. Trail loop continues polling WATCHING names for ~10 minutes.
+6. **Micro-confirm before BUY** — after case ENTER, watch 1-min tape from the 1H bar close; ABORT if dumping through −1.5%/structure; wait for pullback if extended >+1.5%; skip dead tape (micro RVOL / vol_ratio_20); CONFIRM only if holding. EH wait extends to ~20m; sparse bars may use TWS last to hold-confirm (dump abort never loosened). Confirmed buys use **pullback LimitOrder** near signal. Trail loop continues polling WATCHING names.
 
 ### Not Live Paper (research / disabled)
 

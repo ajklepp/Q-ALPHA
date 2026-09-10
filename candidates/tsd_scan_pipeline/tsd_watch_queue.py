@@ -327,10 +327,18 @@ def execute_live_entries(
         kill_pct, kill_source = resolve_kill_pct(
             kill_pct, profile=cand.get("tsd_profile"),
         )
+        limit_px = cand.get("limit_price")
+        try:
+            limit_f = float(limit_px) if limit_px is not None else None
+        except (TypeError, ValueError):
+            limit_f = None
+        prefer_limit = bool(cand.get("prefer_limit") or (limit_f and limit_f > 0))
         fill = place_tsd_entry(
             ib, sym,
             entry_price=cand.get("htf_1h_close") or cand.get("close"),
             kill_pct=kill_pct,
+            limit_price=limit_f,
+            prefer_limit=prefer_limit,
         )
         if fill.get("status") != "FILLED":
             results.append({**fill, "kind": entry_kind})
@@ -491,6 +499,10 @@ def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "htf_sma20_rising": row.get("htf_sma20_rising"),
         "kill_pct": row.get("kill_pct"),
         "tsd_profile": row.get("tsd_profile"),
+        "vol_ratio_20": row.get("vol_ratio_20"),
+        "limit_price": row.get("limit_price"),
+        "prefer_limit": row.get("prefer_limit", True),
+        "last_close": row.get("last_close"),
     }
 
 
@@ -543,9 +555,13 @@ def process_micro_confirm_queue(
     Peak Hour micro-confirm tick: WATCHING → CONFIRM (buy) / ABORT / TIMEOUT.
 
     Call after 1H launch admits and from the trail monitor loop so we do not
-    market-buy into an already-failing 1-min tape.
+    market-buy into an already-failing 1-min tape. Sparse EH may use TWS last;
+    CONFIRMs use pullback LimitOrder near signal (no chase).
     """
+    from ib_insync import Stock
+
     from tsd_scan_pipeline.tsd_capacity import load_state, save_state
+    from tsd_scan_pipeline.tsd_entry import _ref_price
     from tsd_scan_pipeline.tsd_micro_confirm import confirm_peak_hour_entry
 
     state = load_queue()
@@ -562,16 +578,29 @@ def process_micro_confirm_queue(
 
     for row in watching:
         sym = str(row.get("symbol") or "").upper()
-        verdict, reason, meta = confirm_peak_hour_entry(row, api_key=polygon_key)
+        live_last: float | None = None
+        if ib is not None:
+            try:
+                contract = Stock(sym, "SMART", "USD")
+                ib.qualifyContracts(contract)
+                live_last = _ref_price(ib, contract)
+            except Exception as exc:
+                print(f"  MICRO {sym}: tws quote warn: {exc}")
+        verdict, reason, meta = confirm_peak_hour_entry(
+            row, api_key=polygon_key, live_last=live_last,
+        )
         print(
             f"  MICRO {sym}: {verdict} {reason} "
-            f"bars={meta.get('n_bars')} elapsed={meta.get('elapsed_min')}"
+            f"bars={meta.get('n_bars')} elapsed={meta.get('elapsed_min')} "
+            f"rvol={meta.get('micro_rvol')} lim={meta.get('limit_price')}"
         )
         if verdict == "PENDING":
             update_queue_row(
                 sym,
                 extra={"micro_confirm": "pending", "micro_reason": reason, **{
-                    k: meta.get(k) for k in ("n_bars", "last_close", "elapsed_min")
+                    k: meta.get(k) for k in (
+                        "n_bars", "last_close", "elapsed_min", "micro_rvol", "limit_price",
+                    )
                 }},
             )
             results.append({"symbol": sym, "status": "PENDING", "reason": reason})
@@ -585,15 +614,29 @@ def process_micro_confirm_queue(
             )
             results.append({"symbol": sym, "status": verdict, "reason": reason})
             continue
-        # CONFIRM
+        # CONFIRM — pullback limit near signal
+        limit_px = meta.get("limit_price")
         update_queue_row(
             sym,
             status="CONFIRMED",
             reason=reason,
-            extra={"micro_confirm": "confirm", "micro_reason": reason},
+            extra={
+                "micro_confirm": "confirm",
+                "micro_reason": reason,
+                "limit_price": limit_px,
+                "prefer_limit": True,
+                "last_close": meta.get("last_close") or live_last,
+                "micro_rvol": meta.get("micro_rvol"),
+            },
         )
-        to_enter.append(queue_row_as_candidate(row))
-        results.append({"symbol": sym, "status": "CONFIRM", "reason": reason})
+        cand = queue_row_as_candidate({**row, "limit_price": limit_px, "prefer_limit": True})
+        to_enter.append(cand)
+        results.append({
+            "symbol": sym,
+            "status": "CONFIRM",
+            "reason": reason,
+            "limit_price": limit_px,
+        })
 
     if live and ib is not None and to_enter:
         fills = execute_live_entries(ib, to_enter, book)
@@ -605,6 +648,7 @@ def process_micro_confirm_queue(
                 "symbol": c.get("symbol"),
                 "status": "DRY_CONFIRM",
                 "reason": "micro_confirm_ok",
+                "limit_price": c.get("limit_price"),
             })
 
     return results
