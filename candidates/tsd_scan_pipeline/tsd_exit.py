@@ -55,6 +55,252 @@ def cancel_order_safe(ib: IB, order_id: int | None) -> bool:
     return False
 
 
+OWNER_CANCEL_CLIENT_IDS = (0, 91, 93, 94, 95, 96, 97, 88, 89, 90)
+
+
+def _open_sell_rows(ib: IB) -> list[dict[str, Any]]:
+    """Snapshot working SELL orders (symbol, orderId, clientId, type)."""
+    rows: list[dict[str, Any]] = []
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.35)
+    except Exception:
+        pass
+    for trade in list(ib.openTrades() or []):
+        try:
+            action = str(trade.order.action or "").upper()
+            if action != "SELL":
+                continue
+            status = str(trade.orderStatus.status or "")
+            if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                continue
+            rows.append({
+                "symbol": str(getattr(trade.contract, "symbol", "") or "").upper(),
+                "order_id": int(trade.order.orderId or 0),
+                "client_id": int(getattr(trade.order, "clientId", 0) or 0),
+                "order_type": str(trade.order.orderType or ""),
+            })
+        except Exception:
+            continue
+    return [r for r in rows if r["symbol"] and r["order_id"] > 0]
+
+
+def _broker_qty_map(ib: IB) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for pos in ib.positions() or []:
+        sym = str(getattr(pos.contract, "symbol", "") or "").upper()
+        if not sym:
+            continue
+        out[sym] = out.get(sym, 0.0) + float(pos.position or 0)
+    return out
+
+
+def _cancel_oids_on_ib(ib: IB, order_ids: set[int]) -> list[int]:
+    """
+    Cancel specific order ids on this connection.
+
+    Returns ids that are actually gone (Cancelled / ApiCancelled / missing)
+    after the cancel attempt — not merely ids we *sent* a cancel for.
+    IBKR Error 10147 (wrong clientId) must not count as success.
+    """
+    if not order_ids:
+        return []
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.35)
+    except Exception:
+        pass
+
+    attempted: set[int] = set()
+    for trade in list(ib.openTrades() or []):
+        try:
+            oid = int(trade.order.orderId or 0)
+        except Exception:
+            continue
+        if oid not in order_ids:
+            continue
+        try:
+            ib.cancelOrder(trade.order)
+            attempted.add(oid)
+            sym = str(getattr(trade.contract, "symbol", "") or "").upper()
+            print(
+                f"  {sym} cancel sent oid={oid} "
+                f"type={trade.order.orderType} via clientId={getattr(ib.client, 'clientId', '?')}"
+            )
+        except Exception as exc:
+            print(f"  cancel oid={oid} warn: {exc}")
+
+    if attempted:
+        ib.sleep(0.6)
+        try:
+            ib.reqAllOpenOrders()
+            ib.sleep(0.35)
+        except Exception:
+            pass
+
+    still_open: set[int] = set()
+    for trade in list(ib.openTrades() or []):
+        try:
+            oid = int(trade.order.orderId or 0)
+        except Exception:
+            continue
+        if oid not in order_ids:
+            continue
+        status = str(trade.orderStatus.status or "")
+        if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+            continue
+        still_open.add(oid)
+
+    confirmed = sorted(oid for oid in attempted if oid not in still_open)
+    # Also treat already-absent target ids as done if they were in order_ids
+    # and never appeared as working after refresh (no false success from 10147).
+    for oid in list(order_ids):
+        if oid not in still_open and oid not in attempted:
+            # Was never visible on this client — do not claim success.
+            pass
+    for oid in confirmed:
+        print(f"  confirm cancelled oid={oid}")
+    if attempted and still_open:
+        print(
+            f"  cancel incomplete via clientId={getattr(ib.client, 'clientId', '?')}: "
+            f"still open {sorted(still_open)}"
+        )
+    return confirmed
+
+
+def cancel_working_sells_for_symbol(
+    ib: IB,
+    symbol: str,
+    *,
+    dry_run: bool = False,
+) -> list[int]:
+    """
+    Cancel every working SELL order for *symbol* on this connection.
+
+    Used after full exits and for orphan housekeeping so leftover STP/LMT
+    kills cannot short a flat name. Returns cancelled order ids.
+    """
+    sym = symbol.upper()
+    rows = [r for r in _open_sell_rows(ib) if r["symbol"] == sym]
+    if not rows:
+        return []
+    if dry_run:
+        for r in rows:
+            print(
+                f"  {sym} DRY_RUN cancel orphan SELL oid={r['order_id']} "
+                f"type={r['order_type']}"
+            )
+        return [int(r["order_id"]) for r in rows]
+    return _cancel_oids_on_ib(ib, {int(r["order_id"]) for r in rows})
+
+
+def housekeep_orphan_sell_orders(
+    ib: IB,
+    *,
+    dry_run: bool = False,
+    host: str = "127.0.0.1",
+    port: int = 7497,
+    owner_retry: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Cancel working SELL orders on symbols that are flat at the broker.
+
+    Safety net for missed kill-cancels after structure / kill / manual exits.
+    Never cancels SELL orders for symbols that still have a long.
+
+    If ``owner_retry`` is True and cancels fail with Error 10147 (foreign
+    clientId), reconnect as the recorded owner clientIds and retry — same
+    pattern as flatten_tws_paper.
+    """
+    try:
+        broker_qty = _broker_qty_map(ib)
+    except Exception as exc:
+        print(f"  orphan housekeep blocked: positions unavailable ({exc})")
+        return []
+
+    sell_rows = _open_sell_rows(ib)
+    orphan_rows = [
+        r for r in sell_rows
+        if float(broker_qty.get(r["symbol"], 0.0)) <= 0
+    ]
+    if not orphan_rows:
+        print("  orphan housekeep: no flat-symbol working sells")
+        return []
+
+    if dry_run:
+        actions = []
+        by_sym: dict[str, list[int]] = {}
+        for r in orphan_rows:
+            by_sym.setdefault(r["symbol"], []).append(int(r["order_id"]))
+            print(
+                f"  {r['symbol']} DRY_RUN cancel orphan SELL "
+                f"oid={r['order_id']} type={r['order_type']} client={r['client_id']}"
+            )
+        for sym, oids in sorted(by_sym.items()):
+            actions.append({"symbol": sym, "cancelled_order_ids": oids})
+        return actions
+
+    target_oids = {int(r["order_id"]) for r in orphan_rows}
+    cancelled = set(_cancel_oids_on_ib(ib, target_oids))
+
+    remaining = [
+        r for r in orphan_rows if int(r["order_id"]) not in cancelled
+    ]
+    if remaining and owner_retry:
+        # Prefer recorded owner clientIds first — foreign cancel returns 10147.
+        owner_ids: list[int] = []
+        for r in remaining:
+            cid = int(r["client_id"])
+            if cid not in owner_ids:
+                owner_ids.append(cid)
+        for cid in OWNER_CANCEL_CLIENT_IDS:
+            if cid not in owner_ids:
+                owner_ids.append(cid)
+        primary_cid = int(getattr(getattr(ib, "client", None), "clientId", -1) or -1)
+        print(
+            f"  orphan housekeep: {len(remaining)} sell(s) remain — "
+            f"retry as owner clients {owner_ids}"
+        )
+        for cid in owner_ids:
+            if not (target_oids - cancelled):
+                break
+            if cid == primary_cid:
+                cancelled.update(_cancel_oids_on_ib(ib, target_oids - cancelled))
+                continue
+            temp = IB()
+            try:
+                temp.connect(host, port, clientId=cid, timeout=8)
+            except Exception as exc:
+                print(f"  owner clientId={cid} connect skip: {exc}")
+                try:
+                    temp.disconnect()
+                except Exception:
+                    pass
+                continue
+            try:
+                cancelled.update(_cancel_oids_on_ib(temp, target_oids - cancelled))
+            finally:
+                try:
+                    temp.disconnect()
+                except Exception:
+                    pass
+
+    by_sym: dict[str, list[int]] = {}
+    for r in orphan_rows:
+        oid = int(r["order_id"])
+        if oid in cancelled:
+            by_sym.setdefault(r["symbol"], []).append(oid)
+    actions = [
+        {"symbol": sym, "cancelled_order_ids": oids}
+        for sym, oids in sorted(by_sym.items())
+    ]
+    if actions:
+        print(f"  orphan housekeep: cancelled sells on {len(actions)} flat symbol(s)")
+    else:
+        print("  orphan housekeep: no flat-symbol working sells cancelled")
+    return actions
+
+
 def sync_kill_quantity(
     ib: IB,
     leg: dict[str, Any],
@@ -65,29 +311,14 @@ def sync_kill_quantity(
     """
     Keep emergency kill stop aligned with remaining shares.
 
-    - remaining == 0 → cancel kill (only when fully flat)
-    - remaining > 0 → modify kill qty to match (cancel+replace if needed)
+    - remaining == 0 or broker flat → cancel kill / any working SELLs
+    - remaining > 0 → resize kill qty to match (cancel+replace if needed)
     """
     trail = leg.get("trail") or {}
     remaining = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
     kill_oid = leg.get("kill_order_id")
 
-    if remaining <= 0:
-        if kill_oid and not trail.get("kill_stop_cancelled"):
-            if dry_run:
-                trail["kill_stop_cancelled"] = True
-                leg["trail"] = trail
-                print(f"  {symbol} DRY_RUN cancel kill oid={kill_oid} (flat)")
-                return True
-            if cancel_order_safe(ib, kill_oid):
-                trail["kill_stop_cancelled"] = True
-                leg["trail"] = trail
-                print(f"  {symbol} cancelled kill oid={kill_oid} (fully flat)")
-                return True
-        return True
-
-    # Long-only invariant: never create or enlarge a SELL stop unless IBKR
-    # confirms enough live long shares. Local state can lag a broker kill fill.
+    # Long-only invariant: never leave working SELL stops on a flat broker book.
     try:
         broker_qty = sum(
             float(pos.position or 0)
@@ -97,10 +328,20 @@ def sync_kill_quantity(
         )
     except Exception as exc:
         print(f"  {symbol} kill sync blocked: broker position unavailable ({exc})")
-        return False
-    if broker_qty <= 0:
-        print(f"  {symbol} kill sync blocked: broker flat")
-        return False
+        broker_qty = None
+
+    if remaining <= 0 or (broker_qty is not None and broker_qty <= 0):
+        cancelled = cancel_working_sells_for_symbol(ib, symbol, dry_run=dry_run)
+        if kill_oid and int(kill_oid) not in cancelled:
+            cancel_order_safe(ib, kill_oid)
+        trail["kill_stop_cancelled"] = True
+        leg["trail"] = trail
+        print(
+            f"  {symbol} kill/orphan SELL cleanup "
+            f"remaining={remaining} broker={broker_qty} cancelled={cancelled}"
+        )
+        return True
+
     remaining = min(remaining, int(broker_qty))
 
     if kill_oid is None:
