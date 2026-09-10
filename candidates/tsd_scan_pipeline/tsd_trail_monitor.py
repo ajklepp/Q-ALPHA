@@ -355,7 +355,13 @@ def _process_leg(
             )
     if is_t4_only(trail):
         pos["t4_only"] = True
-        print(f"  {sym}: T4-only runner — slot freed")
+        open_ids = [
+            str(t.get("id") or "").upper()
+            for t in (trail.get("tranches") or [])
+            if not t.get("closed")
+        ]
+        label = "+".join(open_ids) if open_ids else "runner"
+        print(f"  {sym}: {label} trailing — slot freed")
 
     pos["legs"][leg_index] = leg
     return results

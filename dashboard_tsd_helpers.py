@@ -402,18 +402,38 @@ def unrealized_from_open_row(row: dict[str, Any]) -> float:
     return round((mark - entry) * shares, 2)
 
 
-def is_t34_trailing_position(row: dict[str, Any]) -> bool:
-    """
-    True when an open name still holds T3 and/or T4 shares (runner inventory).
-    """
+def open_tranche_ids(row: dict[str, Any]) -> list[str]:
+    """Open tranche labels on a cloud/local open row (e.g. T1, T2)."""
+    ids: list[str] = []
     for t in parse_tranche_json(row.get("tranche_json")):
         if bool(t.get("closed")):
             continue
         tid = str(t.get("id") or t.get("tranche_id") or "").upper()
-        if tid in ("T3", "T4"):
-            return True
-    # t4_only flag means only the runner remains
-    return bool(row.get("t4_only"))
+        if tid:
+            ids.append(tid)
+    return ids
+
+
+def is_t34_trailing_position(row: dict[str, Any]) -> bool:
+    """
+    True when only runner inventory remains (T3 and/or T4).
+
+    Full open = T1 and/or T2 still intact (consumes a slot).
+    Trailing = T1 and T2 gone; residual T3/T4 free the slot.
+    """
+    if bool(row.get("t4_only")) and remaining_open_shares(row) > 0:
+        return True
+    ids = open_tranche_ids(row)
+    if not ids:
+        return False
+    return all(tid in ("T3", "T4") for tid in ids)
+
+
+def is_full_slot_position(row: dict[str, Any]) -> bool:
+    """True when an open name still consumes a full slot (T1/T2 intact)."""
+    if remaining_open_shares(row) <= 0:
+        return False
+    return not is_t34_trailing_position(row)
 
 
 def scoreboard_pnl(
@@ -424,6 +444,7 @@ def scoreboard_pnl(
     Consistent Peak Hour scoreboard P&L parts.
 
     Headline P&L = realized (closed + open partials) + unrealized (remaining).
+    Open = full slots (T1/T2 intact). Trailing = T3/T4-only runners.
     """
     closed_realized = sum(_sf(r.get("pnl_dollars"), 0.0) for r in closed_rows)
     partial_realized = sum(partial_realized_from_open_row(r) for r in open_rows)
@@ -441,6 +462,7 @@ def scoreboard_pnl(
     flats = len(closed_rows) - winners - losers
     decisive = winners + losers
     trailing = sum(1 for r in open_rows if is_t34_trailing_position(r))
+    full_slots = sum(1 for r in open_rows if is_full_slot_position(r))
     return {
         "realized": realized,
         "closed_realized": round(closed_realized, 2),
@@ -454,5 +476,6 @@ def scoreboard_pnl(
         "decisive": decisive,
         "win_rate": (winners / decisive) if decisive else None,
         "open_names": len({str(r.get("symbol") or "").upper() for r in open_rows if r.get("symbol")}),
+        "full_slots": full_slots,
         "trailing_positions": trailing,
     }

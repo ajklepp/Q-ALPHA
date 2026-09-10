@@ -123,7 +123,12 @@ def _position(state: dict[str, Any], symbol: str) -> dict[str, Any] | None:
 
 
 def full_slots_used(state: dict[str, Any]) -> int:
-    """Count positions occupying a full slot (not T4-only runner)."""
+    """
+    Count positions occupying a full slot.
+
+    Full slot = T1 and/or T2 still intact. t4_only runners (T3 and/or T4
+    residual after T1/T2 exit) do not consume a slot.
+    """
     n = 0
     for pos in state.get("positions") or []:
         if str(pos.get("status", "OPEN")).upper() != "OPEN":
@@ -343,7 +348,7 @@ def record_entry(
 
 
 def mark_t4_only(state: dict[str, Any], symbol: str) -> None:
-    """T4-only runner frees a full slot."""
+    """Mark T3/T4 runner residual — frees a full slot (T1/T2 already gone)."""
     pos = _position(state, symbol)
     if pos:
         pos["t4_only"] = True

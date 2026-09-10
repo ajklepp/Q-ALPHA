@@ -166,7 +166,8 @@ class TestScoreboardPnl(unittest.TestCase):
         ]
         self.assertEqual(remaining_open_shares(open_rows[0]), 26)
         self.assertAlmostEqual(partial_realized_from_open_row(open_rows[0]), 4.32, places=2)
-        self.assertTrue(is_t34_trailing_position(open_rows[0]))
+        # T2 still intact → full slot, not trailing
+        self.assertFalse(is_t34_trailing_position(open_rows[0]))
         board = scoreboard_pnl(open_rows, closed_rows)
         self.assertEqual(board["winners"], 1)
         self.assertEqual(board["losers"], 1)
@@ -178,7 +179,38 @@ class TestScoreboardPnl(unittest.TestCase):
             (6.56 - 6.36) * 26,
             places=2,
         )
+        self.assertEqual(board["full_slots"], 1)
+        self.assertEqual(board["trailing_positions"], 0)
+
+    def test_trailing_only_when_t1_t2_gone(self):
+        runner = {
+            "symbol": "RUN",
+            "entry_price": 10.0,
+            "current_price": 11.0,
+            "shares": 3,
+            "tranche_json": [
+                {"id": "T1", "shares": 4, "closed": True, "exit_price": 10.5},
+                {"id": "T2", "shares": 3, "closed": True, "exit_price": 10.8},
+                {"id": "T3", "shares": 2, "closed": False},
+                {"id": "T4", "shares": 1, "closed": False},
+            ],
+        }
+        tiny = {
+            "symbol": "ATRC",
+            "entry_price": 50.0,
+            "current_price": 51.0,
+            "shares": 4,
+            "tranche_json": [
+                {"id": "T1", "shares": 2, "closed": False},
+                {"id": "T2", "shares": 2, "closed": False},
+            ],
+        }
+        self.assertTrue(is_t34_trailing_position(runner))
+        self.assertFalse(is_t34_trailing_position(tiny))
+        board = scoreboard_pnl([runner, tiny], [])
+        self.assertEqual(board["full_slots"], 1)
         self.assertEqual(board["trailing_positions"], 1)
+        self.assertEqual(board["open_names"], 2)
 
 
 if __name__ == "__main__":

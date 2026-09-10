@@ -688,7 +688,12 @@ def render_live_status_tab(
     from dashboard_tsd_helpers import scoreboard_pnl
 
     board = scoreboard_pnl(tsd_rows, tsd_closed)
-    open_names = int(tsd_pool.get("open_names") or board["open_names"] or 0)
+    # Open = full slots (T1/T2 intact). Prefer cloud open_positions when present.
+    open_full = int(
+        tsd_pool.get("open_positions")
+        if tsd_pool.get("open_positions") is not None
+        else board["full_slots"]
+    )
     total_equity = cash + board["open_mtm"]
     # Prefer identity P&L (realized+unrealized). Fall back to equity-start if marks missing.
     total_pnl = board["total_pnl"]
@@ -725,7 +730,7 @@ def render_live_status_tab(
             else:
                 st.metric("Win rate", "—")
         with d2:
-            st.metric("Open", str(open_names))
+            st.metric("Open", str(open_full))
         with d3:
             st.metric("Trailing Positions", str(board["trailing_positions"]))
         with d4:
@@ -733,6 +738,7 @@ def render_live_status_tab(
         st.caption(
             f"Unrealized ${unrealized_pnl:+,.2f} · realized ${realized_pnl:+,.2f}"
             f" · score {_continuation_score_version()}"
+            f" · Open = T1/T2 intact · Trailing = T3/T4 only"
         )
 
     with st.container(border=True):

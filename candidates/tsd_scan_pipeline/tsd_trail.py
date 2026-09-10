@@ -188,10 +188,18 @@ def remaining_shares(trail_doc: dict[str, Any]) -> int:
 
 
 def is_t4_only(trail_doc: dict[str, Any]) -> bool:
-    """True when only T4 tranche remains open."""
+    """
+    True when only runner inventory remains (T3 and/or T4; no T1/T2).
+
+    Slot semantics: T1/T2 intact = full slot. Once T1 and T2 are closed,
+    residual T3/T4 runners free the slot (cash/P&L still gate new size).
+    Flag name kept for book/cloud compatibility.
+    """
     state = sim_state_from_dict(trail_doc)
     open_tranches = [t for t in state.tranches if not t.closed]
-    return len(open_tranches) == 1 and open_tranches[0].id == "T4"
+    if not open_tranches:
+        return False
+    return all(str(t.id).upper() in ("T3", "T4") for t in open_tranches)
 
 
 def any_tranche_trailing(trail_doc: dict[str, Any]) -> bool:
