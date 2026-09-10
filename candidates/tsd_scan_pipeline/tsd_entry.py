@@ -123,8 +123,8 @@ def place_kill_stop(
         lmtPrice=limit_px,
         tif="GTC",
     )
-    if session != "RTH":
-        order.outsideRth = True
+    # GTC kill must survive overnight gaps — always allow outside RTH.
+    order.outsideRth = True
     trade = ib.placeOrder(contract, order)
     ib.sleep(0.5)
     return {

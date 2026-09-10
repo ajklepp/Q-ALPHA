@@ -2,6 +2,11 @@
 Q-ALPHA TSD pipeline — session-aware IBKR exit orders.
 
 Mirrors tsd_entry session rules for SELL legs (trail / kill / time_cap).
+
+Fail-closed residual-long rules:
+  - Cancel working SELLs before a software exit (no dual-SELL races).
+  - Detect STP LMT kills that have gapped through their limit and market-flatten.
+  - Never leave a 1-share long sitting under an unfillable stop-limit.
 """
 from __future__ import annotations
 
@@ -21,6 +26,86 @@ from tsd_scan_pipeline.tsd_pool import release_on_exit
 from tsd_scan_pipeline.tsd_trail import remaining_shares
 
 EXIT_LIMIT_SLIP = 0.998
+# Cents of slack when comparing last vs a SELL limit (float noise).
+UNFILLABLE_EPS = 0.01
+
+
+def sell_stop_limit_unfillable(
+    last_px: float,
+    *,
+    stop_px: float = 0.0,
+    lmt_px: float = 0.0,
+) -> bool:
+    """
+    True when a SELL StopLimit cannot fill at the current print.
+
+    After a gap-down, IB triggers the stop then rests a limit *above* the
+    market. That order never fills until price rallies — the JANX failure
+    mode (POS=1, STP LMT ~18.89, last ~17.69).
+    """
+    try:
+        last = float(last_px or 0)
+    except (TypeError, ValueError):
+        return False
+    if last <= 0:
+        return False
+    try:
+        lmt = float(lmt_px or 0)
+    except (TypeError, ValueError):
+        lmt = 0.0
+    try:
+        stop = float(stop_px or 0)
+    except (TypeError, ValueError):
+        stop = 0.0
+    ceiling = lmt if lmt > 0 else (
+        round(stop * KILL_LIMIT_SLIP, 2) if stop > 0 else 0.0
+    )
+    if ceiling <= 0:
+        return False
+    return last < (ceiling - UNFILLABLE_EPS)
+
+
+def kill_price_already_through(last_px: float, kill_price: float) -> bool:
+    """True when last has blown through the kill stop-limit ceiling."""
+    try:
+        kill = float(kill_price or 0)
+    except (TypeError, ValueError):
+        return False
+    if kill <= 0:
+        return False
+    return sell_stop_limit_unfillable(
+        last_px,
+        stop_px=kill,
+        lmt_px=round(kill * KILL_LIMIT_SLIP, 2),
+    )
+
+
+def _snapshot_last_price(ib: IB, symbol: str) -> float | None:
+    """Best-effort last/bid/close for stuck-exit checks."""
+    sym = symbol.upper()
+    try:
+        contract = Stock(sym, "SMART", "USD")
+        ib.qualifyContracts(contract)
+        tick = ib.reqMktData(contract, "", False, False)
+        ib.sleep(1.0)
+        px: float | None = None
+        for attr in ("last", "bid", "close"):
+            try:
+                v = float(getattr(tick, attr, None) or 0)
+                if v > 0:
+                    px = v
+                    break
+            except (TypeError, ValueError):
+                continue
+        try:
+            ib.cancelMktData(contract)
+        except Exception:
+            pass
+        return px
+    except Exception as exc:
+        print(f"  {sym} last-price snapshot warn: {exc}")
+        return None
+
 
 
 def build_exit_order(
@@ -74,11 +159,17 @@ def _open_sell_rows(ib: IB) -> list[dict[str, Any]]:
             status = str(trade.orderStatus.status or "")
             if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
                 continue
+            remaining = float(trade.order.totalQuantity or 0) - float(
+                trade.orderStatus.filled or 0
+            )
             rows.append({
                 "symbol": str(getattr(trade.contract, "symbol", "") or "").upper(),
                 "order_id": int(trade.order.orderId or 0),
                 "client_id": int(getattr(trade.order, "clientId", 0) or 0),
                 "order_type": str(trade.order.orderType or ""),
+                "stop_price": float(getattr(trade.order, "stopPrice", 0) or 0),
+                "lmt_price": float(getattr(trade.order, "lmtPrice", 0) or 0),
+                "remaining": max(0.0, remaining),
             })
         except Exception:
             continue
@@ -345,6 +436,28 @@ def sync_kill_quantity(
 
     remaining = min(remaining, int(broker_qty))
 
+    # If last already blew through the kill limit, do NOT re-arm an unfillable
+    # STP LMT — cancel working sells and market-flatten the residual long.
+    if not dry_run and remaining > 0 and target_kill > 0:
+        last_px = _snapshot_last_price(ib, symbol)
+        if last_px is not None and kill_price_already_through(last_px, target_kill):
+            print(
+                f"  {symbol} kill already through "
+                f"last={last_px:.2f} kill={target_kill:.2f} — force flatten {remaining}sh"
+            )
+            cancel_working_sells_for_symbol(ib, symbol, dry_run=False)
+            fill = place_tsd_exit(
+                ib,
+                symbol,
+                remaining,
+                ref_price=last_px,
+                entry_price=float(trail.get("entry_price") or 0) or None,
+                reason="kill_gap_unfillable",
+            )
+            trail["kill_stop_cancelled"] = True
+            leg["trail"] = trail
+            return str(fill.get("status") or "") in ("FILLED", "PARTIAL")
+
     if kill_oid is None:
         return False
 
@@ -384,8 +497,8 @@ def sync_kill_quantity(
                     lmtPrice=limit_px,
                     tif="GTC",
                 )
-                if session != "RTH":
-                    order.outsideRth = True
+                # GTC kill must work overnight gaps — always allow outside RTH.
+                order.outsideRth = True
                 new_trade = ib.placeOrder(contract, order)
                 ib.sleep(0.3)
                 leg["kill_order_id"] = new_trade.order.orderId
@@ -415,8 +528,8 @@ def sync_kill_quantity(
             lmtPrice=limit_px,
             tif="GTC",
         )
-        if session != "RTH":
-            order.outsideRth = True
+        # GTC kill must work overnight gaps — always allow outside RTH.
+        order.outsideRth = True
         new_trade = ib.placeOrder(contract, order)
         ib.sleep(0.3)
         leg["kill_order_id"] = new_trade.order.orderId
@@ -425,6 +538,99 @@ def sync_kill_quantity(
     except Exception as exc:
         print(f"  {symbol} sync_kill_quantity warn: {exc}")
     return False
+
+
+def repair_unfillable_stop_limit_sells(
+    ib: IB,
+    *,
+    dry_run: bool = False,
+    last_by_symbol: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Cancel+flatten residual longs whose working SELL STP LMT is unfillable.
+
+    Covers the JANX case: broker qty>0, stop-limit resting above the market
+    after a gap, with no software path that re-checks fillability.
+    """
+    try:
+        broker_qty = _broker_qty_map(ib)
+    except Exception as exc:
+        print(f"  stuck-exit repair blocked: positions unavailable ({exc})")
+        return []
+
+    sell_rows = _open_sell_rows(ib)
+    actions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    last_map = dict(last_by_symbol or {})
+
+    for row in sell_rows:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym or sym in seen:
+            continue
+        qty = float(broker_qty.get(sym, 0.0) or 0.0)
+        if qty <= 0:
+            continue  # flat-symbol orphans handled by housekeep_orphan_sell_orders
+        otype = str(row.get("order_type") or "").upper()
+        if otype not in ("STP LMT", "STPLMT", "STOP LIMIT"):
+            # Also treat plain STP with missing limit using stop×slip via helper.
+            if otype not in ("STP", "STP LMT", "STPLMT", "STOP", "STOP LIMIT"):
+                continue
+        last_px = last_map.get(sym)
+        if last_px is None:
+            last_px = _snapshot_last_price(ib, sym)
+            if last_px is not None:
+                last_map[sym] = last_px
+        if last_px is None:
+            continue
+        if not sell_stop_limit_unfillable(
+            last_px,
+            stop_px=float(row.get("stop_price") or 0),
+            lmt_px=float(row.get("lmt_price") or 0),
+        ):
+            continue
+
+        seen.add(sym)
+        shares = int(qty)
+        print(
+            f"  {sym} STUCK STP LMT last={last_px:.2f} "
+            f"stop={row.get('stop_price')} lmt={row.get('lmt_price')} "
+            f"— cancel+flatten {shares}sh"
+        )
+        if dry_run:
+            actions.append({
+                "symbol": sym,
+                "type": "stuck_stop_limit_flatten",
+                "status": "DRY_RUN",
+                "shares": shares,
+                "last": last_px,
+                "stop_price": row.get("stop_price"),
+                "lmt_price": row.get("lmt_price"),
+            })
+            continue
+
+        cancel_working_sells_for_symbol(ib, sym, dry_run=False)
+        fill = place_tsd_exit(
+            ib,
+            sym,
+            shares,
+            ref_price=last_px,
+            reason="kill_gap_unfillable",
+        )
+        actions.append({
+            "symbol": sym,
+            "type": "stuck_stop_limit_flatten",
+            "status": fill.get("status"),
+            "shares": fill.get("shares") or shares,
+            "last": last_px,
+            "stop_price": row.get("stop_price"),
+            "lmt_price": row.get("lmt_price"),
+            "fill": fill,
+        })
+    if actions:
+        print(f"  stuck-exit repair: {len(actions)} symbol(s)")
+    else:
+        print("  stuck-exit repair: none")
+    return actions
 
 
 def place_tsd_exit(
@@ -445,6 +651,10 @@ def place_tsd_exit(
 
     contract = Stock(sym, "SMART", "USD")
     ib.qualifyContracts(contract)
+
+    # Prevent dual-SELL races with a resting kill STP LMT (partial-fill orphans).
+    cancel_working_sells_for_symbol(ib, sym, dry_run=False)
+
 
     px = ref_price
     if px is None or px <= 0:
