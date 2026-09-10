@@ -595,8 +595,12 @@ def _local_thesis_by_symbol() -> dict[str, dict]:
 
 
 def _render_tsd_open_card(row: dict) -> None:
-    """Public open-leg card — price and P&L only (no stop-layer / ran-up detail)."""
-    from dashboard_tsd_helpers import remaining_open_shares, unrealized_from_open_row
+    """Public open-leg card — price, P&L, and T1–T4 trigger levels."""
+    from dashboard_tsd_helpers import (
+        format_tranche_levels_caption,
+        remaining_open_shares,
+        unrealized_from_open_row,
+    )
 
     symbol = str(row.get("symbol") or "")
     entry_price = _safe_float(row.get("entry_price"), 0.0)
@@ -616,11 +620,14 @@ def _render_tsd_open_card(row: dict) -> None:
         if entry_price
         else f"{shares} {share_word}"
     )
+    tranche_caption = format_tranche_levels_caption(row)
 
     c1, c2, c3 = st.columns([2, 2, 2])
     with c1:
         st.markdown(f"**{symbol}**")
         st.caption(share_caption)
+        if tranche_caption:
+            st.caption(tranche_caption)
     with c2:
         st.metric("Price", f"${current_price:.2f}", f"{pnl_pct_val:+.1%}")
     with c3:

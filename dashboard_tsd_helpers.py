@@ -402,6 +402,31 @@ def unrealized_from_open_row(row: dict[str, Any]) -> float:
     return round((mark - entry) * shares, 2)
 
 
+def format_tranche_levels_caption(row: dict[str, Any]) -> str:
+    """
+    Compact T1–T4 line for open cards: T1=$20.36 · T2=HIT · T3=$21.35 · T4=$21.75.
+
+    HIT when the tranche trigger has fired (closed or trailing/armed).
+    Omits missing labels (e.g. 2-tranche ATRC shows T1/T2 only).
+    """
+    parts: list[str] = []
+    for t in parse_tranche_json(row.get("tranche_json")):
+        tid = str(t.get("id") or t.get("tranche_id") or "").upper()
+        if tid not in ("T1", "T2", "T3", "T4"):
+            continue
+        closed = bool(t.get("closed"))
+        armed = bool(t.get("armed") or t.get("trailing"))
+        if closed or armed:
+            parts.append(f"{tid}=HIT")
+            continue
+        trig = _sf(t.get("trigger_price"), 0.0)
+        if trig > 0:
+            parts.append(f"{tid}=${trig:.2f}")
+        else:
+            parts.append(f"{tid}=—")
+    return " · ".join(parts)
+
+
 def open_tranche_ids(row: dict[str, Any]) -> list[str]:
     """Open tranche labels on a cloud/local open row (e.g. T1, T2)."""
     ids: list[str] = []

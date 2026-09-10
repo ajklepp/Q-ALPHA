@@ -11,6 +11,7 @@ from dashboard_tsd_helpers import (
     build_tranche_table_rows,
     format_level,
     format_trail_stop_cell,
+    format_tranche_levels_caption,
     hold_time_display,
     is_t34_trailing_position,
     map_exit_layer,
@@ -211,6 +212,18 @@ class TestScoreboardPnl(unittest.TestCase):
         self.assertEqual(board["full_slots"], 1)
         self.assertEqual(board["trailing_positions"], 1)
         self.assertEqual(board["open_names"], 2)
+
+    def test_tranche_levels_caption_hit_and_prices(self):
+        row = {
+            "tranche_json": [
+                {"id": "T1", "trigger_price": 6.55, "closed": True, "trailing": True},
+                {"id": "T2", "trigger_price": 6.68, "closed": False, "trailing": True},
+                {"id": "T3", "trigger_price": 6.87, "closed": False, "trailing": False},
+                {"id": "T4", "trigger_price": 7.00, "closed": False, "trailing": False},
+            ],
+        }
+        cap = format_tranche_levels_caption(row)
+        self.assertEqual(cap, "T1=HIT · T2=HIT · T3=$6.87 · T4=$7.00")
 
 
 if __name__ == "__main__":
