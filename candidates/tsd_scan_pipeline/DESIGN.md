@@ -13,14 +13,14 @@
 | `tsd_popularity` | Multi-day Polygon movers + $vol leaders + live gainers + TWS MOST_ACTIVE/TOP_PERC_GAIN |
 | `tsd_attention` | Attention Pool: top continuation ∪ tradable_popular ∪ soft-extension (ST optional) |
 | `tsd_case_review` | ENTER / WAIT / REJECT — score alone cannot buy |
-| `tsd_watch_queue` + `execute_live_entries` | Admit + BUY **case-ENTER only** |
+| `tsd_watch_queue` + micro-confirm + `execute_live_entries` | Admit → 1m tape confirm → BUY **case-ENTER only** |
 | `tsd_social` (Polygon + TWS news + StockTwits; X off) | Rank soft terms + case dossier evidence |
 | `tsd_deep_features` (20d room/bounce + 1H path prior) | Path prior when n≥3; else profile analog fallback |
 | Missed ledger `evidence` + thesis | Frozen decision snapshot for Weekly Review |
 | `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Thin PRINT/OUTLOOK (attention set) |
 | `tsd_catalyst_deep` (90d lookback) | Narrative + risk flags; contradictions can REJECT |
 | OpenRouter web search | Live chatter / leaderboard context inside case fusion |
-| `tsd_trail_monitor` | Keep-profit v1: T1 bank @+2% → kill tighten 2.5% → T2–T4 trail |
+| `tsd_trail_monitor` | Keep-profit v1 + **micro-confirm** WATCHING→BUY |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
 
@@ -30,7 +30,8 @@
 2. **Continuation score nominates** into Attention Pool.  
 3. **Momentum / popularity** — ask “is this a popular stock to trade?” via recent multi-day leaderboard history (not first 1H print alone), TWS scanners, live gainers; StockTwits is optional only.  
 4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT.  
-5. **BUY only case-ENTER**, still capped at 2/scan + capacity.
+5. **BUY only case-ENTER**, still capped at 2/scan + capacity.  
+6. **Micro-confirm before BUY** — after case ENTER, watch 1-min tape from the 1H bar close; ABORT if dumping through −1.5%/structure; CONFIRM only if holding. Trail loop continues polling WATCHING names for ~10 minutes.
 
 ### Not Live Paper (research / disabled)
 

@@ -1,7 +1,9 @@
 """
 Q-ALPHA UTS v2 — Peak Hour watch queue.
 
-Live Paper: 1H LAUNCH scan admits names here, then execute_live_entries places
+Live Paper: 1H LAUNCH admits WATCHING names; process_micro_confirm_queue then
+BUY via execute_live_entries only after 1-min tape CONFIRM (ABORT/TIMEOUT skip).
+Legacy note — older path admitted then execute_live_entries placed
 BUY orders (sole live entry authority via TSD Scheduler --tick --live).
 
 setup_watch_agent.py is research/legacy — not on the Live Paper schedule.
@@ -167,7 +169,12 @@ def add_to_watch_queue(
             "htf_close_above_sma50": qh_row.get("htf_close_above_sma50", cand.get("htf_close_above_sma50")),
             "htf_sma20_rising": qh_row.get("htf_sma20_rising", cand.get("htf_sma20_rising")),
             "added_at": when,
+            "queued_at": when,
+            "signal_close": float(
+                qh_row.get("htf_1h_close") or qh_row.get("close") or cand.get("htf_1h_close") or 0
+            ),
             "status": "WATCHING",
+            "micro_confirm": "pending",
             "gates": {**gates, "quality": qh_gates},
             "quality_gates": qh_gates,
             "regime": regime_label,
@@ -469,9 +476,17 @@ def queue_row_as_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "htf_1h_buy_signal": row.get("htf_1h_buy_signal"),
         "htf_1h_bar_hour": row.get("htf_1h_bar_hour"),
         "htf_1h_bar_time": row.get("htf_1h_bar_time"),
-        "htf_1h_close": row.get("htf_1h_close"),
+        "htf_1h_close": row.get("htf_1h_close") or row.get("signal_close"),
+        "signal_close": row.get("signal_close") or row.get("htf_1h_close"),
         "phase_3h": row.get("phase_3h") or row.get("phase"),
         "htf_range_20d_pct": row.get("htf_range_20d_pct"),
+        "case_review": row.get("case_review"),
+        "case_verdict": row.get("case_verdict"),
+        "momentum_context": row.get("momentum_context"),
+        "on_gainers": row.get("on_gainers"),
+        "attention_reasons": row.get("attention_reasons"),
+        "tradable_popular": row.get("tradable_popular") or row.get("on_gainers") or row.get("recent_leaderboard"),
+        "recent_leaderboard": row.get("recent_leaderboard"),
         "htf_close_above_sma50": row.get("htf_close_above_sma50"),
         "htf_sma20_rising": row.get("htf_sma20_rising"),
         "kill_pct": row.get("kill_pct"),
@@ -515,3 +530,81 @@ def watching_symbols() -> list[str]:
         for r in state.get("queue") or []
         if str(r.get("status", "")).upper() == "WATCHING"
     ]
+
+
+def process_micro_confirm_queue(
+    ib=None,
+    *,
+    book_state: dict[str, Any] | None = None,
+    live: bool = True,
+    polygon_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Peak Hour micro-confirm tick: WATCHING → CONFIRM (buy) / ABORT / TIMEOUT.
+
+    Call after 1H launch admits and from the trail monitor loop so we do not
+    market-buy into an already-failing 1-min tape.
+    """
+    from tsd_scan_pipeline.tsd_capacity import load_state, save_state
+    from tsd_scan_pipeline.tsd_micro_confirm import confirm_peak_hour_entry
+
+    state = load_queue()
+    watching = [
+        r for r in state.get("queue") or []
+        if str(r.get("status", "")).upper() == "WATCHING"
+    ]
+    if not watching:
+        return []
+
+    book = book_state if book_state is not None else load_state()
+    results: list[dict[str, Any]] = []
+    to_enter: list[dict[str, Any]] = []
+
+    for row in watching:
+        sym = str(row.get("symbol") or "").upper()
+        verdict, reason, meta = confirm_peak_hour_entry(row, api_key=polygon_key)
+        print(
+            f"  MICRO {sym}: {verdict} {reason} "
+            f"bars={meta.get('n_bars')} elapsed={meta.get('elapsed_min')}"
+        )
+        if verdict == "PENDING":
+            update_queue_row(
+                sym,
+                extra={"micro_confirm": "pending", "micro_reason": reason, **{
+                    k: meta.get(k) for k in ("n_bars", "last_close", "elapsed_min")
+                }},
+            )
+            results.append({"symbol": sym, "status": "PENDING", "reason": reason})
+            continue
+        if verdict in ("ABORT", "TIMEOUT"):
+            update_queue_row(
+                sym,
+                status="SKIPPED",
+                reason=f"micro_{verdict.lower()}:{reason}",
+                extra={"micro_confirm": verdict.lower(), "micro_reason": reason},
+            )
+            results.append({"symbol": sym, "status": verdict, "reason": reason})
+            continue
+        # CONFIRM
+        update_queue_row(
+            sym,
+            status="CONFIRMED",
+            reason=reason,
+            extra={"micro_confirm": "confirm", "micro_reason": reason},
+        )
+        to_enter.append(queue_row_as_candidate(row))
+        results.append({"symbol": sym, "status": "CONFIRM", "reason": reason})
+
+    if live and ib is not None and to_enter:
+        fills = execute_live_entries(ib, to_enter, book)
+        save_state(book)
+        results.extend(fills)
+    elif to_enter and not live:
+        for c in to_enter:
+            results.append({
+                "symbol": c.get("symbol"),
+                "status": "DRY_CONFIRM",
+                "reason": "micro_confirm_ok",
+            })
+
+    return results

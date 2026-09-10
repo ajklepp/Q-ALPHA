@@ -433,12 +433,6 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     opens = [p for p in state.get("positions") or [] if str(p.get("status", "OPEN")).upper() == "OPEN"]
     print(f"Open positions: {len(opens)}  symbols={open_symbols(state)}")
 
-    if not opens:
-        print("Nothing to monitor.")
-        payload = {"mode": mode, "checked_at": now.isoformat(), "actions": []}
-        _save_snapshot(payload)
-        return payload
-
     last_connect_error: Exception | None = None
     used_client_id: int | None = None
     for client_id in TWS_CLIENT_ID_FALLBACKS:
@@ -450,9 +444,6 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         except Exception as exc:
             last_connect_error = exc
             print(f"CONNECT FAIL clientId={client_id}: {exc}")
-            # A timed-out ib_insync connect can leave its socket/clientId alive.
-            # Tear it down before trying the fallback or the loop can conflict
-            # with itself forever.
             try:
                 ib.disconnect()
             except Exception:
@@ -463,6 +454,44 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         print(f"CONNECT FAILED: {error}")
         return {"error": error, "checked_at": now.isoformat()}
 
+    actions: list[dict[str, Any]] = []
+
+    # Peak Hour micro-confirm: WATCHING → BUY / SKIP (even if book is flat)
+    try:
+        from tsd_scan_pipeline.tsd_watch_queue import (
+            process_micro_confirm_queue,
+            watching_symbols,
+        )
+
+        watching = watching_symbols()
+        if watching:
+            print(f"\n--- MICRO-CONFIRM watching={watching} ---")
+            micro = process_micro_confirm_queue(
+                ib, book_state=state, live=not dry_run,
+            )
+            actions.extend({"type": "micro_confirm", **r} for r in micro)
+            state = load_state()
+            opens = [
+                p for p in state.get("positions") or []
+                if str(p.get("status", "OPEN")).upper() == "OPEN"
+            ]
+    except Exception as exc:
+        print(f"  micro-confirm warn: {exc}")
+
+    if not opens:
+        print("Nothing to trail-monitor.")
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+        payload = {
+            "mode": mode,
+            "checked_at": now.isoformat(),
+            "actions": actions,
+            "open_count": 0,
+        }
+        _save_snapshot(payload)
+        return payload
     try:
         broker_positions: dict[str, float] = {}
         for broker_pos in ib.positions() or []:

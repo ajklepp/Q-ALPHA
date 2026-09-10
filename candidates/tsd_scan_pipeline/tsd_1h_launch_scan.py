@@ -49,7 +49,10 @@ from tsd_scan_pipeline.tsd_launch_score import (
     EXTENSION_SCAN_AUTO,
     enrich_launch_fields,
 )
-from tsd_scan_pipeline.tsd_watch_queue import add_to_watch_queue, execute_live_entries
+from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
+    add_to_watch_queue,
+    process_micro_confirm_queue,
+)
 from tsd_scan_pipeline.universe_tsd import load_polygon_key
 
 ET = pytz.timezone("America/New_York")
@@ -419,7 +422,7 @@ def run_1h_launch_scan(
 
         enter_rows = [r for r in take if str(r.get("symbol", "")).upper() in admitted]
         if not enter_rows:
-            print("  No queue-admitted names to enter")
+            print("  No queue-admitted names to micro-confirm")
             if take and skipped:
                 try:
                     from tsd_scan_pipeline.tsd_notify import (
@@ -444,14 +447,21 @@ def run_1h_launch_scan(
             if ib is not None:
                 book = load_state()
                 reset_scan_counter(book)
-                entry_results = execute_live_entries(ib, enter_rows, book)
+                # Micro-confirm (1-min hold/abort) before BUY — do not chase dumps
+                print("\n--- MICRO-CONFIRM (1-min tape since 1H close) ---")
+                entry_results = process_micro_confirm_queue(
+                    ib, book_state=book, live=True, polygon_key=key,
+                )
                 save_state(book)
                 try:
                     ib.disconnect()
                 except Exception:
                     pass
                 for fill in entry_results:
-                    print(f"  {fill.get('symbol')} {fill.get('status')} {fill.get('reason', '')}")
+                    print(
+                        f"  {fill.get('symbol')} {fill.get('status')} "
+                        f"{fill.get('reason', '')}"
+                    )
 
     _write_launch_artifact(
         now_et=now_et,
