@@ -1,7 +1,0 @@
-results/bar_cache/
-results/progress.json
-results/run_log.txt
-results/refine_v2_log.txt
-results/best_trades.json
-__pycache__/
-*.pyc
