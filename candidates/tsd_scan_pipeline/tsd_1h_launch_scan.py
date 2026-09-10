@@ -230,7 +230,13 @@ def evaluate_1h_symbol(
     """1H LAUNCH trigger. 3H buy_signal is NOT required. Soft EXTENSION via score."""
     base = {"symbol": symbol.upper(), "pass": False, "reject_reason": None}
     if htf_row:
-        base.update({k: v for k, v in htf_row.items() if k.startswith("htf_") or k == "close"})
+        base.update({
+            k: v for k, v in htf_row.items()
+            if k.startswith("htf_")
+            or k in ("close", "market_cap", "dollar_vol_20d_avg", "dollar_vol_20d")
+        })
+        if htf_row.get("dollar_vol_20d_avg") is not None and base.get("dollar_vol_20d") is None:
+            base["dollar_vol_20d"] = htf_row.get("dollar_vol_20d_avg")
     ok, launch_row = evaluate_1h_buy_signal(base, polygon_key=polygon_key, now=now)
     out = {**base, **launch_row, "symbol": symbol.upper()}
     scan = float(out.get("scan_score") or out.get("htf_1h_scan_score") or 0)

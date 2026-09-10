@@ -3,7 +3,7 @@ Q-ALPHA UTS v2.6 — daily HTF pre-filter universe.
 
 From the liquid TSD universe (mcap>=$300M, $vol20d>=$5M, price>=$5), keep names
 that pass the same daily HTF math as tsd_htf_gates:
-  20d range >= 25%, close > SMA50, SMA20 rising, price >= $5.
+  20d range 25%–150%, close > SMA50, SMA20 rising, price >= $5.
 
 Hourly 1H launch scans this set only (~hundreds, not 2899).
 Recompute once per session (04:30 ET) and optionally at noon.
@@ -25,6 +25,7 @@ if str(CANDIDATES_DIR) not in sys.path:
 
 from tsd_scan_pipeline.tsd_htf_gates import (
     HTF_BARS_NEEDED,
+    HTF_RANGE_20D_MAX,
     HTF_RANGE_20D_MIN,
     compute_htf_metrics,
     compute_htf_rank_score,
@@ -115,7 +116,10 @@ def build_htf_universe(*, refresh: bool = False, polygon_key: str | None = None)
 
     key = polygon_key or load_polygon_key()
     liquid = build_daily_universe(key, refresh=False)
-    liquid_syms = {str(r["symbol"]).upper() for r in liquid}
+    liquid_by_sym = {
+        str(r["symbol"]).upper(): r for r in liquid if r.get("symbol")
+    }
+    liquid_syms = set(liquid_by_sym)
     print(f"  HTF pre-filter on {len(liquid_syms)} liquid names...", flush=True)
     ohlc = _collect_grouped_ohlc(key)
 
@@ -136,6 +140,7 @@ def build_htf_universe(*, refresh: bool = False, polygon_key: str | None = None)
             and metrics.get("sma20_rising")
         ):
             continue
+        meta = liquid_by_sym.get(sym) or {}
         passed.append({
             "symbol": sym,
             "htf_range_20d_pct": metrics.get("range_20d_pct"),
@@ -145,6 +150,8 @@ def build_htf_universe(*, refresh: bool = False, polygon_key: str | None = None)
             "htf_sma20_slope_pct": metrics.get("sma20_slope_pct"),
             "htf_score": compute_htf_rank_score(metrics),
             "close": px,
+            "market_cap": meta.get("market_cap"),
+            "dollar_vol_20d_avg": meta.get("dollar_vol_20d_avg"),
         })
 
     doc = {
@@ -153,6 +160,7 @@ def build_htf_universe(*, refresh: bool = False, polygon_key: str | None = None)
         "liquid_count": len(liquid_syms),
         "htf_pass_count": len(passed),
         "range_min": HTF_RANGE_20D_MIN,
+        "range_max": HTF_RANGE_20D_MAX,
         "min_price": MIN_PRICE_HTF,
         "symbols": [p["symbol"] for p in passed],
         "rows": passed,

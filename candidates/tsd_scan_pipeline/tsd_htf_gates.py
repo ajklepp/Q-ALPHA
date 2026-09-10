@@ -2,7 +2,7 @@
 Q-ALPHA UTS v2 Phase 2.5 — daily HTF entry gates (signal-day close, no look-ahead).
 
 Hard gates (all required):
-  - 20d range >= 25%
+  - 20d range >= 25% and <= 150% (upper bound blocks pump/dump blowoffs)
   - close > SMA50
   - SMA20 rising (SMA20 now > SMA20 10 sessions ago)
 
@@ -21,6 +21,7 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 ET = pytz.timezone("America/New_York")
 
 HTF_RANGE_20D_MIN = 0.25
+HTF_RANGE_20D_MAX = 1.50  # Reject blowoff pumps (e.g. FGI 338% 20d range).
 HTF_SMA_RISE_LOOKBACK = 10
 HTF_BARS_NEEDED = 60
 HTF_MIN_PRICE = 5.0
@@ -81,7 +82,7 @@ def compute_htf_metrics(closes: list[float], highs: list[float], lows: list[floa
             and sma20_prior is not None
             and sma20_now > sma20_prior
         ),
-        "range_ok": range_pct >= HTF_RANGE_20D_MIN,
+        "range_ok": HTF_RANGE_20D_MIN <= range_pct <= HTF_RANGE_20D_MAX,
         "price_ok": signal_close >= HTF_MIN_PRICE,
     }
 
@@ -139,7 +140,11 @@ def evaluate_htf_daily_gates(
             "range_20d_pct": float(row["htf_range_20d_pct"]),
             "close_above_sma50": bool(row.get("htf_close_above_sma50")),
             "sma20_rising": bool(row.get("htf_sma20_rising")),
-            "range_ok": float(row["htf_range_20d_pct"]) >= HTF_RANGE_20D_MIN,
+            "range_ok": (
+                HTF_RANGE_20D_MIN
+                <= float(row["htf_range_20d_pct"])
+                <= HTF_RANGE_20D_MAX
+            ),
             "price_ok": float(row.get("close") or row.get("htf_1h_close") or 99) >= HTF_MIN_PRICE,
             "dist_sma50_pct": row.get("htf_dist_sma50_pct"),
             "sma20_slope_pct": row.get("htf_sma20_slope_pct"),
@@ -164,8 +169,12 @@ def evaluate_htf_daily_gates(
         "sma20_rising": bool(metrics.get("sma20_rising")),
         "price_floor": bool(metrics.get("price_ok", True)),
     }
+    range_pct = float(metrics.get("range_20d_pct") or 0.0)
     if not gates["range_20d"]:
-        reasons.append(f"range_20d<{HTF_RANGE_20D_MIN:.0%}")
+        if range_pct > HTF_RANGE_20D_MAX:
+            reasons.append(f"range_20d>{HTF_RANGE_20D_MAX:.0%}")
+        else:
+            reasons.append(f"range_20d<{HTF_RANGE_20D_MIN:.0%}")
     if not gates["close_above_sma50"]:
         reasons.append("close<=sma50")
     if not gates["sma20_rising"]:

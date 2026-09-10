@@ -1,7 +1,7 @@
 """
 Q-ALPHA UTS v2 Phase 2 — quality + history gate (NOT a news veto).
 
-Hard blocks: instrument safety, liquidity (mcap / dollar vol when present),
+Hard blocks: instrument safety, liquidity (mcap / dollar vol — mcap required),
 price floor, auto-extension only (scan>=75 / bar_state extended).
 Soft EXTENSION (phase label / scan 65–74) is score-demoted upstream — never veto.
 Analogs (count / win rate) are soft context only — never veto entry.
@@ -29,6 +29,7 @@ from tsd_scan_pipeline.universe_tsd import (
     MCAP_MIN,
     MIN_DOLLAR_VOL_20D,
     POLYGON_BASE,
+    fetch_ticker_market_cap,
     load_polygon_key,
     polygon_get,
 )
@@ -153,7 +154,8 @@ def evaluate_quality_history_gate(
 
     gates: dict[str, bool] = {
         "instrument_safety": passes_instrument_safety(sym, require_cs_cache=False) if sym else False,
-        "mcap_floor": True if mcap is None else float(mcap) >= MCAP_MIN,
+        # Fail closed: missing mcap must never pass (Polygon list API often omits it).
+        "mcap_floor": mcap is not None and float(mcap) >= MCAP_MIN,
         "dollar_vol_floor": True if dollar_vol is None else float(dollar_vol) >= MIN_DOLLAR_VOL_20D,
         "price_floor": price >= MIN_PRICE_FLOOR if price > 0 else True,
         "analog_count": True,  # soft context — never hard-blocks (stored on enrich)
@@ -167,7 +169,10 @@ def evaluate_quality_history_gate(
     if not gates["instrument_safety"]:
         reasons.append("instrument_safety_fail")
     if not gates["mcap_floor"]:
-        reasons.append(f"mcap<{MCAP_MIN:.0f}")
+        if mcap is None:
+            reasons.append("mcap_unknown")
+        else:
+            reasons.append(f"mcap<{MCAP_MIN:.0f}")
     if not gates["dollar_vol_floor"]:
         reasons.append(f"dollar_vol<{MIN_DOLLAR_VOL_20D:.0f}")
     if not gates["price_floor"]:
@@ -405,11 +410,24 @@ def enrich_queue_row(
     Deep lookback (90d) finds older development news + undated expectations.
     Soft context only — never vetoes admission.
     """
-    passed, gates, reasons = evaluate_quality_history_gate(candidate)
-    if not passed:
-        return dict(candidate), False, gates, reasons
+    row0 = dict(candidate)
+    # Fail-closed mcap: if scan row lacks it, resolve via detail endpoint once.
+    if row0.get("market_cap") is None and row0.get("symbol"):
+        try:
+            key = polygon_key or load_polygon_key()
+            mcap = fetch_ticker_market_cap(str(row0["symbol"]), key)
+            if mcap is not None:
+                row0["market_cap"] = mcap
+        except Exception as exc:
+            print(f"  mcap resolve skipped: {exc}")
+    if row0.get("dollar_vol_20d") is None and row0.get("dollar_vol_20d_avg") is not None:
+        row0["dollar_vol_20d"] = row0.get("dollar_vol_20d_avg")
 
-    row = enrich_launch_fields(dict(candidate))
+    passed, gates, reasons = evaluate_quality_history_gate(row0)
+    if not passed:
+        return row0, False, gates, reasons
+
+    row = enrich_launch_fields(row0)
     news_ctx: dict[str, Any] = {}
     if fetch_news:
         try:

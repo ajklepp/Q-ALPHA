@@ -2,9 +2,13 @@
 Q-ALPHA TSD pipeline — daily Polygon universe (mcap + liquidity).
 
 Builds the TSD swing scan universe:
-  - market_cap >= $300M (Polygon reference API)
+  - market_cap >= $300M (Polygon ticker DETAIL endpoint — list API omits/ignores mcap)
   - 20-day avg dollar volume >= $5M
   - passes_instrument_safety() name/symbol gates
+
+Polygon list `/v3/reference/tickers` no longer returns `market_cap` and its
+`market_cap.gte` filter is unreliable (microcaps like FGI still appear). Every
+liquid candidate must be verified via `/v3/reference/tickers/{symbol}`.
 
 Polygon Developer tier (15-min delay) — research / hunt-list ONLY, not live signals.
 
@@ -89,8 +93,10 @@ def polygon_get(url: str, params: dict | None, api_key: str, timeout: int = 60) 
 
 def fetch_mcap_universe(api_key: str) -> dict[str, dict[str, Any]]:
     """
-    Paginate Polygon reference tickers with market_cap >= MCAP_MIN.
-    Returns {symbol: {market_cap, name, primary_exchange}}.
+    Paginate Polygon reference tickers (CS, active US).
+
+    NOTE: list responses omit market_cap and market_cap.gte is unreliable.
+    Callers must verify mcap via fetch_ticker_market_cap / filter_by_verified_mcap.
     """
     url = f"{POLYGON_BASE}/v3/reference/tickers"
     params: dict[str, Any] = {
@@ -98,7 +104,6 @@ def fetch_mcap_universe(api_key: str) -> dict[str, dict[str, Any]]:
         "locale": "us",
         "active": "true",
         "type": "CS",
-        "market_cap.gte": MCAP_MIN,
         "limit": 1000,
     }
     out: dict[str, dict[str, Any]] = {}
@@ -114,11 +119,10 @@ def fetch_mcap_universe(api_key: str) -> dict[str, dict[str, Any]]:
                 continue
             if not passes_instrument_safety(sym, require_cs_cache=False):
                 continue
-            mcap = row.get("market_cap")
             out[sym] = {
                 "symbol": sym,
                 "name": name,
-                "market_cap": float(mcap) if mcap is not None else None,
+                "market_cap": None,  # filled by detail endpoint
                 "primary_exchange": str(row.get("primary_exchange") or ""),
             }
         pages += 1
@@ -128,6 +132,62 @@ def fetch_mcap_universe(api_key: str) -> dict[str, dict[str, Any]]:
         url = nxt or ""
         params = {}
     return out
+
+
+def fetch_ticker_market_cap(symbol: str, api_key: str) -> float | None:
+    """
+    Fetch market_cap from Polygon ticker DETAIL endpoint.
+
+    List/search endpoints omit this field; detail is the only reliable source.
+    """
+    sym = symbol.upper()
+    url = f"{POLYGON_BASE}/v3/reference/tickers/{sym}"
+    try:
+        data = polygon_get(url, None, api_key)
+    except Exception:
+        return None
+    results = data.get("results") or {}
+    mcap = results.get("market_cap")
+    if mcap is None:
+        return None
+    try:
+        return float(mcap)
+    except (TypeError, ValueError):
+        return None
+
+
+def filter_by_verified_mcap(
+    rows: list[dict[str, Any]],
+    api_key: str,
+    *,
+    mcap_min: float = MCAP_MIN,
+) -> list[dict[str, Any]]:
+    """
+    Attach detail-endpoint market_cap and keep only names >= mcap_min.
+
+    Fail closed: missing/unparseable mcap is rejected.
+    """
+    kept: list[dict[str, Any]] = []
+    rejected_low = 0
+    rejected_unknown = 0
+    total = len(rows)
+    for i, row in enumerate(rows, start=1):
+        sym = str(row.get("symbol") or "").upper()
+        mcap = fetch_ticker_market_cap(sym, api_key)
+        if mcap is None:
+            rejected_unknown += 1
+            continue
+        if mcap < mcap_min:
+            rejected_low += 1
+            continue
+        kept.append({**row, "market_cap": mcap, "symbol": sym})
+        if i % 25 == 0 or i == total:
+            print(
+                f"  mcap verify {i}/{total} kept={len(kept)} "
+                f"low={rejected_low} unknown={rejected_unknown}",
+                flush=True,
+            )
+    return kept
 
 
 def build_dollar_vol_map(api_key: str, days: int = DOLLAR_VOL_LOOKBACK_DAYS) -> dict[str, float]:
@@ -163,7 +223,7 @@ def build_dollar_vol_map(api_key: str, days: int = DOLLAR_VOL_LOOKBACK_DAYS) -> 
 
 def build_daily_universe(api_key: str, *, refresh: bool = False) -> list[dict[str, Any]]:
     """
-    Full TSD universe with liquidity fields.
+    Full TSD universe with verified mcap + liquidity fields.
     Cached per ET calendar day under results/universe_cache/.
     """
     UNIVERSE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,31 +232,44 @@ def build_daily_universe(api_key: str, *, refresh: bool = False) -> list[dict[st
     if cache_path.exists() and not refresh:
         doc = json.loads(cache_path.read_text(encoding="utf-8"))
         rows = doc.get("tickers") or []
-        print(f"  Universe cache hit: {len(rows)} tickers ({today})", flush=True)
-        return rows
+        # Stale caches from before mcap verification are unsafe — rebuild.
+        if rows and all(r.get("market_cap") is None for r in rows):
+            print(
+                f"  Universe cache INVALID (all market_cap=null) — rebuilding {today}",
+                flush=True,
+            )
+        else:
+            print(f"  Universe cache hit: {len(rows)} tickers ({today})", flush=True)
+            return rows
 
-    print("  Fetching mcap>=$300M reference universe...", flush=True)
-    mcap_map = fetch_mcap_universe(api_key)
-    print(f"  Mcap universe: {len(mcap_map)} symbols", flush=True)
+    print("  Fetching active CS reference universe...", flush=True)
+    ref_map = fetch_mcap_universe(api_key)
+    print(f"  Reference universe: {len(ref_map)} symbols", flush=True)
 
     dv_map = build_dollar_vol_map(api_key)
-    rows: list[dict[str, Any]] = []
-    for sym, meta in mcap_map.items():
+    liquid: list[dict[str, Any]] = []
+    for sym, meta in ref_map.items():
         dv = dv_map.get(sym)
         if dv is None or dv < MIN_DOLLAR_VOL_20D:
             continue
-        rows.append(
+        liquid.append(
             {
                 **meta,
                 "dollar_vol_20d_avg": round(dv, 2),
             }
         )
+    print(
+        f"  Dollar-vol >= ${MIN_DOLLAR_VOL_20D/1e6:.0f}M: {len(liquid)} names — verifying mcap...",
+        flush=True,
+    )
+    rows = filter_by_verified_mcap(liquid, api_key, mcap_min=MCAP_MIN)
     rows.sort(key=lambda r: r.get("dollar_vol_20d_avg") or 0, reverse=True)
     payload = {
         "built_at": datetime.now(ET).isoformat(),
         "date": today,
         "mcap_min": MCAP_MIN,
         "min_dollar_vol_20d": MIN_DOLLAR_VOL_20D,
+        "mcap_source": "polygon_ticker_detail",
         "count": len(rows),
         "tickers": rows,
     }
