@@ -13,8 +13,9 @@ from typing import Any
 FALLBACK_KILL_PCT = 0.05
 PROFILE_KILL_MIN = 0.02
 PROFILE_KILL_MAX = 0.06
-# Research-only: skip entry when nearest area-low risk exceeds this (not used as stop)
-STRUCTURE_RISK_MAX = 0.05
+# Research-only soft skip when nearest area-low risk exceeds this (not used as stop).
+# Autopsy 2026-09-10: 3.5% cap lifts book vs 5% (filters PRE/ACDC-style wide bases).
+STRUCTURE_RISK_MAX = 0.035
 STRUCTURE_LOOKBACK_BARS = 10
 
 

@@ -309,14 +309,15 @@ def sync_kill_quantity(
     dry_run: bool = False,
 ) -> bool:
     """
-    Keep emergency kill stop aligned with remaining shares.
+    Keep emergency kill stop aligned with remaining shares AND trail kill price.
 
-    - remaining == 0 or broker flat → cancel kill / any working SELLs
-    - remaining > 0 → resize kill qty to match (cancel+replace if needed)
+    After T1 bank, keep-profit may raise kill_price (e.g. to −2.5%); broker
+    stop must move up with it.
     """
     trail = leg.get("trail") or {}
     remaining = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
     kill_oid = leg.get("kill_order_id")
+    target_kill = float(trail.get("kill_price") or 0)
 
     # Long-only invariant: never leave working SELL stops on a flat broker book.
     try:
@@ -357,12 +358,40 @@ def sync_kill_quantity(
             if int(trade.order.orderId) != int(kill_oid):
                 continue
             cur_qty = int(trade.order.totalQuantity or 0)
-            if cur_qty == remaining:
+            cur_stop = float(getattr(trade.order, "stopPrice", 0) or 0)
+            need_qty = cur_qty != remaining
+            need_px = target_kill > 0 and abs(cur_stop - target_kill) >= 0.01
+            if not need_qty and not need_px:
                 return True
             if dry_run:
                 print(
-                    f"  {symbol} DRY_RUN sync kill {cur_qty} -> {remaining} "
-                    f"oid={kill_oid}"
+                    f"  {symbol} DRY_RUN sync kill qty {cur_qty}->{remaining} "
+                    f"stop {cur_stop}->{target_kill} oid={kill_oid}"
+                )
+                return True
+            # Cancel+replace when stop price ratchets up (modify stop in-place is flaky)
+            if need_px:
+                cancel_order_safe(ib, kill_oid)
+                ib.sleep(0.3)
+                contract = Stock(symbol.upper(), "SMART", "USD")
+                ib.qualifyContracts(contract)
+                session = classify_session()
+                limit_px = round(target_kill * KILL_LIMIT_SLIP, 2)
+                order = StopLimitOrder(
+                    action="SELL",
+                    totalQuantity=remaining,
+                    stopPrice=round(target_kill, 2),
+                    lmtPrice=limit_px,
+                    tif="GTC",
+                )
+                if session != "RTH":
+                    order.outsideRth = True
+                new_trade = ib.placeOrder(contract, order)
+                ib.sleep(0.3)
+                leg["kill_order_id"] = new_trade.order.orderId
+                print(
+                    f"  {symbol} kill ratchet stop {cur_stop}->{target_kill} "
+                    f"qty={remaining} oid={leg['kill_order_id']}"
                 )
                 return True
             trade.order.totalQuantity = remaining

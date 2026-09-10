@@ -544,11 +544,17 @@ def select_enter_rows(
     *,
     max_n: int,
 ) -> list[dict[str, Any]]:
-    """Only case ENTER rows, ranked by confidence then continuation score."""
+    """
+    Only case ENTER rows with tradable popularity (momentum confirmation).
+
+    Autopsy: popular+structure filter kept the green keep-profit book;
+    obscure non-popular ENTERs were a drag.
+    """
     enters = [
         r for r in reviewed
         if str(r.get("case_verdict") or r.get("case_review", {}).get("verdict") or "").upper()
         == "ENTER"
+        and bool(r.get("tradable_popular") or r.get("recent_leaderboard") or r.get("on_gainers"))
     ]
     enters.sort(
         key=lambda r: (

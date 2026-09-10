@@ -142,43 +142,30 @@ def init_trail_state(
     profile: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """
-    Build serializable trail state for a new leg using strategy_a levels.
+    Peak Hour trail state — keep-profit v1 (autopsy 2026-08-31..09-10).
+
+    T1 hard-banks at +2%; kill then tightens to 2.5%; T2–T4 trail.
+    Blanket structure kill stays OFF (Chat A + autopsy: net negative).
     """
-    strat_profile = tsd_profile_to_strategy_profile(profile or {})
-    levels = extract_levels(strat_profile)
-    alloc = split_tranches(n_shares)
-    trigs = triggers_for_n(levels["triggers_4"], len(alloc))
-    tranches: list[TrancheState] = []
-    for (tid, sh, w), trig in zip(alloc, trigs):
-        tranches.append(
-            TrancheState(
-                id=tid,
-                shares=sh,
-                weight=w,
-                trigger_pct=float(trig),
-                trigger_price=entry_price * (1.0 + float(trig)),
-                trail_pct=float(levels["trail_pct"]),
-                run_high=0.0,
-            )
-        )
-    state = SimState(
-        entry_price=float(entry_price),
-        kill_price=float(entry_price) * (1.0 - float(levels["kill_pct"])),
-        kill_pct=float(levels["kill_pct"]),
-        trail_pct=float(levels["trail_pct"]),
-        tranches=tranches,
-        peak_high=float(entry_price),
-        trading_day=1,
+    from tsd_scan_pipeline.tsd_keep_profit import init_php_trail_state
+
+    kill, kill_source = resolve_kill_pct(
+        (profile or {}).get("kill_pct") if profile else None,
+        profile=profile,
     )
-    doc = sim_state_to_dict(state)
-    doc["levels_source"] = levels.get("source")
-    doc["kill_source"] = strat_profile.get("kill_source") or "fallback_5pct"
-    doc["kill_stop_cancelled"] = False
+    doc = init_php_trail_state(
+        float(entry_price),
+        int(n_shares),
+        kill_pct=float(kill),
+    )
+    doc["kill_source"] = kill_source
+    doc["levels_source"] = "php_keep_profit_v1"
     doc["opened_at"] = datetime.now(ET).isoformat()
     doc["last_session_date"] = datetime.now(ET).date().isoformat()
     doc["structure_stop"] = None
     doc["rth_armed"] = False
     doc["breakeven_locked"] = False
+    doc["kill_stop_cancelled"] = False
     return doc
 
 
@@ -218,13 +205,24 @@ def evaluate_trail_tick(
     force_time_cap: bool = False,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Advance trail state one price tick. Returns (updated_doc, new_exits).
-
-    new_exits: [{tranche_id, shares, exit_price, reason, when}]
+    Advance trail one tick. Default = Peak Hour keep-profit (T1 bank + tighten).
     """
+    if trail_doc.get("php_keep_profit", True):
+        from tsd_scan_pipeline.tsd_keep_profit import php_process_bar
+
+        return php_process_bar(
+            trail_doc,
+            high=float(high),
+            low=float(low),
+            close=float(close),
+            when=when,
+            force_time_cap=force_time_cap,
+            be_lock_after_t1=False,
+            kill_tighten_after_t1=0.025,
+        )
+
     before = sim_state_from_dict(trail_doc)
     prior_closed = {t.id: t.closed for t in before.tranches}
-
     state = deepcopy(before)
     process_bar(
         state,
@@ -234,21 +232,16 @@ def evaluate_trail_tick(
         when=when,
         force_time_cap=force_time_cap,
     )
-
     exits: list[dict[str, Any]] = []
     for t in state.tranches:
-        was_closed = prior_closed.get(t.id, False)
-        if not was_closed and t.closed:
-            exits.append(
-                {
-                    "tranche_id": t.id,
-                    "shares": int(t.shares),
-                    "exit_price": float(t.exit_price or close),
-                    "reason": t.exit_reason or "trail",
-                    "when": t.exit_time or when,
-                }
-            )
-
+        if not prior_closed.get(t.id, False) and t.closed:
+            exits.append({
+                "tranche_id": t.id,
+                "shares": int(t.shares),
+                "exit_price": float(t.exit_price or close),
+                "reason": t.exit_reason or "trail",
+                "when": t.exit_time or when,
+            })
     updated = sim_state_to_dict(state)
     updated["kill_stop_cancelled"] = trail_doc.get("kill_stop_cancelled", False)
     updated["levels_source"] = trail_doc.get("levels_source")

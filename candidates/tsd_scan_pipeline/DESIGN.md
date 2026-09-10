@@ -20,7 +20,7 @@
 | `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Thin PRINT/OUTLOOK (attention set) |
 | `tsd_catalyst_deep` (90d lookback) | Narrative + risk flags; contradictions can REJECT |
 | OpenRouter web search | Live chatter / leaderboard context inside case fusion |
-| `tsd_trail_monitor` | Kill until +1R → BE → trail |
+| `tsd_trail_monitor` | Keep-profit v1: T1 bank @+2% → kill tighten 2.5% → T2–T4 trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
 
@@ -66,7 +66,13 @@ Pacing: **~2.5s/symbol** for historical pulls.
 
 ## Phase 4 — Software trail monitor
 
-`tsd_trail_monitor.py` (clientId **95**): strategy_a 4-tranche trail, session-aware SELL.
+`tsd_trail_monitor.py` (clientId **95**): Peak Hour **keep-profit v1** (autopsy 2026-09-10).
+
+- **T1** hard-banks at **+2%** (not a 4% trail that only frees after ~+7%).
+- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet via `sync_kill_quantity`).
+- **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%`.
+- **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).
+- Entry soft-skip when structure risk **> 3.5%**; ENTER requires tradable popularity.
 
 ## Phase 5 — Scheduler + scorecard
 
