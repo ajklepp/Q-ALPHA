@@ -38,7 +38,9 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
 from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
 from tsd_scan_pipeline.tsd_exit import (  # noqa: E402
     housekeep_orphan_sell_orders,
+    kill_price_already_through,
     place_tsd_exit,
+    repair_unfillable_stop_limit_sells,
     sync_kill_quantity,
 )
 from tsd_scan_pipeline.tsd_notify import format_exited, notify_tsd  # noqa: E402
@@ -273,6 +275,25 @@ def _process_leg(
 
     maybe_arm_be_lock_on_1r(leg, trail, quote_high=quote["high"])
     trail = leg.get("trail") or trail
+
+    # Fail-closed: if last already through kill STP LMT ceiling, flatten now.
+    # Covers residual 1-share longs left under a gapped stop-limit (JANX).
+    last_px = float(quote.get("close") or quote.get("last") or 0)
+    kill_px = float(trail.get("kill_price") or 0)
+    if last_px > 0 and kill_price_already_through(last_px, kill_px):
+        print(
+            f"  {sym} kill gap unfillable last={last_px:.2f} "
+            f"kill={kill_px:.2f} — force flatten"
+        )
+        results.extend(
+            _exit_all_remaining(
+                ib, pos, leg_index, leg, sym,
+                reason="kill_gap_unfillable",
+                quote=quote,
+                dry_run=dry_run,
+            )
+        )
+        return results
 
     if should_idle_no_1r(trail, leg):
         results.extend(
@@ -674,6 +695,15 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
             )
         except Exception as exc:
             print(f"  trail dashboard sync warn: {exc}")
+
+        # Flatten residual longs whose STP LMT kill is unfillable (gap-through).
+        if not dry_run:
+            try:
+                stuck_actions = repair_unfillable_stop_limit_sells(ib, dry_run=False)
+                if stuck_actions:
+                    actions.extend(stuck_actions)
+            except Exception as exc:
+                print(f"  stuck-exit repair warn: {exc}")
 
         # Cancel leftover SELL stops on broker-flat names (missed kill cancels).
         if not dry_run:
