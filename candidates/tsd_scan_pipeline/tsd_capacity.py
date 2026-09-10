@@ -252,6 +252,10 @@ def record_entry(
     rs_sector_5d: float | None = None,
     rs_ok: int | None = None,
     sector_etf: str | None = None,
+    case_review: dict[str, Any] | None = None,
+    momentum_context: bool | None = None,
+    on_gainers: bool | None = None,
+    attention_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     """Book a filled entry into TSD state."""
     from tsd_scan_pipeline.tsd_kill import resolve_kill_pct
@@ -320,6 +324,10 @@ def record_entry(
         "rs_sector_5d": rs_sector_5d,
         "rs_ok": rs_ok,
         "sector_etf": sector_etf,
+        "case_review": case_review or {},
+        "momentum_context": momentum_context,
+        "on_gainers": on_gainers,
+        "attention_reasons": list(attention_reasons or []),
         "status": "OPEN",
         "trail": trail,
         "exits": [],

@@ -237,6 +237,19 @@ def add_to_watch_queue(
             "ticker_prior_source": qh_row.get(
                 "ticker_prior_source", cand.get("ticker_prior_source")
             ),
+            "case_review": cand.get("case_review") or qh_row.get("case_review") or {},
+            "case_verdict": cand.get("case_verdict")
+            or (cand.get("case_review") or {}).get("verdict"),
+            "momentum_context": bool(
+                cand.get("momentum_context")
+                if cand.get("momentum_context") is not None
+                else qh_row.get("momentum_context")
+            ),
+            "on_gainers": bool(cand.get("on_gainers") or qh_row.get("on_gainers")),
+            "buzz_accel": bool(cand.get("buzz_accel") or qh_row.get("buzz_accel")),
+            "attention_reasons": list(
+                cand.get("attention_reasons") or qh_row.get("attention_reasons") or []
+            ),
         }
 
         idx = _queue_index(state, sym)
@@ -373,6 +386,10 @@ def execute_live_entries(
             rs_sector_5d=cand.get("rs_sector_5d"),
             rs_ok=cand.get("rs_ok"),
             sector_etf=cand.get("sector_etf"),
+            case_review=cand.get("case_review"),
+            momentum_context=cand.get("momentum_context"),
+            on_gainers=cand.get("on_gainers"),
+            attention_reasons=cand.get("attention_reasons"),
         )
         any_fill = True
         results.append({**fill, "kind": entry_kind, "kill_source": fill_kill_source})

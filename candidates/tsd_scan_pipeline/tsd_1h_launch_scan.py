@@ -1,12 +1,13 @@
 """
 Q-ALPHA UTS v2.6 — hourly 1H LAUNCH scan.
 
-HTF-pass names → last completed 1H launch eval → rank by HTF+launch →
+HTF-pass names → last completed 1H launch eval → rank by continuation_score →
+Attention Pool (score + gainers + buzz) → Case Review (ENTER/WAIT/REJECT) →
 queue / enter at most 2 NEW names if slots free.
 
 Bar source: Polygon 1H aggs (see tsd_1h_signal.BAR_SOURCE).
 Hours: 05–15 ET (scan at :15 after bar close; hitch study + RTH).
-Rank: continuation_score_v1.1 (EXP-0021 ship gate). Cap: 2 new names per scan.
+Rank nominates; case decides. Cap: 2 new names per scan.
 """
 from __future__ import annotations
 
@@ -64,6 +65,7 @@ def _write_launch_artifact(
     take: list[dict[str, Any]],
     queue_results: list[dict[str, Any]] | None = None,
     entry_results: list[dict[str, Any]] | None = None,
+    attention: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Persist today's Peak Hour 1H board for dashboard / Supabase watchlist SoT."""
     q_by_sym = {
@@ -72,12 +74,16 @@ def _write_launch_artifact(
     e_by_sym = {
         str(r.get("symbol", "")).upper(): r for r in (entry_results or [])
     }
+    att_by_sym = {
+        str(r.get("symbol", "")).upper(): r for r in (attention or [])
+    }
     take_syms = {str(t.get("symbol", "")).upper() for t in take}
     rows_out: list[dict[str, Any]] = []
     for i, r in enumerate(ranked, 1):
         sym = str(r.get("symbol", "")).upper()
         qr = q_by_sym.get(sym) or {}
         er = e_by_sym.get(sym) or {}
+        ar = att_by_sym.get(sym) or r
         if er.get("status") == "FILLED":
             status = "ENTERED"
         elif str(qr.get("status", "")).upper() in QUEUE_ADMIT_STATUSES:
@@ -87,6 +93,9 @@ def _write_launch_artifact(
             status = "SKIP" if st == "SKIPPED" else st
         elif sym in take_syms:
             status = "TAKE"
+        elif sym in att_by_sym:
+            cv = str((ar.get("case_review") or {}).get("verdict") or ar.get("case_verdict") or "")
+            status = f"CASE_{cv}" if cv else "ATTENTION"
         else:
             status = "RANKED"
         rows_out.append({
@@ -105,21 +114,37 @@ def _write_launch_artifact(
             "status": status,
             "queue_reason": qr.get("reason"),
             "structure_mode": r.get("structure_mode"),
-            "print": r.get("print"),
-            "outlook": r.get("outlook"),
+            "print": ar.get("print") or r.get("print"),
+            "outlook": ar.get("outlook") or r.get("outlook"),
+            "case_verdict": (ar.get("case_review") or {}).get("verdict") or ar.get("case_verdict"),
+            "case_confidence": (ar.get("case_review") or {}).get("confidence")
+            or ar.get("case_confidence"),
+            "momentum_context": ar.get("momentum_context"),
+            "on_gainers": ar.get("on_gainers"),
+            "attention_reasons": ar.get("attention_reasons"),
+            "room_class": (ar.get("case_review") or {}).get("room_class"),
         })
     payload = {
         "updated_at": now_et.isoformat(),
         "strategy": "Peak Hour Performers",
-        "version": "3.1-continuation-ranker",
+        "version": "3.2-case-review",
         "bar_source": BAR_SOURCE,
         "hours": sorted(ALLOWED_HOURS),
         "continuation_score_version": CONTINUATION_SCORE_VERSION,
         "slots_per_scan": MAX_NEW_ENTRIES_PER_SCAN,
         "ranked_count": len(ranked),
+        "attention_count": len(attention) if attention is not None else None,
         "take_count": len(take),
+        "case_enter_count": sum(
+            1 for r in (attention or [])
+            if str((r.get("case_review") or {}).get("verdict") or "").upper() == "ENTER"
+        ) if attention is not None else None,
         "rows": rows_out,
     }
+    LAUNCH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCH_CACHE_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    print(f"  Wrote {LAUNCH_CACHE_PATH.relative_to(CANDIDATES_DIR.parent)}")
+    return LAUNCH_CACHE_PATH
     LAUNCH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     LAUNCH_CACHE_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     print(f"  Wrote {LAUNCH_CACHE_PATH.relative_to(CANDIDATES_DIR.parent)}")
@@ -341,16 +366,38 @@ def run_1h_launch_scan(
             )
 
     ranked = rank_1h_launches(rows, polygon_key=key, now=now_et)
-    take = ranked[:MAX_NEW_ENTRIES_PER_SCAN]
-    print(f"\n1H launches: {len(ranked)}  taking top {len(take)} (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)")
+    print(f"\n1H launches: {len(ranked)} ranked passers")
+
+    from tsd_scan_pipeline.tsd_attention import build_attention_pool
+    from tsd_scan_pipeline.tsd_case_review import review_attention_pool, select_enter_rows
+
+    attention_raw = build_attention_pool(ranked, polygon_key=key)
+    # Dry scans: rules-only case (no LLM spend). Live: full fusion + web search.
+    attention = review_attention_pool(
+        attention_raw,
+        use_web_search=bool(live),
+        allow_llm=bool(live),
+        enrich_catalyst=bool(live),
+        polygon_key=key,
+    )
+    take = select_enter_rows(attention, max_n=MAX_NEW_ENTRIES_PER_SCAN)
+    print(
+        f"\nCase review: attention={len(attention)} "
+        f"ENTER={sum(1 for r in attention if str(r.get('case_verdict') or '').upper()=='ENTER')} "
+        f"taking {len(take)} (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)"
+    )
     for r in take:
+        case = r.get("case_review") or {}
         print(
             f"  {r['symbol']:<6} 1H_close={r.get('htf_1h_close')} "
             f"hour={r.get('htf_1h_bar_hour')} bar={r.get('bar_state')} "
-            f"HTF={r.get('htf_score')} launch={r.get('launch_score')} "
-            f"cont={r.get('continuation_score')} mult={r.get('hour_mult')} "
-            f"mode={r.get('structure_mode')}"
+            f"HTF={r.get('htf_score')} cont={r.get('continuation_score')} "
+            f"CASE={case.get('verdict')} conf={case.get('confidence')} "
+            f"mom={int(bool(r.get('momentum_context')))} "
+            f"reasons={','.join(r.get('attention_reasons') or [])}"
         )
+    if not take and attention:
+        print("  No case-ENTER names this scan (score alone cannot buy)")
 
     queue_results: list[dict[str, Any]] = []
     entry_results: list[dict[str, Any]] = []
@@ -412,6 +459,7 @@ def run_1h_launch_scan(
         take=take,
         queue_results=queue_results,
         entry_results=entry_results,
+        attention=attention,
     )
     funnel_path = _persist_funnel(
         now_et=now_et,

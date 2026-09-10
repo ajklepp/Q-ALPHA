@@ -1,7 +1,7 @@
 # Peak Hour Performers — Live Paper design
 
 **Status:** Live Paper primary = **1H LAUNCH @ :15** (hours **05–15** ET).  
-**Product:** Peak Hour Performers v3.1 · continuation_score_v1.1 · 2 slots/scan · LONG-ONLY.  
+**Product:** Peak Hour Performers v3.2 · continuation_score nominates · **case review decides** · 2 slots/scan · LONG-ONLY.  
 **Workspace:** Q-ALPHA only.
 
 ### Live Paper stack (KEEP)
@@ -10,15 +10,26 @@
 |-----|------|
 | `scheduler.py --tick --live` | Sole entry authority → `tsd_1h_launch_scan` |
 | HTF universe @ 04:30 | Daily pass set for hourly scan |
-| `tsd_watch_queue` + `execute_live_entries` | Admit + BUY |
-| `tsd_social` (Polygon + TWS news + StockTwits; X off) | Soft continuation terms + thesis; never hard-vetoes |
+| `tsd_attention` | Attention Pool: top continuation ∪ Polygon gainers ∪ ST buzz ∪ soft-extension |
+| `tsd_case_review` | ENTER / WAIT / REJECT — score alone cannot buy |
+| `tsd_watch_queue` + `execute_live_entries` | Admit + BUY **case-ENTER only** |
+| `tsd_social` (Polygon + TWS news + StockTwits; X off) | Rank soft terms + case dossier evidence |
 | `tsd_deep_features` (20d room/bounce + 1H path prior) | Path prior when n≥3; else profile analog fallback |
 | Missed ledger `evidence` + thesis | Frozen decision snapshot for Weekly Review |
-| `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Thin PRINT/OUTLOOK from recent headlines |
-| `tsd_catalyst_deep` (90d lookback) | Narrative + stale-relevant + undated expectations; soft score; thesis |
+| `catalyst_ai` via OpenRouter (`gpt-4o-mini` default) | Thin PRINT/OUTLOOK (attention set) |
+| `tsd_catalyst_deep` (90d lookback) | Narrative + risk flags; contradictions can REJECT |
+| OpenRouter web search | Live chatter / leaderboard context inside case fusion |
 | `tsd_trail_monitor` | Kill until +1R → BE → trail |
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
+
+### Authority (v3.2)
+
+1. **1H deep-swing / early scan scores stay preferential** (do not equalize all bars).  
+2. **Continuation score nominates** into Attention Pool.  
+3. **Momentum context** (HTF + gainers / buzz / vol) qualifies those scores.  
+4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT.  
+5. **BUY only case-ENTER**, still capped at 2/scan + capacity.
 
 ### Not Live Paper (research / disabled)
 
