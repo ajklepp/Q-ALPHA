@@ -152,43 +152,90 @@ def _exit_all_remaining(
             ib, sym, rem, ref_price=px, entry_price=entry_px, reason=reason,
         )
 
+    filled_sh = int(fill.get("shares") or 0)
+    status = str(fill.get("status") or "")
+    if status not in ("FILLED", "PARTIAL", "DRY_RUN") or filled_sh <= 0:
+        print(
+            f"  {sym} STRUCTURE EXIT FAIL status={status} "
+            f"reason={fill.get('reason')} — book left OPEN"
+        )
+        results.append({
+            "symbol": sym,
+            "leg": leg_index,
+            "reason": reason,
+            "status": "EXIT_FAIL",
+            "fill": fill,
+        })
+        return results
+
+    if filled_sh < rem:
+        print(
+            f"  {sym} STRUCTURE PARTIAL fill {filled_sh}/{rem} — "
+            f"keeping residual open (no false full close)"
+        )
+
     record_leg_exit(
         pos,
         leg_index=leg_index,
-        shares=rem,
+        shares=filled_sh,
         exit_price=float(fill.get("fill_price") or px),
         reason=reason,
         tranche_id="STRUCTURE",
         order_id=fill.get("order_id"),
     )
-    leg["status"] = "CLOSED"
     exit_px = float(fill.get("fill_price") or px)
+    # Close tranches from the front until filled_sh is consumed
+    left = filled_sh
     for tranche in trail.get("tranches") or []:
-        if not tranche.get("closed"):
+        if left <= 0:
+            break
+        if tranche.get("closed"):
+            continue
+        t_sh = int(tranche.get("shares") or 0)
+        if t_sh <= 0:
+            continue
+        if t_sh <= left:
             tranche["closed"] = True
             tranche["trailing"] = False
             tranche["exit_price"] = exit_px
             tranche["exit_time"] = datetime.now(ET).isoformat()
             tranche["exit_reason"] = reason
+            left -= t_sh
+        else:
+            # Split: close filled portion by shrinking open tranche
+            tranche["shares"] = t_sh - left
+            left = 0
     trail["kill_stop_cancelled"] = False
     leg["trail"] = trail
+
+    still = remaining_shares(trail) if trail else max(0, rem - filled_sh)
+    if still <= 0:
+        leg["status"] = "CLOSED"
+    else:
+        leg["status"] = "OPEN"
+        # Shrink leg share count to residual for capacity/dashboard
+        leg["shares"] = still
     pos["legs"][leg_index] = leg
     if not dry_run:
-        # remaining_shares is now 0; sync cancels kill + any orphan SELLs
         sync_kill_quantity(ib, leg, sym, dry_run=False)
-    entry_px = float((leg.get("trail") or {}).get("entry_price") or leg.get("price") or 0)
-    pnl = (exit_px - entry_px) * rem if entry_px > 0 else None
+    pnl = (exit_px - entry_px) * filled_sh if entry_px > 0 else None
     if not dry_run:
         notify_tsd(
             format_exited(
                 sym,
-                reason=reason,
-                shares=rem,
+                reason=reason if still <= 0 else f"{reason}_partial",
+                shares=filled_sh,
                 exit_price=exit_px,
                 pnl_dollars=pnl,
             )
         )
-    results.append({"symbol": sym, "leg": leg_index, "reason": reason, "fill": fill})
+    results.append({
+        "symbol": sym,
+        "leg": leg_index,
+        "reason": reason,
+        "fill": fill,
+        "remaining": still,
+    })
     return results
 
 
@@ -305,16 +352,54 @@ def _process_leg(
                 entry_price=entry_px,
                 reason=str(ex["reason"]),
             )
+        filled_sh = int(fill.get("shares") or 0)
+        if str(fill.get("status") or "") not in ("FILLED", "PARTIAL", "DRY_RUN") or filled_sh <= 0:
+            print(
+                f"  {sym} EXIT FAIL {ex['tranche_id']}: "
+                f"{fill.get('status')} {fill.get('reason')} — reopen tranche (no broker fill)"
+            )
+            # evaluate_trail_tick already closed the tranche in software — undo
+            for tranche in trail.get("tranches") or []:
+                if str(tranche.get("id")) == str(ex["tranche_id"]):
+                    tranche["closed"] = False
+                    tranche["exit_price"] = None
+                    tranche["exit_time"] = None
+                    tranche["exit_reason"] = None
+                    break
+            results.append({
+                "symbol": sym,
+                "leg": leg_index,
+                **ex,
+                "fill": fill,
+                "status": "EXIT_FAIL",
+            })
+            continue
+        # evaluate_trail_tick already marked full tranche closed; adjust if partial
+        if filled_sh < int(ex["shares"]):
+            for tranche in trail.get("tranches") or []:
+                if str(tranche.get("id")) == str(ex["tranche_id"]):
+                    tranche["closed"] = False
+                    tranche["shares"] = int(ex["shares"]) - filled_sh
+                    tranche["exit_price"] = None
+                    tranche["exit_time"] = None
+                    tranche["exit_reason"] = None
+                    break
         record_leg_exit(
             pos,
             leg_index=leg_index,
-            shares=int(ex["shares"]),
+            shares=filled_sh,
             exit_price=float(fill.get("fill_price") or ex["exit_price"]),
             reason=str(ex["reason"]),
             tranche_id=str(ex["tranche_id"]),
             order_id=fill.get("order_id"),
         )
-        results.append({"symbol": sym, "leg": leg_index, **ex, "fill": fill})
+        results.append({
+            "symbol": sym,
+            "leg": leg_index,
+            **ex,
+            "shares": filled_sh,
+            "fill": fill,
+        })
 
     # Keep leg.shares = remaining open size (not original fill size).
     rem_now = remaining_shares(trail)
@@ -513,8 +598,19 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     if not dry_run:
         try:
-            from tws_intraday_sync import _reconcile_tsd_broker_kills
+            from tws_intraday_sync import (
+                _reconcile_broker_orphan_longs,
+                _reconcile_tsd_broker_kills,
+            )
 
+            orphans = _reconcile_broker_orphan_longs(broker_positions)
+            if orphans:
+                print(f"Broker orphan longs reopened: {orphans}")
+                state = load_state()
+                opens = [
+                    pos for pos in state.get("positions") or []
+                    if str(pos.get("status", "OPEN")).upper() == "OPEN"
+                ]
             reconciled = _reconcile_tsd_broker_kills(ib, broker_positions)
             if reconciled:
                 print(f"Broker kills reconciled before trail: {reconciled}")
@@ -524,7 +620,7 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
                     if str(pos.get("status", "OPEN")).upper() == "OPEN"
                 ]
         except Exception as exc:
-            print(f"  broker-kill reconcile warn: {exc}")
+            print(f"  broker reconcile warn: {exc}")
 
     actions: list[dict[str, Any]] = []
     for pos in opens:

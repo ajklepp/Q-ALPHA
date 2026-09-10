@@ -480,8 +480,12 @@ def place_tsd_exit(
         filled = float(trade.orderStatus.filled or 0)
         if filled > 0:
             avg_fill = float(trade.orderStatus.avgFillPrice or px)
+        # Wait for full fill — early return on partial caused book/broker orphans
+        if filled >= float(shares) - 1e-9 or st == "Filled":
             break
         if st in ("Cancelled", "Inactive", "ApiCancelled"):
+            if filled > 0:
+                break
             return {
                 "status": "REJECTED",
                 "reason": f"order_{st}",
@@ -496,16 +500,26 @@ def place_tsd_exit(
             pass
         return {"status": "REJECTED", "reason": "no_fill_timeout", "symbol": sym, "exit_reason": reason}
 
+    # Cancel unfilled residual so we do not leave a working SELL
+    if filled + 1e-9 < float(shares):
+        try:
+            ib.cancelOrder(trade.order)
+            ib.sleep(0.3)
+        except Exception:
+            pass
+
     release_on_exit(
-        int(filled),
+        int(round(filled)),
         avg_fill,
         entry_price=entry_price,
         symbol=sym,
     )
+    status = "FILLED" if filled + 1e-9 >= float(shares) else "PARTIAL"
     return {
-        "status": "FILLED",
+        "status": status,
         "symbol": sym,
-        "shares": int(filled),
+        "shares": int(round(filled)),
+        "requested_shares": int(shares),
         "fill_price": avg_fill,
         "session": session,
         "order_id": trade.order.orderId,

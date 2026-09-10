@@ -130,6 +130,51 @@ def release_on_exit(
     return doc
 
 
+def rebuild_deployed_from_book(
+    book: dict[str, Any] | None = None,
+    *,
+    state: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """
+    Recompute deployed cost basis from OPEN book legs; keep equity (cash+deployed).
+
+    Repairs drift when exits were recorded wrong vs pool releases (dashboard audit).
+    """
+    doc = state or load_pool(path)
+    if book is None:
+        try:
+            from tsd_scan_pipeline.tsd_capacity import load_state
+
+            book = load_state()
+        except Exception:
+            book = {"positions": []}
+
+    deployed = 0.0
+    for pos in book.get("positions") or []:
+        if str(pos.get("status") or "").upper() != "OPEN":
+            continue
+        for leg in pos.get("legs") or []:
+            if str(leg.get("status") or "").upper() != "OPEN":
+                continue
+            trail = leg.get("trail") or {}
+            entry = float(trail.get("entry_price") or leg.get("price") or 0)
+            rem = 0
+            for t in trail.get("tranches") or []:
+                if not t.get("closed"):
+                    rem += int(t.get("shares") or 0)
+            if rem <= 0:
+                rem = int(leg.get("shares") or 0)
+            if entry > 0 and rem > 0:
+                deployed += entry * rem
+
+    equity = float(doc.get("pool") or 0.0) + float(doc.get("deployed") or 0.0)
+    doc["deployed"] = round(deployed, 2)
+    doc["pool"] = round(max(0.0, equity - deployed), 2)
+    save_pool(doc, path)
+    return doc
+
+
 def pool_equity(state: dict[str, Any] | None = None) -> float:
     """Cash + deployed cost basis (excludes open MTM until marked)."""
     doc = state or load_pool()

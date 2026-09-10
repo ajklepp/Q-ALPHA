@@ -358,6 +358,159 @@ def _reconcile_tsd_broker_kills(
     return reconciled
 
 
+def _reconcile_broker_orphan_longs(
+    broker_positions: dict[str, float],
+) -> list[str]:
+    """
+    Re-open local TSD legs when broker still holds shares but book says CLOSED.
+
+    Repairs false full-closes after partial structure exits (e.g. JANX left 1 sh).
+    Does not place orders — book/pool only. Kill stops re-arm on next trail tick.
+    """
+    from tsd_scan_pipeline.tsd_capacity import load_state, save_state
+    from tsd_scan_pipeline.tsd_pool import rebuild_deployed_from_book
+    from tsd_scan_pipeline.tsd_trail import remaining_shares
+
+    book = load_state()
+    repaired: list[str] = []
+    changed = False
+
+    for pos in book.get("positions") or []:
+        symbol = str(pos.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        broker_qty = float(broker_positions.get(symbol, 0.0) or 0.0)
+        if broker_qty < 0.5:
+            continue  # flat or short (short = cleanup elsewhere)
+
+        # Prefer OPEN legs; if none, revive most recent CLOSED leg
+        open_legs = [
+            leg for leg in (pos.get("legs") or [])
+            if str(leg.get("status") or "").upper() == "OPEN"
+        ]
+        if open_legs:
+            # Book already open — if remaining shares understate broker, bump T4/last
+            for leg in open_legs:
+                trail = leg.get("trail") or {}
+                rem = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
+                need = int(round(broker_qty)) - rem
+                if need <= 0:
+                    continue
+                tranches = trail.get("tranches") or []
+                if tranches:
+                    # Add residual onto last tranche
+                    last = tranches[-1]
+                    if last.get("closed"):
+                        last["closed"] = False
+                        last["exit_price"] = None
+                        last["exit_time"] = None
+                        last["exit_reason"] = None
+                        last["shares"] = need
+                    else:
+                        last["shares"] = int(last.get("shares") or 0) + need
+                leg["shares"] = rem + need
+                leg["status"] = "OPEN"
+                leg["trail"] = trail
+                pos["status"] = "OPEN"
+                pos["closed_at"] = None
+                changed = True
+                if symbol not in repaired:
+                    repaired.append(symbol)
+                print(
+                    f"  >>> TSD ORPHAN LONG TOP-UP {symbol} "
+                    f"+{need}sh broker={broker_qty:.0f} book_was={rem}"
+                )
+            continue
+
+        # Fully CLOSED in book but broker long — reopen last leg as residual
+        closed_legs = [
+            leg for leg in (pos.get("legs") or [])
+            if str(leg.get("status") or "").upper() == "CLOSED"
+        ]
+        if not closed_legs:
+            continue
+        leg = closed_legs[-1]
+        trail = dict(leg.get("trail") or {})
+        entry = float(trail.get("entry_price") or leg.get("price") or 0)
+        residual = int(round(broker_qty))
+        if residual <= 0 or entry <= 0:
+            continue
+
+        # Shrink last STRUCTURE exit if it overstated sold qty
+        exits = list(leg.get("exits") or [])
+        if exits:
+            last_ex = dict(exits[-1])
+            sold = int(last_ex.get("shares") or 0)
+            original = int(leg.get("shares") or sold)
+            if sold >= original and sold - residual > 0:
+                last_ex["shares"] = sold - residual
+                last_ex["reason"] = str(last_ex.get("reason") or "") + "_orphan_adj"
+                exits[-1] = last_ex
+                leg["exits"] = exits
+
+        # Rebuild tranches: all closed except one residual runner
+        tranches = list(trail.get("tranches") or [])
+        closed_budget = max(0, int(leg.get("shares") or 0) - residual)
+        left_close = closed_budget
+        for t in tranches:
+            t_sh = int(t.get("shares") or 0)
+            if left_close >= t_sh and t_sh > 0:
+                t["closed"] = True
+                if t.get("exit_price") is None and exits:
+                    t["exit_price"] = exits[-1].get("exit_price")
+                    t["exit_reason"] = exits[-1].get("reason")
+                    t["exit_time"] = exits[-1].get("time")
+                left_close -= t_sh
+            else:
+                t["closed"] = False
+                t["trailing"] = False
+                t["exit_price"] = None
+                t["exit_time"] = None
+                t["exit_reason"] = None
+                t["shares"] = residual if left_close < t_sh else max(1, t_sh - left_close)
+                # Only one open tranche for residual
+                residual = 0
+                left_close = 0
+        if residual > 0:
+            # No tranche slots left — append runner
+            tranches.append({
+                "id": "T4",
+                "shares": residual,
+                "weight": 0.1,
+                "trigger_pct": 0.1,
+                "trigger_price": round(entry * 1.1, 4),
+                "trail_pct": 0.04,
+                "trailing": False,
+                "run_high": 0.0,
+                "activated_at": None,
+                "activation_high": None,
+                "closed": False,
+                "exit_price": None,
+                "exit_time": None,
+                "exit_reason": None,
+                "trail_stop_at_exit": None,
+            })
+        trail["tranches"] = tranches
+        rem_now = remaining_shares(trail)
+        leg["trail"] = trail
+        leg["status"] = "OPEN"
+        leg["shares"] = rem_now
+        pos["status"] = "OPEN"
+        pos["closed_at"] = None
+        # leg is already the in-book dict (mutated in place)
+        changed = True
+        repaired.append(symbol)
+        print(
+            f"  >>> TSD ORPHAN LONG REOPEN {symbol} "
+            f"{rem_now}sh @ entry={entry:.4f} broker={broker_qty:.0f}"
+        )
+
+    if changed:
+        save_state(book)
+        rebuild_deployed_from_book(book)
+    return repaired
+
+
 def _vwap(fills: list[dict]) -> float | None:
     if not fills:
         return None
@@ -802,6 +955,14 @@ def run_tws_intraday_sync(
 
         pos_map = _ib_position_map(ib)
         print(f"  TWS positions: {pos_map or '(flat)'}")
+
+        try:
+            summary["tsd_orphans"] = _reconcile_broker_orphan_longs(pos_map)
+            if summary["tsd_orphans"]:
+                print(f"  TSD orphan longs repaired: {summary['tsd_orphans']}")
+        except Exception as exc:
+            print(f"  TSD orphan-long reconcile warn: {exc}")
+            summary["sync_errors"].append(f"tsd_orphan:{exc}")
 
         try:
             summary["tsd_reconciled"] = _reconcile_tsd_broker_kills(ib, pos_map)
