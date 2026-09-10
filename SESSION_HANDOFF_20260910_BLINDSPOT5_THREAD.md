@@ -86,3 +86,15 @@ Key files:
 Read and follow C:\Users\ajkle\Documents\Q-ALPHA\SESSION_HANDOFF_20260910_BLINDSPOT5_THREAD.md
 That file is the Q-ALPHA-relevant clone of work from the Track 100 "Blind-spot #5 event distance" thread (micro-confirm, keep-profit, JANX orphan audit, Track 100 repo split). Continue from there; do not re-run Track 100 inside Q-ALPHA.
 ```
+
+---
+
+## Close-out (2026-09-10 evening)
+
+The long-running **q-alpha** Agents chat *"Blind-spot #5 event distance"* (~20h) failed to load (`Couldn't load this agent`). That thread is **closed out** — do not try to revive it.
+
+**Canonical continuity for Peak Hour / TSD live paper:**
+- This handoff file in **Q-ALPHA** and **Q-ALPHA-READONLY**
+- Latest `main` commits through `6fd76c8` (handoff) / `4752bd7` (orphan exit fix)
+
+**Track 100** continues only in `C:\Users\ajkle\Documents\Track 100` / https://github.com/ajklepp/track-100
