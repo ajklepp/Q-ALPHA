@@ -10,7 +10,8 @@
 |-----|------|
 | `scheduler.py --tick --live` | Sole entry authority → `tsd_1h_launch_scan` |
 | HTF universe @ 04:30 | Daily pass set for hourly scan |
-| `tsd_attention` | Attention Pool: top continuation ∪ Polygon gainers ∪ ST buzz ∪ soft-extension |
+| `tsd_popularity` | Multi-day Polygon movers + $vol leaders + live gainers + TWS MOST_ACTIVE/TOP_PERC_GAIN |
+| `tsd_attention` | Attention Pool: top continuation ∪ tradable_popular ∪ soft-extension (ST optional) |
 | `tsd_case_review` | ENTER / WAIT / REJECT — score alone cannot buy |
 | `tsd_watch_queue` + `execute_live_entries` | Admit + BUY **case-ENTER only** |
 | `tsd_social` (Polygon + TWS news + StockTwits; X off) | Rank soft terms + case dossier evidence |
@@ -27,7 +28,7 @@
 
 1. **1H deep-swing / early scan scores stay preferential** (do not equalize all bars).  
 2. **Continuation score nominates** into Attention Pool.  
-3. **Momentum context** (HTF + gainers / buzz / vol) qualifies those scores.  
+3. **Momentum / popularity** — ask “is this a popular stock to trade?” via recent multi-day leaderboard history (not first 1H print alone), TWS scanners, live gainers; StockTwits is optional only.  
 4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT.  
 5. **BUY only case-ENTER**, still capped at 2/scan + capacity.
 

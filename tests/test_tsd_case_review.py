@@ -44,26 +44,38 @@ def _row(**kwargs):
 
 
 class TestAttentionPool(unittest.TestCase):
-    def test_top_continuation_and_gainer_union(self):
+    def test_top_continuation_and_recent_leaderboard_union(self):
         ranked = [
             _row(symbol="AAA", continuation_score=90),
             _row(symbol="BBB", continuation_score=85),
             _row(symbol="CCC", continuation_score=40, scan_score=60),
             _row(symbol="IREN", continuation_score=45, scan_score=58, dist_20d_high_pct=0.15),
         ]
+        # IREN was a multi-day leader earlier — not necessarily on *today* gainers
+        ctx = {
+            "recent_gainer_symbols": {"IREN"},
+            "recent_active_symbols": {"IREN"},
+            "live_gainers": set(),
+            "tws_symbols": set(),
+            "popular_symbols": {"IREN"},
+            "tws_ok": False,
+            "sessions_loaded": 5,
+        }
         pool = build_attention_pool(
             ranked,
-            gainers={"IREN", "ZZZ"},
+            popularity_ctx=ctx,
             top_k=2,
             pool_max=10,
+            include_tws=False,
         )
         syms = {r["symbol"] for r in pool}
         self.assertIn("AAA", syms)
         self.assertIn("BBB", syms)
-        self.assertIn("IREN", syms)  # gainer + soft-extension room
+        self.assertIn("IREN", syms)
         iren = next(r for r in pool if r["symbol"] == "IREN")
-        self.assertTrue(iren.get("on_gainers"))
-        self.assertIn("polygon_gainer", iren.get("attention_reasons") or [])
+        self.assertTrue(iren.get("recent_leaderboard"))
+        self.assertTrue(iren.get("tradable_popular"))
+        self.assertIn("recent_leaderboard", iren.get("attention_reasons") or [])
 
     def test_hard_extended_excluded(self):
         ranked = [_row(symbol="HOT", scan_score=80, bar_state="extended", continuation_score=99)]
@@ -115,10 +127,20 @@ class TestCaseReview(unittest.TestCase):
             htf_range_20d_pct=0.55,
             dist_20d_high_pct=0.14,
             vol_ratio_20=1.8,
-            st_msg_24h=40.0,
-            st_ok=1,
+            st_msg_24h=2.0,
+            st_ok=0,
         )
-        good = annotate_momentum_context(good, gainers={"IREN"}, buzz_threshold=12)
+        ctx = {
+            "recent_gainer_symbols": {"IREN"},
+            "recent_active_symbols": {"IREN"},
+            "live_gainers": set(),
+            "tws_symbols": {"IREN"},
+            "popular_symbols": {"IREN"},
+            "tws_ok": True,
+            "sessions_loaded": 8,
+        }
+        good = annotate_momentum_context(good, popularity_ctx=ctx, buzz_threshold=99)
+        self.assertTrue(good.get("tradable_popular"))
         self.assertTrue(good.get("momentum_context"))
         self.assertEqual(classify_room_class(good), "CONSTRUCTIVE_ROOM")
         case = review_case(good, allow_llm=False, use_web_search=False)

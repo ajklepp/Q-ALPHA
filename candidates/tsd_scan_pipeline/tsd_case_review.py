@@ -127,6 +127,9 @@ def build_case_dossier(row: dict[str, Any]) -> dict[str, Any]:
         "vol_ratio_20": float(row.get("vol_ratio_20") or 0.0),
         "room_class": room_class,
         "on_gainers": bool(row.get("on_gainers")),
+        "recent_leaderboard": bool(row.get("recent_leaderboard")),
+        "tws_popular": bool(row.get("tws_popular")),
+        "tradable_popular": bool(row.get("tradable_popular")),
         "buzz_accel": bool(row.get("buzz_accel")),
         "momentum_context": bool(row.get("momentum_context")),
         "attention_reasons": list(row.get("attention_reasons") or []),
@@ -214,21 +217,31 @@ def deterministic_case_verdict(dossier: dict[str, Any]) -> dict[str, Any] | None
 
     # Strong momentum + constructive room + early/deep-swing scan → ENTER without LLM
     scan = float(dossier.get("scan_score") or 99.0)
+    popular = bool(
+        dossier.get("tradable_popular")
+        or dossier.get("recent_leaderboard")
+        or dossier.get("tws_popular")
+        or dossier.get("on_gainers")
+        or dossier.get("buzz_accel")
+    )
     if (
         dossier.get("room_class") == "CONSTRUCTIVE_ROOM"
         and dossier.get("momentum_context")
         and scan <= 55.0
-        and (dossier.get("on_gainers") or dossier.get("buzz_accel"))
+        and popular
     ):
-        evidence.append("constructive_room+momentum+early_scan")
+        evidence.append("constructive_room+momentum+popular+early_scan")
         return _case(
             sym,
             "ENTER",
             0.72,
             dossier,
-            structure_note="Constructive room with momentum confirmation on early swing",
+            structure_note="Constructive room with tradable-popularity confirmation on early swing",
             sentiment_note=(
-                f"gainers={dossier.get('on_gainers')} buzz={dossier.get('buzz_accel')}"
+                f"popular={dossier.get('tradable_popular')} "
+                f"recent_lb={dossier.get('recent_leaderboard')} "
+                f"tws={dossier.get('tws_popular')} "
+                f"today_gainer={dossier.get('on_gainers')}"
             ),
             risks=[],
             evidence=evidence,
@@ -261,6 +274,9 @@ def _case(
         "evidence": evidence,
         "momentum_context": bool(dossier.get("momentum_context")),
         "on_gainers": bool(dossier.get("on_gainers")),
+        "recent_leaderboard": bool(dossier.get("recent_leaderboard")),
+        "tws_popular": bool(dossier.get("tws_popular")),
+        "tradable_popular": bool(dossier.get("tradable_popular")),
         "buzz_accel": bool(dossier.get("buzz_accel")),
         "continuation_score": dossier.get("continuation_score"),
         "attention_reasons": dossier.get("attention_reasons") or [],
@@ -466,7 +482,13 @@ def review_attention_pool(
                 )
                 # Preserve attention flags
                 for k in (
-                    "on_gainers", "buzz_accel", "momentum_context", "attention_reasons",
+                    "on_gainers",
+                    "recent_leaderboard",
+                    "tws_popular",
+                    "tradable_popular",
+                    "buzz_accel",
+                    "momentum_context",
+                    "attention_reasons",
                 ):
                     if k in row:
                         erow[k] = row[k]
