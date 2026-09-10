@@ -340,3 +340,119 @@ def format_gate_summary(gates: Any) -> str:
     if failed:
         return "FAIL:" + ",".join(failed[:3])
     return "OK"
+
+
+def remaining_open_shares(row: dict[str, Any]) -> int:
+    """
+    Shares still open on a cloud/local open leg.
+
+    Prefer open tranche sizes; fall back to shares minus closed-tranche sizes,
+    then to the raw shares field.
+    """
+    tranches = parse_tranche_json(row.get("tranche_json"))
+    if tranches:
+        open_sh = sum(
+            int(_sf(t.get("shares"), 0.0))
+            for t in tranches
+            if not bool(t.get("closed"))
+        )
+        if open_sh > 0:
+            return open_sh
+        closed_sh = sum(
+            int(_sf(t.get("shares"), 0.0))
+            for t in tranches
+            if bool(t.get("closed"))
+        )
+        raw = int(_sf(row.get("shares"), 0.0))
+        if raw > 0 and closed_sh > 0:
+            return max(0, raw - closed_sh)
+    return max(0, int(_sf(row.get("shares"), 0.0)))
+
+
+def partial_realized_from_open_row(row: dict[str, Any]) -> float:
+    """
+    Realized P&L from closed tranches still attached to an OPEN leg.
+
+    Trail scale-outs (T1/T2) must count in scoreboard realized even before
+    the whole symbol is flat.
+    """
+    entry = _sf(row.get("entry_price"), 0.0)
+    if entry <= 0:
+        return 0.0
+    if row.get("partial_realized") is not None:
+        return round(_sf(row.get("partial_realized"), 0.0), 2)
+    pnl = 0.0
+    for t in parse_tranche_json(row.get("tranche_json")):
+        if not bool(t.get("closed")):
+            continue
+        sh = int(_sf(t.get("shares"), 0.0))
+        px = _sf(t.get("exit_price"), 0.0)
+        if sh > 0 and px > 0:
+            pnl += (px - entry) * sh
+    return round(pnl, 2)
+
+
+def unrealized_from_open_row(row: dict[str, Any]) -> float:
+    """Mark-to-market P&L on remaining open shares only."""
+    entry = _sf(row.get("entry_price"), 0.0)
+    mark = _sf(row.get("current_price"), 0.0)
+    shares = remaining_open_shares(row)
+    if entry <= 0 or mark <= 0 or shares <= 0:
+        return 0.0
+    return round((mark - entry) * shares, 2)
+
+
+def is_t34_trailing_position(row: dict[str, Any]) -> bool:
+    """
+    True when an open name still holds T3 and/or T4 shares (runner inventory).
+    """
+    for t in parse_tranche_json(row.get("tranche_json")):
+        if bool(t.get("closed")):
+            continue
+        tid = str(t.get("id") or t.get("tranche_id") or "").upper()
+        if tid in ("T3", "T4"):
+            return True
+    # t4_only flag means only the runner remains
+    return bool(row.get("t4_only"))
+
+
+def scoreboard_pnl(
+    open_rows: list[dict[str, Any]],
+    closed_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Consistent Peak Hour scoreboard P&L parts.
+
+    Headline P&L = realized (closed + open partials) + unrealized (remaining).
+    """
+    closed_realized = sum(_sf(r.get("pnl_dollars"), 0.0) for r in closed_rows)
+    partial_realized = sum(partial_realized_from_open_row(r) for r in open_rows)
+    realized = round(closed_realized + partial_realized, 2)
+    unrealized = round(sum(unrealized_from_open_row(r) for r in open_rows), 2)
+    open_mtm = round(
+        sum(
+            _sf(r.get("current_price"), 0.0) * remaining_open_shares(r)
+            for r in open_rows
+        ),
+        2,
+    )
+    winners = sum(1 for r in closed_rows if _sf(r.get("pnl_dollars"), 0.0) > 0.005)
+    losers = sum(1 for r in closed_rows if _sf(r.get("pnl_dollars"), 0.0) < -0.005)
+    flats = len(closed_rows) - winners - losers
+    decisive = winners + losers
+    trailing = sum(1 for r in open_rows if is_t34_trailing_position(r))
+    return {
+        "realized": realized,
+        "closed_realized": round(closed_realized, 2),
+        "partial_realized": round(partial_realized, 2),
+        "unrealized": unrealized,
+        "total_pnl": round(realized + unrealized, 2),
+        "open_mtm": open_mtm,
+        "winners": winners,
+        "losers": losers,
+        "flats": flats,
+        "decisive": decisive,
+        "win_rate": (winners / decisive) if decisive else None,
+        "open_names": len({str(r.get("symbol") or "").upper() for r in open_rows if r.get("symbol")}),
+        "trailing_positions": trailing,
+    }

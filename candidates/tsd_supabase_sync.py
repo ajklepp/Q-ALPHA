@@ -105,6 +105,8 @@ def _serialize_tranches(trail: dict[str, Any]) -> list[dict[str, Any]]:
             "armed": armed,
             "trail_stop": stop,
             "closed": bool(t.get("closed")),
+            "exit_price": _finite(t.get("exit_price")),
+            "exit_reason": t.get("exit_reason"),
         })
     return out
 
@@ -132,7 +134,15 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
             if not entry_date:
                 entry_date = datetime.now(ET).strftime("%Y-%m-%d")
             entry_price = _finite(trail.get("entry_price")) or _finite(leg.get("price"))
-            shares = int(leg.get("shares") or 0)
+            from tsd_scan_pipeline.tsd_trail import remaining_shares
+
+            try:
+                shares = int(remaining_shares(trail)) if trail.get("tranches") else 0
+            except Exception:
+                shares = 0
+            if shares <= 0:
+                exited = sum(int(ex.get("shares") or 0) for ex in leg.get("exits") or [])
+                shares = max(0, int(leg.get("shares") or 0) - exited)
             kill_price = _finite(trail.get("kill_price"))
             current_price = _finite(trail.get("last_close")) or entry_price
             scan_score = _finite(leg.get("scan_score"))
@@ -142,6 +152,22 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
             if entry_price and shares > 0 and current_price:
                 pnl_dollars = round((current_price - entry_price) * shares, 2)
                 pnl_pct = round((current_price - entry_price) / entry_price, 4)
+
+            partial_realized = 0.0
+            if entry_price:
+                for ex in leg.get("exits") or []:
+                    sh = int(ex.get("shares") or 0)
+                    px = _finite(ex.get("exit_price"))
+                    if sh > 0 and px is not None:
+                        partial_realized += (px - entry_price) * sh
+                if partial_realized == 0.0:
+                    for t in trail.get("tranches") or []:
+                        if not t.get("closed"):
+                            continue
+                        sh = int(t.get("shares") or 0)
+                        px = _finite(t.get("exit_price"))
+                        if sh > 0 and px is not None:
+                            partial_realized += (px - entry_price) * sh
 
             tranche_rows = _serialize_tranches(trail)
             raw_tranches = trail.get("tranches") or []
@@ -166,6 +192,7 @@ def flatten_open_legs(book: dict[str, Any]) -> list[dict[str, Any]]:
                     "current_price": current_price,
                     "pnl_dollars": pnl_dollars,
                     "pnl_pct": pnl_pct,
+                    "partial_realized": round(partial_realized, 2),
                     "status": "OPEN",
                     "last_bar_time": trail.get("last_bar_time"),
                     "scan_score": scan_score,

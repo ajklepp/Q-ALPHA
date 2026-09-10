@@ -12,13 +12,18 @@ from dashboard_tsd_helpers import (
     format_level,
     format_trail_stop_cell,
     hold_time_display,
+    is_t34_trailing_position,
     map_exit_layer,
     mark_age_minutes,
     mfe_in_r,
     next_trail_stop,
+    partial_realized_from_open_row,
     progress_fraction,
     progress_milestones,
     progress_tick_labels,
+    remaining_open_shares,
+    scoreboard_pnl,
+    unrealized_from_open_row,
 )
 
 
@@ -138,6 +143,42 @@ class TestStylePnl(unittest.TestCase):
 
         self.assertIn("font-weight", _style_pnl(0.052))
         self.assertEqual(_style_pnl(float("nan")), "")
+
+
+class TestScoreboardPnl(unittest.TestCase):
+    def test_partial_trail_exit_counts_in_realized_and_remaining_shares(self):
+        open_rows = [{
+            "symbol": "FWDI",
+            "entry_price": 6.36,
+            "current_price": 6.56,
+            "shares": 44,  # stale original size
+            "tranche_json": [
+                {"id": "T1", "shares": 18, "closed": True, "exit_price": 6.60},
+                {"id": "T2", "shares": 13, "closed": False},
+                {"id": "T3", "shares": 9, "closed": False},
+                {"id": "T4", "shares": 4, "closed": False},
+            ],
+        }]
+        closed_rows = [
+            {"symbol": "PURR", "pnl_dollars": 2.40},
+            {"symbol": "FGI", "pnl_dollars": -13.60},
+            {"symbol": "CVI", "pnl_dollars": 0.0},
+        ]
+        self.assertEqual(remaining_open_shares(open_rows[0]), 26)
+        self.assertAlmostEqual(partial_realized_from_open_row(open_rows[0]), 4.32, places=2)
+        self.assertTrue(is_t34_trailing_position(open_rows[0]))
+        board = scoreboard_pnl(open_rows, closed_rows)
+        self.assertEqual(board["winners"], 1)
+        self.assertEqual(board["losers"], 1)
+        self.assertEqual(board["flats"], 1)
+        self.assertAlmostEqual(board["partial_realized"], 4.32, places=2)
+        self.assertAlmostEqual(board["realized"], 2.40 - 13.60 + 4.32, places=2)
+        self.assertAlmostEqual(
+            board["unrealized"],
+            (6.56 - 6.36) * 26,
+            places=2,
+        )
+        self.assertEqual(board["trailing_positions"], 1)
 
 
 if __name__ == "__main__":

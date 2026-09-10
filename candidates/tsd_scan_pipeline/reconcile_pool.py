@@ -25,7 +25,7 @@ from tsd_scan_pipeline.tsd_pool import load_pool, save_pool  # noqa: E402
 
 
 def _closed_leg_pnl(leg: dict[str, Any]) -> float:
-    """Sum exit P&L for one closed leg."""
+    """Sum exit P&L for one leg (closed or open with partial exits)."""
     trail = leg.get("trail") or {}
     entry = _finite(trail.get("entry_price")) or _finite(leg.get("price"))
     if not entry or entry <= 0:
@@ -36,21 +36,36 @@ def _closed_leg_pnl(leg: dict[str, Any]) -> float:
         px = _finite(ex.get("exit_price"))
         if sh > 0 and px is not None:
             pnl += (px - entry) * sh
+    if pnl == 0.0:
+        for t in trail.get("tranches") or []:
+            if not t.get("closed"):
+                continue
+            sh = int(t.get("shares") or 0)
+            px = _finite(t.get("exit_price"))
+            if sh > 0 and px is not None:
+                pnl += (px - entry) * sh
     return pnl
 
 
 def _flatten_closed_pnl(book: dict[str, Any]) -> tuple[float, int]:
+    """Realized P&L from fully closed legs + partial exits on still-open legs."""
     total = 0.0
-    count = 0
+    closed_count = 0
     for pos in book.get("positions") or []:
         for leg in pos.get("legs") or []:
-            if str(leg.get("status", "")).upper() != "CLOSED":
-                continue
-            if not leg.get("exits"):
-                continue
-            total += _closed_leg_pnl(leg)
-            count += 1
-    return total, count
+            status = str(leg.get("status", "")).upper()
+            if status == "CLOSED":
+                if not leg.get("exits") and not any(
+                    (t.get("closed") and t.get("exit_price"))
+                    for t in (leg.get("trail") or {}).get("tranches") or []
+                ):
+                    continue
+                total += _closed_leg_pnl(leg)
+                closed_count += 1
+            elif status == "OPEN":
+                # Scale-out profits/losses already realized while runner remains.
+                total += _closed_leg_pnl(leg)
+    return total, closed_count
 
 
 def _finite(x: Any) -> float | None:

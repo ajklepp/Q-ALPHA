@@ -36,7 +36,11 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     save_state,
 )
 from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
-from tsd_scan_pipeline.tsd_exit import place_tsd_exit, sync_kill_quantity  # noqa: E402
+from tsd_scan_pipeline.tsd_exit import (  # noqa: E402
+    housekeep_orphan_sell_orders,
+    place_tsd_exit,
+    sync_kill_quantity,
+)
 from tsd_scan_pipeline.tsd_notify import format_exited, notify_tsd  # noqa: E402
 from tsd_scan_pipeline.tsd_base_break import check_base_break
 from tsd_scan_pipeline.tsd_scan_ibkr import fetch_3h_bars
@@ -158,12 +162,20 @@ def _exit_all_remaining(
         order_id=fill.get("order_id"),
     )
     leg["status"] = "CLOSED"
+    exit_px = float(fill.get("fill_price") or px)
+    for tranche in trail.get("tranches") or []:
+        if not tranche.get("closed"):
+            tranche["closed"] = True
+            tranche["trailing"] = False
+            tranche["exit_price"] = exit_px
+            tranche["exit_time"] = datetime.now(ET).isoformat()
+            tranche["exit_reason"] = reason
     trail["kill_stop_cancelled"] = False
     leg["trail"] = trail
     pos["legs"][leg_index] = leg
     if not dry_run:
+        # remaining_shares is now 0; sync cancels kill + any orphan SELLs
         sync_kill_quantity(ib, leg, sym, dry_run=False)
-    exit_px = float(fill.get("fill_price") or px)
     entry_px = float((leg.get("trail") or {}).get("entry_price") or leg.get("price") or 0)
     pnl = (exit_px - entry_px) * rem if entry_px > 0 else None
     if not dry_run:
@@ -303,6 +315,13 @@ def _process_leg(
             order_id=fill.get("order_id"),
         )
         results.append({"symbol": sym, "leg": leg_index, **ex, "fill": fill})
+
+    # Keep leg.shares = remaining open size (not original fill size).
+    rem_now = remaining_shares(trail)
+    if rem_now >= 0:
+        leg["shares"] = rem_now
+    leg["trail"] = trail
+    pos["legs"][leg_index] = leg
 
     if not dry_run:
         sync_kill_quantity(ib, leg, sym, dry_run=False)
@@ -524,6 +543,17 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
             )
         except Exception as exc:
             print(f"  trail dashboard sync warn: {exc}")
+
+        # Cancel leftover SELL stops on broker-flat names (missed kill cancels).
+        if not dry_run:
+            try:
+                orphan_actions = housekeep_orphan_sell_orders(ib, dry_run=False)
+                if orphan_actions:
+                    actions.extend(
+                        {"type": "orphan_sell_cancel", **row} for row in orphan_actions
+                    )
+            except Exception as exc:
+                print(f"  orphan housekeep warn: {exc}")
 
     try:
         ib.disconnect()

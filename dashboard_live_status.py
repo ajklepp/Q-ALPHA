@@ -261,13 +261,12 @@ def _board_row_from_sources(
     entry: Any = None,
     peak: Any = None,
 ) -> dict[str, str | int]:
-    # hour/htf/launch/phase/buy kept in signature for call-site compatibility;
-    # intentionally omitted from the public board (no strategy leak).
-    _ = (hour, htf, launch, phase, buy)
+    # hour/htf/launch/phase/buy/entry/peak kept for call-site compatibility;
+    # intentionally omitted from the public board (no strategy leak / no ran-up).
+    _ = (hour, htf, launch, phase, buy, entry, peak, rank)
     return {
         "Symbol": str(symbol or "").upper(),
         "Result": _public_result_label(status),
-        "Ran up": _ran_up_label(_safe_float(entry, 0.0), _safe_float(peak, float("nan"))),
     }
 
 
@@ -460,15 +459,17 @@ def _next_tsd_scan_countdown() -> str:
 
 
 def tsd_closed_stats(closed_legs: list[dict]) -> dict[str, Any]:
-    """Win/loss counts for TSD closed legs."""
-    total = len(closed_legs)
+    """Win/loss counts for TSD closed legs (flats excluded from losses)."""
     winners = sum(
-        1 for r in closed_legs if _safe_float(r.get("pnl_dollars"), 0.0) > 0
+        1 for r in closed_legs if _safe_float(r.get("pnl_dollars"), 0.0) > 0.005
     )
-    losers = total - winners
-    win_rate = winners / total if total else None
+    losers = sum(
+        1 for r in closed_legs if _safe_float(r.get("pnl_dollars"), 0.0) < -0.005
+    )
+    decisive = winners + losers
+    win_rate = winners / decisive if decisive else None
     return {
-        "total": total,
+        "total": decisive,
         "winners": winners,
         "losers": losers,
         "win_rate": win_rate,
@@ -594,36 +595,36 @@ def _local_thesis_by_symbol() -> dict[str, dict]:
 
 
 def _render_tsd_open_card(row: dict) -> None:
-    """Public open-leg card — price / P&L / ran-up only (no stop-layer detail)."""
+    """Public open-leg card — price and P&L only (no stop-layer / ran-up detail)."""
+    from dashboard_tsd_helpers import remaining_open_shares, unrealized_from_open_row
+
     symbol = str(row.get("symbol") or "")
     entry_price = _safe_float(row.get("entry_price"), 0.0)
-    peak_high = _safe_float(row.get("peak_high"), float("nan"))
     current_price = _safe_float(row.get("current_price"), entry_price)
-    shares = int(_safe_float(row.get("shares"), 0.0))
-    calculated_pnl = (
-        (current_price - entry_price) * shares
-        if entry_price > 0 and current_price > 0 and shares > 0
-        else 0.0
-    )
+    shares = remaining_open_shares(row)
+    calculated_pnl = unrealized_from_open_row(row)
     calculated_pct = (
         (current_price - entry_price) / entry_price
         if entry_price > 0 and current_price > 0
         else 0.0
     )
-    pnl_dollars = _safe_float(row.get("pnl_dollars"), calculated_pnl)
+    pnl_dollars = calculated_pnl
     pnl_pct_val = _safe_float(row.get("pnl_pct"), calculated_pct)
-    ran = _ran_up_label(entry_price, peak_high)
+    share_word = "share" if shares == 1 else "shares"
+    share_caption = (
+        f"{shares} {share_word} entry ${entry_price:.2f}"
+        if entry_price
+        else f"{shares} {share_word}"
+    )
 
-    c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+    c1, c2, c3 = st.columns([2, 2, 2])
     with c1:
         st.markdown(f"**{symbol}**")
-        st.caption(f"{shares} sh · entry ${entry_price:.2f}" if entry_price else f"{shares} sh")
+        st.caption(share_caption)
     with c2:
         st.metric("Price", f"${current_price:.2f}", f"{pnl_pct_val:+.1%}")
     with c3:
         st.metric("P&L", f"${pnl_dollars:+.2f}")
-    with c4:
-        st.metric("Ran up", ran)
 
     from dashboard_thesis import render_thesis_expander
 
@@ -683,18 +684,25 @@ def render_live_status_tab(
 
     cash = _safe_float(tsd_pool.get("pool"), TSD_STARTING_POOL)
     starting = _safe_float(tsd_pool.get("starting_pool"), TSD_STARTING_POOL)
-    open_names = int(tsd_pool.get("open_names") or len({r.get("symbol") for r in tsd_rows}))
 
-    in_market_mtm = sum(
-        _safe_float(r.get("current_price"), 0.0) * int(_safe_float(r.get("shares"), 0))
-        for r in tsd_rows
-    )
-    total_equity = cash + in_market_mtm
-    realized_pnl = sum(_safe_float(r.get("pnl_dollars"), 0.0) for r in tsd_closed)
-    unrealized_pnl = sum(_safe_float(r.get("pnl_dollars"), 0.0) for r in tsd_rows)
-    total_pnl = total_equity - starting
+    from dashboard_tsd_helpers import scoreboard_pnl
+
+    board = scoreboard_pnl(tsd_rows, tsd_closed)
+    open_names = int(tsd_pool.get("open_names") or board["open_names"] or 0)
+    total_equity = cash + board["open_mtm"]
+    # Prefer identity P&L (realized+unrealized). Fall back to equity-start if marks missing.
+    total_pnl = board["total_pnl"]
+    if not tsd_rows and not tsd_closed:
+        total_pnl = total_equity - starting
     total_pnl_pct = (total_pnl / starting * 100.0) if starting > 0 else 0.0
-    closed_stats = tsd_closed_stats(tsd_closed)
+    closed_stats = {
+        "total": board["decisive"],
+        "winners": board["winners"],
+        "losers": board["losers"],
+        "win_rate": board["win_rate"],
+    }
+    realized_pnl = board["realized"]
+    unrealized_pnl = board["unrealized"]
 
     _render_spy_hmm_regime_banner(tsd_pool)
 
@@ -710,7 +718,7 @@ def render_live_status_tab(
         c3.metric("Wins", str(closed_stats["winners"]))
         c4.metric("Losses", str(closed_stats["losers"]))
 
-        d1, d2, d3 = st.columns(3)
+        d1, d2, d3, d4 = st.columns(4)
         with d1:
             if closed_stats["total"] and closed_stats["win_rate"] is not None:
                 st.metric("Win rate", f"{closed_stats['win_rate']:.0%}")
@@ -719,6 +727,8 @@ def render_live_status_tab(
         with d2:
             st.metric("Open", str(open_names))
         with d3:
+            st.metric("Trailing Positions", str(board["trailing_positions"]))
+        with d4:
             st.metric("Cash", f"${cash:,.2f}")
         st.caption(
             f"Unrealized ${unrealized_pnl:+,.2f} · realized ${realized_pnl:+,.2f}"
