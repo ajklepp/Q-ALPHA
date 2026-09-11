@@ -425,6 +425,27 @@ def execute_live_entries(
             f"src={fill_kill_source} bar={cand.get('bar_state')} "
             f"kill_oid={fill.get('kill_order_id')}"
         )
+        # Parallel paper: mirror fill into 3R multi-target shadow book (no broker).
+        try:
+            from tsd_scan_pipeline.tsd_shadow_multi_target import mirror_live_fill
+
+            mirror_live_fill(
+                symbol=sym,
+                fill_price=float(fill["fill_price"]),
+                shares=int(fill["shares"]),
+                opened_at=datetime.now(ET).isoformat(),
+                order_id=fill.get("order_id"),
+                meta={
+                    "kind": entry_kind,
+                    "continuation_score": cand.get("continuation_score")
+                    or cand.get("combined_rank_score"),
+                    "bar_state": cand.get("bar_state"),
+                    "live_exit": "4t_keep_profit",
+                    "shadow_exit": "mt3_035_050_090",
+                },
+            )
+        except Exception as exc:
+            print(f"  shadow MT3 mirror warn: {exc}")
         notify_tsd(
             format_entered(
                 sym,

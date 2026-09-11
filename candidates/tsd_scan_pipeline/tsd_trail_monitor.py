@@ -899,6 +899,17 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     if not dry_run:
         save_state(state)
 
+        # Advance 3R shadow paper book on the same quotes (software exits only).
+        try:
+            from tsd_scan_pipeline.tsd_shadow_multi_target import tick_open_shadows
+
+            def _shadow_quote(symbol: str) -> dict[str, Any] | None:
+                return _fetch_quote(ib, symbol)
+
+            tick_open_shadows(_shadow_quote)
+        except Exception as exc:
+            print(f"  shadow MT3 tick warn: {exc}")
+
         def _trail_mark_fn(ib_conn, symbol: str, *, timeout_sec: float = 8.0) -> float | None:
             """Mark from live quote; fall back to trail last_close on the book leg."""
             q = _fetch_quote(ib_conn, symbol)
