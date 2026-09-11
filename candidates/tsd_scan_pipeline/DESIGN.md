@@ -74,6 +74,7 @@ Pacing: **~2.5s/symbol** for historical pulls.
 - **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%`.
 - **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).
 - Entry soft-skip when structure risk **> 3.5%**; ENTER requires tradable popularity.
+- **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper**. No second broker exits.
 
 ## Phase 5 — Scheduler + scorecard
 
