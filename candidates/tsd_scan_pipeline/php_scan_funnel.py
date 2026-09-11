@@ -212,14 +212,20 @@ def latest_scan_funnel() -> dict[str, Any] | None:
 
 
 def funnel_caption(doc: dict[str, Any] | None = None) -> str | None:
-    """One-line Live Status caption: HTF N · launches M · entered K."""
+    """One-line Live Status caption: HTF · launches · take · entered (+ rate)."""
     doc = doc if doc is not None else latest_scan_funnel()
     if not doc:
         return None
+    take_n = int(doc.get("take_n") or 0)
+    entered_n = int(doc.get("entered_n") or 0)
+    rate = doc.get("take_to_entered_rate")
+    if rate is None and take_n:
+        rate = entered_n / take_n
+    rate_bit = f" ({100 * float(rate):.0f}%)" if rate is not None and take_n else ""
     return (
         f"HTF {int(doc.get('htf_pass_count') or 0)} · "
         f"launches {int(doc.get('launches_n') or 0)} · "
-        f"entered {int(doc.get('entered_n') or 0)}"
+        f"take {take_n} · entered {entered_n}{rate_bit}"
     )
 
 

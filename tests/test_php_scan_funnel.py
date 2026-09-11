@@ -82,7 +82,7 @@ def test_write_0715_style_artifact() -> None:
     nd = RESULTS_DIR / "php_funnel_20260903.ndjson"
     assert nd.exists()
     cap = funnel_caption(doc)
-    assert cap == "HTF 310 · launches 1 · entered 1"
+    assert cap == "HTF 310 · launches 1 · take 1 · entered 1 (100%)"
     loaded = json.loads(path.read_text(encoding="utf-8"))
     assert loaded["entered"][0]["symbol"] == "HPE"
     print(f"OK example artifact: {path}")
