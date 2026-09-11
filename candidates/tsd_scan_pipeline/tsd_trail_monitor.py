@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -28,6 +29,17 @@ LOOP_START_HOUR_ET = 4
 LOOP_STOP_HOUR_ET = 20
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
+
+# Boot fingerprint — proves which interpreter(s) load this module (dual-trail hunt).
+try:
+    _boot = CANDIDATES_DIR / "logs" / "tsd_trail_boot.log"
+    _boot.parent.mkdir(parents=True, exist_ok=True)
+    with open(_boot, "a", encoding="utf-8") as _fh:
+        _fh.write(
+            f"{datetime.now().isoformat()} pid={os.getpid()} exe={sys.executable} argv={sys.argv}\n"
+        )
+except Exception:
+    pass
 
 from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     load_state,
@@ -48,6 +60,70 @@ from tsd_scan_pipeline.tsd_exit import (  # noqa: E402
 from tsd_scan_pipeline.tsd_notify import format_exited, notify_tsd  # noqa: E402
 from tsd_scan_pipeline.tsd_base_break import check_base_break
 from tsd_scan_pipeline.tsd_scan_ibkr import fetch_3h_bars
+
+# Singleton so two trail loops (venv + system python) cannot cancel each other's kills.
+_TRAIL_LOCK_PATH = CANDIDATES_DIR / "logs" / "tsd_trail_monitor.lock"
+_TRAIL_LOCK_FH = None
+
+
+def _acquire_trail_lock(*, fail_closed: bool = False) -> bool:
+    """Return False if another trail --loop already holds the lock."""
+    global _TRAIL_LOCK_FH
+    try:
+        _TRAIL_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(_TRAIL_LOCK_PATH, "a+b")
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                fh.close()
+                return False
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                fh.close()
+                return False
+        fh.seek(0)
+        fh.truncate()
+        fh.write(f"{os.getpid()}\n".encode("ascii"))
+        fh.flush()
+        _TRAIL_LOCK_FH = fh
+        return True
+    except Exception as exc:
+        print(f"trail lock warn: {exc}")
+        # --loop must fail closed (autopsy P0); --once may fail open.
+        return not fail_closed
+
+
+def _release_trail_lock() -> None:
+    global _TRAIL_LOCK_FH
+    fh = _TRAIL_LOCK_FH
+    _TRAIL_LOCK_FH = None
+    if fh is None:
+        return
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        fh.close()
+    except Exception:
+        pass
+
 from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
     ensure_rth_monitoring,
@@ -295,19 +371,40 @@ def _process_leg(
         bars_list = bars_df.reset_index().rename(columns={"index": "time"}).to_dict("records")
         broke, base_info = check_base_break(bars_list, quote["close"])
         if broke:
-            print(
-                f"  {sym} base_break_down close={quote['close']:.2f} "
-                f"base_low={base_info.get('base_low') if base_info else '?'}"
+            # Autopsy P1: day-1 base-break full flatten only after +1R or T1 bank.
+            trading_day = int(trail.get("trading_day") or 1)
+            one_r = bool(trail.get("one_r_locked") or leg.get("one_r_locked"))
+            t1_banked = any(
+                str(t.get("id") or "") == "T1" and bool(t.get("closed"))
+                for t in (trail.get("tranches") or [])
             )
-            results.extend(
-                _exit_all_remaining(
-                    ib, pos, leg_index, leg, sym,
-                    reason="base_break_down",
-                    quote=quote,
-                    dry_run=dry_run,
+            if trading_day <= 1 and not (one_r or t1_banked):
+                print(
+                    f"  {sym} base_break deferred (day1 until +1R/T1) "
+                    f"close={quote['close']:.2f} "
+                    f"base_low={base_info.get('base_low') if base_info else '?'}"
                 )
-            )
-            return results
+                results.append({
+                    "symbol": sym,
+                    "leg": leg_index,
+                    "status": "BASE_BREAK_DEFERRED",
+                    "reason": "day1_until_1r_or_t1",
+                    "base_low": (base_info or {}).get("base_low"),
+                })
+            else:
+                print(
+                    f"  {sym} base_break_down close={quote['close']:.2f} "
+                    f"base_low={base_info.get('base_low') if base_info else '?'}"
+                )
+                results.extend(
+                    _exit_all_remaining(
+                        ib, pos, leg_index, leg, sym,
+                        reason="base_break_down",
+                        quote=quote,
+                        dry_run=dry_run,
+                    )
+                )
+                return results
     except Exception as exc:
         print(f"  {sym} base_break check skipped: {exc}")
 
@@ -866,7 +963,7 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     path = _save_snapshot(payload)
     print("")
     print("=" * 64)
-    print(f"Done — {len(actions)} action(s). Snapshot: {path}")
+    print(f"Done - {len(actions)} action(s). Snapshot: {path}")
     print("=" * 64)
     return payload
 
@@ -902,25 +999,55 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.loop:
+        # Prefer VIRTUAL_ENV / prefix check — on Windows WMI may show the base
+        # interpreter path while sys.executable still points at venv\Scripts.
+        venv_root = (CANDIDATES_DIR.parent / "venv").resolve()
+        in_venv = False
+        try:
+            in_venv = Path(sys.prefix).resolve() == venv_root
+        except Exception:
+            in_venv = False
+        if not in_venv:
+            ve = os.environ.get("VIRTUAL_ENV")
+            if ve:
+                try:
+                    in_venv = Path(ve).resolve() == venv_root
+                except Exception:
+                    in_venv = False
+        if venv_root.exists() and not in_venv:
+            print(
+                f"REFUSE: interpreter not in repo venv (prefix={sys.prefix} "
+                f"exe={sys.executable}). Use {venv_root / 'Scripts' / 'python.exe'}."
+            )
+            return 3
+        if not _acquire_trail_lock(fail_closed=True):
+            print(
+                f"REFUSE: another tsd_trail_monitor --loop holds {_TRAIL_LOCK_PATH}. "
+                "Only one trail owner may run (duplicate loops cancel each other's kills)."
+            )
+            return 2
         print("Loop mode: Ctrl+C to stop")
-        while True:
-            now_et = datetime.now(ET)
-            if now_et.hour >= LOOP_STOP_HOUR_ET or now_et.hour < LOOP_START_HOUR_ET:
-                print(
-                    f"Loop window closed at {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} "
-                    f"(active {LOOP_START_HOUR_ET:02d}:00–{LOOP_STOP_HOUR_ET:02d}:00 ET)"
-                )
-                break
-            try:
-                from tsd_scan_pipeline.scheduler import heartbeat_trail_loop
+        try:
+            while True:
+                now_et = datetime.now(ET)
+                if now_et.hour >= LOOP_STOP_HOUR_ET or now_et.hour < LOOP_START_HOUR_ET:
+                    print(
+                        f"Loop window closed at {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+                        f"(active {LOOP_START_HOUR_ET:02d}:00–{LOOP_STOP_HOUR_ET:02d}:00 ET)"
+                    )
+                    break
+                try:
+                    from tsd_scan_pipeline.scheduler import heartbeat_trail_loop
 
-                heartbeat_trail_loop()
-            except Exception:
-                pass
-            run_monitor(dry_run=args.dry_run)
-            wait = poll_interval_sec() if args.adaptive else max(5, args.interval)
-            print(f"  sleeping {wait}s (session={classify_session()})")
-            time.sleep(wait)
+                    heartbeat_trail_loop()
+                except Exception:
+                    pass
+                run_monitor(dry_run=args.dry_run)
+                wait = poll_interval_sec() if args.adaptive else max(5, args.interval)
+                print(f"  sleeping {wait}s (session={classify_session()})")
+                time.sleep(wait)
+        finally:
+            _release_trail_lock()
     else:
         run_monitor(dry_run=args.dry_run)
     return 0

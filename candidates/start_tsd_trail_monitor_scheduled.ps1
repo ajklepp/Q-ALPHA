@@ -41,6 +41,24 @@ $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
 Add-Content -LiteralPath $LogFile -Value ""
 Add-Content -LiteralPath $LogFile -Value "======== TSD TRAIL MONITOR START $stamp ========"
 
+# Autopsy P0 — single starter owner. venv python + pythoncore child = ONE tree.
+# True duplicate = two start_tsd_trail_monitor_scheduled.ps1 processes.
+# Do NOT kill pythoncore/base-interpreter children of venv\Scripts\python.exe.
+$starterName = "start_tsd_trail_monitor_scheduled.ps1"
+$starters = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and ($_.CommandLine -match [regex]::Escape($starterName))
+})
+# This process itself matches; refuse only when another starter already exists.
+$otherStarters = @($starters | Where-Object { $_.ProcessId -ne $PID })
+if ($otherStarters.Count -gt 0) {
+    $msg = "REFUSE: another trail starter already running (PIDs=$($otherStarters.ProcessId -join ',')). One owner only."
+    Write-Host $msg
+    Add-Content -LiteralPath $LogFile -Value $msg
+    exit 2
+}
+Add-Content -LiteralPath $LogFile -Value "prestart: venv owner=$Python (no cross-kill; lock guards duplicates; starter singleton OK)"
+Add-Content -LiteralPath $LogFile -Value "prestart: prefer clientId 95; fallback 85 only on connect fail (inside monitor)"
+
 # 60s loop with adaptive RTH 30s / extended 5m polling (TWS must be open)
 & $Python -u $Runner --loop --adaptive 2>&1 | Out-File -FilePath $LogFile -Append -Encoding utf8
 $exitCode = $LASTEXITCODE

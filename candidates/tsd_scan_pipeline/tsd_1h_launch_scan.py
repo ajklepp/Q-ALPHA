@@ -51,6 +51,7 @@ from tsd_scan_pipeline.tsd_launch_score import (
 )
 from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
     add_to_watch_queue,
+    confirmed_symbols,
     process_micro_confirm_queue,
 )
 from tsd_scan_pipeline.universe_tsd import load_polygon_key
@@ -58,7 +59,47 @@ from tsd_scan_pipeline.universe_tsd import load_polygon_key
 ET = pytz.timezone("America/New_York")
 
 QUEUE_ADMIT_STATUSES = {"ADDED", "UPDATED", "WATCHING"}
+# Queue outcomes that must NOT consume a new-risk take slot (autopsy P0).
+QUEUE_NON_NEW_REASONS = frozenset({"already_confirmed"})
+QUEUE_NON_NEW_STATUSES = frozenset({"UNCHANGED"})
 LAUNCH_CACHE_PATH = PIPELINE_DIR / "results" / "last_1h_launch.json"
+
+
+def _non_new_risk_symbols(book: dict[str, Any] | None = None) -> set[str]:
+    """OPEN book + already CONFIRMED queue — exclude from take-slot accounting."""
+    from tsd_scan_pipeline.tsd_capacity import open_symbols
+
+    skip = set(confirmed_symbols())
+    try:
+        skip |= {str(s).upper() for s in open_symbols(book if book is not None else load_state())}
+    except Exception:
+        pass
+    return {s for s in skip if s}
+
+
+def _queue_consumed_new_slot(qr: dict[str, Any]) -> bool:
+    """True when queue result represents a NEW risk attempt against the hour cap."""
+    st = str(qr.get("status") or "").upper()
+    reason = str(qr.get("reason") or "").lower()
+    if st in QUEUE_NON_NEW_STATUSES or reason in QUEUE_NON_NEW_REASONS:
+        return False
+    return st in QUEUE_ADMIT_STATUSES or st in {"SKIPPED", "REJECTED"}
+
+
+def _promote_next_enter_takes(
+    attention: list[dict[str, Any]],
+    *,
+    already_tried: set[str],
+    need: int,
+    book: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Pick next CASE ENTER names not yet tried (fill-fail / already_confirmed refill)."""
+    from tsd_scan_pipeline.tsd_case_review import select_enter_rows
+
+    if need <= 0:
+        return []
+    exclude = _non_new_risk_symbols(book) | {str(s).upper() for s in already_tried}
+    return select_enter_rows(attention, max_n=need, exclude_symbols=exclude)
 
 
 def _write_launch_artifact(
@@ -138,16 +179,27 @@ def _write_launch_artifact(
         "ranked_count": len(ranked),
         "attention_count": len(attention) if attention is not None else None,
         "take_count": len(take),
+        "entered_count": sum(
+            1 for e in (entry_results or [])
+            if str(e.get("status") or "").upper() == "FILLED"
+        ),
+        "take_to_entered_rate": (
+            round(
+                sum(
+                    1 for e in (entry_results or [])
+                    if str(e.get("status") or "").upper() == "FILLED"
+                ) / len(take),
+                4,
+            )
+            if take
+            else None
+        ),
         "case_enter_count": sum(
             1 for r in (attention or [])
             if str((r.get("case_review") or {}).get("verdict") or "").upper() == "ENTER"
         ) if attention is not None else None,
         "rows": rows_out,
     }
-    LAUNCH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LAUNCH_CACHE_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    print(f"  Wrote {LAUNCH_CACHE_PATH.relative_to(CANDIDATES_DIR.parent)}")
-    return LAUNCH_CACHE_PATH
     LAUNCH_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     LAUNCH_CACHE_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     print(f"  Wrote {LAUNCH_CACHE_PATH.relative_to(CANDIDATES_DIR.parent)}")
@@ -372,7 +424,11 @@ def run_1h_launch_scan(
     print(f"\n1H launches: {len(ranked)} ranked passers")
 
     from tsd_scan_pipeline.tsd_attention import build_attention_pool
-    from tsd_scan_pipeline.tsd_case_review import review_attention_pool, select_enter_rows
+    from tsd_scan_pipeline.tsd_case_review import (
+        alert_case_rank_disagreement,
+        review_attention_pool,
+        select_enter_rows,
+    )
 
     attention_raw = build_attention_pool(ranked, polygon_key=key)
     # Dry scans: rules-only case (no LLM spend). Live: full fusion + web search.
@@ -383,11 +439,19 @@ def run_1h_launch_scan(
         enrich_catalyst=bool(live),
         polygon_key=key,
     )
-    take = select_enter_rows(attention, max_n=MAX_NEW_ENTRIES_PER_SCAN)
+    alert_case_rank_disagreement(attention, notify=bool(live))
+
+    # Autopsy P0: only NEW risk consumes the 2/hour take cap (skip already_confirmed / OPEN).
+    exclude_take = _non_new_risk_symbols(book)
+    if exclude_take:
+        print(f"  Cap exclude (OPEN/CONFIRMED): {sorted(exclude_take)}")
+    take = select_enter_rows(
+        attention, max_n=MAX_NEW_ENTRIES_PER_SCAN, exclude_symbols=exclude_take,
+    )
     print(
         f"\nCase review: attention={len(attention)} "
         f"ENTER={sum(1 for r in attention if str(r.get('case_verdict') or '').upper()=='ENTER')} "
-        f"taking {len(take)} (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)"
+        f"taking {len(take)} NEW (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)"
     )
     for r in take:
         case = r.get("case_review") or {}
@@ -405,13 +469,21 @@ def run_1h_launch_scan(
     queue_results: list[dict[str, Any]] = []
     entry_results: list[dict[str, Any]] = []
     exit_code = 0
+    tried_syms: set[str] = {
+        str(r.get("symbol") or "").upper() for r in take if r.get("symbol")
+    }
 
-    if live and take:
+    def _live_queue_and_enter(ib, candidates: list[dict[str, Any]]) -> None:
+        """Admit candidates to queue and micro-confirm → BUY; mutate outer results."""
+        nonlocal queue_results, entry_results, book
+        if not candidates:
+            return
         print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
-        queue_results = add_to_watch_queue(take, scan_at=now_et.isoformat(), polygon_key=key)
+        qrs = add_to_watch_queue(candidates, scan_at=now_et.isoformat(), polygon_key=key)
+        queue_results.extend(qrs)
         admitted: set[str] = set()
         skipped: list[dict[str, Any]] = []
-        for qr in queue_results:
+        for qr in qrs:
             sym = str(qr.get("symbol", "")).upper()
             st = str(qr.get("status", "")).upper()
             if st in QUEUE_ADMIT_STATUSES:
@@ -420,48 +492,114 @@ def run_1h_launch_scan(
                 skipped.append(qr)
                 print(f"  LIVE SKIP {sym}: status={st} reason={qr.get('reason', '')}")
 
-        enter_rows = [r for r in take if str(r.get("symbol", "")).upper() in admitted]
+        enter_rows = [r for r in candidates if str(r.get("symbol", "")).upper() in admitted]
         if not enter_rows:
             print("  No queue-admitted names to micro-confirm")
-            if take and skipped:
+            if candidates and skipped:
                 try:
                     from tsd_scan_pipeline.tsd_notify import (
                         format_queue_skip_summary,
                         notify_tsd,
                     )
 
-                    notify_tsd(format_queue_skip_summary(len(take), skipped))
+                    notify_tsd(format_queue_skip_summary(len(candidates), skipped))
                 except Exception:
                     pass
-        else:
-            from ib_insync import IB, util
+            return
 
-            util.startLoop()
-            ib = IB()
+        book = load_state()
+        reset_scan_counter(book)
+        print("\n--- MICRO-CONFIRM (1-min tape since 1H close) ---")
+        fills = process_micro_confirm_queue(
+            ib, book_state=book, live=True, polygon_key=key,
+        )
+        save_state(book)
+        entry_results.extend(fills)
+        for fill in fills:
+            print(
+                f"  {fill.get('symbol')} {fill.get('status')} "
+                f"{fill.get('reason', '')}"
+            )
+
+    if live and take:
+        from ib_insync import IB, util
+
+        util.startLoop()
+        ib = IB()
+        try:
+            ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
+        except Exception as exc:
+            print(f"CONNECT FAILED: {exc}")
+            exit_code = 1
+            ib = None
+        if ib is not None:
             try:
-                ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
-            except Exception as exc:
-                print(f"CONNECT FAILED: {exc}")
-                exit_code = 1
-                ib = None
-            if ib is not None:
-                book = load_state()
-                reset_scan_counter(book)
-                # Micro-confirm (1-min hold/abort) before BUY — do not chase dumps
-                print("\n--- MICRO-CONFIRM (1-min tape since 1H close) ---")
-                entry_results = process_micro_confirm_queue(
-                    ib, book_state=book, live=True, polygon_key=key,
+                _live_queue_and_enter(ib, take)
+
+                # Autopsy P0: already_confirmed / UNCHANGED must not burn the hour;
+                # no_fill_timeout frees the slot for the next CASE ENTER.
+                def _slots_remaining() -> int:
+                    filled = sum(
+                        1
+                        for e in entry_results
+                        if str(e.get("status") or "").upper() == "FILLED"
+                    )
+                    in_flight = sum(
+                        1
+                        for e in entry_results
+                        if str(e.get("status") or "").upper()
+                        in ("PENDING", "CONFIRM", "DRY_CONFIRM")
+                    )
+                    # Successful NEW queue admits still watching count as in-flight
+                    watching_now = 0
+                    try:
+                        from tsd_scan_pipeline.tsd_watch_queue import watching_symbols
+
+                        watching_now = sum(
+                            1 for s in watching_symbols() if s in tried_syms
+                        )
+                    except Exception:
+                        watching_now = 0
+                    used = filled + in_flight + watching_now
+                    return max(0, MAX_NEW_ENTRIES_PER_SCAN - used)
+
+                non_new_skips = sum(
+                    1 for qr in queue_results if not _queue_consumed_new_slot(qr)
                 )
-                save_state(book)
+                no_fill_n = sum(
+                    1
+                    for e in entry_results
+                    if str(e.get("reason") or "") == "no_fill_timeout"
+                )
+                need = _slots_remaining()
+                if need > 0 and (non_new_skips or no_fill_n or need > 0):
+                    # Always refill free NEW slots when ENTER backlog remains
+                    promote = _promote_next_enter_takes(
+                        attention,
+                        already_tried=tried_syms,
+                        need=need,
+                        book=book,
+                    )
+                    if promote:
+                        print(
+                            f"\n--- PROMOTE NEXT ENTER "
+                            f"(need={need} non_new_skips={non_new_skips} "
+                            f"no_fill={no_fill_n}) ---"
+                        )
+                        for r in promote:
+                            tried_syms.add(str(r.get("symbol") or "").upper())
+                            take.append(r)
+                            print(
+                                f"  PROMOTE {r.get('symbol')} "
+                                f"cont={r.get('continuation_score')} "
+                                f"CASE={(r.get('case_review') or {}).get('verdict')}"
+                            )
+                        _live_queue_and_enter(ib, promote)
+            finally:
                 try:
                     ib.disconnect()
                 except Exception:
                     pass
-                for fill in entry_results:
-                    print(
-                        f"  {fill.get('symbol')} {fill.get('status')} "
-                        f"{fill.get('reason', '')}"
-                    )
 
     _write_launch_artifact(
         now_et=now_et,

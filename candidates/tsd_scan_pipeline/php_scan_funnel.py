@@ -156,6 +156,9 @@ def build_scan_funnel_doc(
         "queue_skipped": queue_skipped,
         "entered": entered,
         "entered_n": len(entered),
+        "take_to_entered_rate": (
+            round(len(entered) / len(take), 4) if take else None
+        ),
         "reject_summary": reject_summary,
         "reject_samples": reject_samples,
         "runtime_sec": round(float(runtime_sec), 1),
@@ -181,7 +184,9 @@ def write_scan_funnel(doc: dict[str, Any], *, now_et: datetime | None = None) ->
         "bar_hour": doc.get("bar_hour"),
         "htf": doc.get("htf_pass_count"),
         "launches_n": doc.get("launches_n"),
+        "take_n": doc.get("take_n"),
         "entered_n": doc.get("entered_n"),
+        "take_to_entered_rate": doc.get("take_to_entered_rate"),
         "reject_summary": doc.get("reject_summary") or {},
         "live": doc.get("live"),
         "scan_file": path.name,

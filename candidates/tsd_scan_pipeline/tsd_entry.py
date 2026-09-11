@@ -29,9 +29,22 @@ SessionKind = Literal["RTH", "EXTENDED", "OVERNIGHT"]
 
 FILL_WAIT_SEC = 45
 POLL_SEC = 0.5
-# Limit below stop so STP LMT can fill in a fast crash; escalate_stuck_kill_stops
-# is still the safety net if last trades through this band.
-KILL_LIMIT_SLIP = 0.97
+# One requote attempt after no_fill on resting limits (autopsy P0 fill policy).
+REQUOTE_WAIT_SEC = 30
+REQUOTE_CHASE_BPS = 0.001  # +10 bps vs prior limit on requote
+# Broker STP LMT limit vs stop. IB rejects limits too far through the stop
+# (Error 202) — e.g. ATRC kill 51.96 / limit 50.40 (0.97 slip) is cancelled.
+# Keep ~0.5% for acceptance; escalate_stuck_kill_stops is still the crash net.
+KILL_LIMIT_SLIP = 0.995
+
+
+def kill_limit_price(stop_px: float, *, slip: float | None = None) -> float:
+    """Limit price for a SELL STP LMT kill (must stay close enough for IB)."""
+    stop = float(stop_px or 0)
+    if stop <= 0:
+        return 0.0
+    s = float(KILL_LIMIT_SLIP if slip is None else slip)
+    return round(stop * s, 2)
 
 # IBKR overnight session for many US equities (~04:00–20:00 ET).
 # Outside that window (OVERNIGHT classifier) exits generally cannot print.
@@ -146,7 +159,7 @@ def place_kill_stop(
     Phase 4 software trail will replace/merge with this order.
     """
     stop_px = round(fill_price * (1.0 - kill_pct), 2)
-    limit_px = round(stop_px * KILL_LIMIT_SLIP, 2)
+    limit_px = kill_limit_price(stop_px)
     order = StopLimitOrder(
         action="SELL",
         totalQuantity=shares,
@@ -222,22 +235,56 @@ def place_tsd_entry(
 
     import time as time_mod
 
-    deadline = time_mod.time() + fill_wait
-    filled = 0.0
-    avg_fill = px
-    while time_mod.time() < deadline:
-        ib.sleep(POLL_SEC)
-        st = trade.orderStatus.status
-        filled = float(trade.orderStatus.filled or 0)
-        if filled > 0:
-            avg_fill = float(trade.orderStatus.avgFillPrice or px)
-            break
-        if st in ("Cancelled", "Inactive", "ApiCancelled"):
+    def _poll_fill(active_trade, wait_sec: float) -> tuple[float, float, str]:
+        deadline = time_mod.time() + wait_sec
+        filled_qty = 0.0
+        avg = px
+        status = ""
+        while time_mod.time() < deadline:
+            ib.sleep(POLL_SEC)
+            status = str(active_trade.orderStatus.status or "")
+            filled_qty = float(active_trade.orderStatus.filled or 0)
+            if filled_qty > 0:
+                avg = float(active_trade.orderStatus.avgFillPrice or px)
+                break
+            if status in ("Cancelled", "Inactive", "ApiCancelled"):
+                break
+        return filled_qty, avg, status
+
+    filled, avg_fill, st = _poll_fill(trade, fill_wait)
+    if filled <= 0 and st in ("Cancelled", "Inactive", "ApiCancelled"):
+        return {
+            "status": "REJECTED",
+            "reason": f"order_{st}",
+            "symbol": sym,
+            "session": session,
+        }
+
+    # Autopsy P0: one requote for resting limits so a dead #1 does not waste the hour.
+    requoted = False
+    if filled <= 0 and (prefer_limit or (limit_price and limit_price > 0) or session != "RTH"):
+        try:
+            ib.cancelOrder(trade.order)
+            ib.sleep(0.5)
+        except Exception:
+            pass
+        live = _ref_price(ib, contract) or px
+        prior_lmt = float(limit_price) if limit_price and limit_price > 0 else float(px)
+        # Nudge limit toward market (still a limit — never intentional short chase market)
+        requote_lmt = round(max(prior_lmt, live) * (1.0 + REQUOTE_CHASE_BPS), 2)
+        requote_order = build_entry_order(
+            session, shares, live, limit_price=requote_lmt, prefer_limit=True,
+        )
+        trade = ib.placeOrder(contract, requote_order)
+        requoted = True
+        filled, avg_fill, st = _poll_fill(trade, REQUOTE_WAIT_SEC)
+        if filled <= 0 and st in ("Cancelled", "Inactive", "ApiCancelled"):
             return {
                 "status": "REJECTED",
                 "reason": f"order_{st}",
                 "symbol": sym,
                 "session": session,
+                "requoted": True,
             }
 
     if filled <= 0:
@@ -245,7 +292,13 @@ def place_tsd_entry(
             ib.cancelOrder(trade.order)
         except Exception:
             pass
-        return {"status": "REJECTED", "reason": "no_fill_timeout", "symbol": sym, "session": session}
+        return {
+            "status": "REJECTED",
+            "reason": "no_fill_timeout",
+            "symbol": sym,
+            "session": session,
+            "requoted": requoted,
+        }
 
     kill, kill_source = resolve_kill_pct(kill_pct)
     kill_meta = place_kill_stop(ib, contract, int(filled), avg_fill, session, kill_pct=kill)
@@ -260,5 +313,6 @@ def place_tsd_entry(
         "order_id": trade.order.orderId,
         "kill_pct": kill,
         "kill_source": kill_source,
+        "requoted": requoted,
         **kill_meta,
     }

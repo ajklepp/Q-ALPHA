@@ -74,8 +74,84 @@ def _load_scan_snapshots(since: date) -> list[dict[str, Any]]:
         scanned = str(doc.get("scanned_at") or "")[:10]
         if scanned and date.fromisoformat(scanned) >= since:
             doc["_path"] = str(path.name)
+            doc["_source"] = "legacy_tsd"
             snaps.append(doc)
     return snaps
+
+
+def _load_php_scan_snapshots(since: date) -> list[dict[str, Any]]:
+    """Peak Hour funnels — live path when legacy scan_*.json is empty."""
+    php_dir = RESULTS_DIR / "peak_hour_scans"
+    snaps: list[dict[str, Any]] = []
+    if not php_dir.exists():
+        return snaps
+    for path in sorted(php_dir.glob("php_scan_*.json")):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        scanned = str(doc.get("et") or "")[:10]
+        if scanned and date.fromisoformat(scanned) >= since:
+            # Normalize to legacy-ish shape for _build_scan_events / PHP builder
+            snaps.append({
+                "_path": str(path.name),
+                "_source": "php_peak_hour",
+                "scanned_at": doc.get("et"),
+                "php_doc": doc,
+            })
+    return snaps
+
+
+def _build_php_scan_events(scan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten one Peak Hour php_scan funnel into tier-tagged rows."""
+    php = scan.get("php_doc") or {}
+    scanned_at = str(scan.get("scanned_at") or php.get("et") or "")
+    signal_date = _parse_signal_date(scanned_at)
+    if signal_date is None:
+        return []
+
+    launches = list(php.get("launches") or [])
+    entered_syms = {
+        str(e.get("symbol") or "").upper()
+        for e in (php.get("entered") or [])
+    }
+    take_syms = {
+        str(t.get("symbol") or "").upper()
+        for t in launches
+        if t.get("taken")
+    }
+    # Prefer explicit take list if present on doc
+    if php.get("take_n") and not take_syms:
+        for e in php.get("queue_admitted") or []:
+            take_syms.add(str(e.get("symbol") or "").upper())
+
+    events: list[dict[str, Any]] = []
+    for row in launches:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym:
+            continue
+        tiers: list[str] = ["scanned", "signal"]
+        if sym in take_syms:
+            tiers.append("trade3")
+            tiers.append("watch10")
+        if sym in entered_syms:
+            tiers.append("filled")
+        events.append({
+            "scan_path": scan.get("_path"),
+            "scanned_at": scanned_at,
+            "signal_date": signal_date.isoformat(),
+            "symbol": sym,
+            "tiers": tiers,
+            "scan_score": row.get("continuation_score") or row.get("rank") or row.get("launch_score"),
+            "trend_strength": None,
+            "buy_signal": True,
+            "pass": True,
+            "reject_reason": None,
+            "entry_price": row.get("1h_close") or row.get("htf_1h_close") or row.get("close"),
+            "kill_pct": FALLBACK_KILL_PCT,
+            "source": "php_peak_hour",
+        })
+    return events
 
 
 def _parse_signal_date(scanned_at: str) -> date | None:
@@ -453,17 +529,34 @@ def _counterfactual_comparison(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_study(*, days: int = 5, skip_options: bool = False) -> dict[str, Any]:
-    """Build full weekly study payload."""
+    """Build full weekly study payload.
+
+    Prefers legacy scan_*.json; when empty, uses Peak Hour php_scan_*.json
+    so Friday options study is not blank while PHP is the live path (P2).
+    """
     window_days = _trading_days_back(days)
     since = window_days[0] if window_days else datetime.now(ET).date()
     scans = _load_scan_snapshots(since)
-
+    source = "legacy_tsd"
     raw_events: list[dict[str, Any]] = []
-    for scan in scans:
-        raw_events.extend(_build_scan_events(scan))
+    if scans:
+        for scan in scans:
+            raw_events.extend(_build_scan_events(scan))
+    else:
+        php_scans = _load_php_scan_snapshots(since)
+        source = "php_peak_hour"
+        for scan in php_scans:
+            raw_events.extend(_build_php_scan_events(scan))
+        scans = php_scans
+
+    # Autopsy P2: never skip options when PHP/legacy signals exist unless explicit flag.
+    effective_skip = bool(skip_options)
+    if not effective_skip and not any(e.get("pass") for e in raw_events):
+        # No signals — nothing to fetch; keep skip false for reporting honesty
+        pass
 
     api_key = load_polygon_key()
-    events = _enrich_outcomes(raw_events, api_key, skip_options=skip_options)
+    events = _enrich_outcomes(raw_events, api_key, skip_options=effective_skip)
 
     cohorts = [
         _cohort_stats(events, tier)
@@ -479,10 +572,11 @@ def build_study(*, days: int = 5, skip_options: bool = False) -> dict[str, Any]:
         "window_trading_days": [d.isoformat() for d in window_days],
         "window_start": since.isoformat(),
         "scans_in_window": len(scans),
+        "scan_source": source,
         "events_total": len(events),
         "signals_passed": sum(1 for e in events if e.get("pass")),
         "signals_with_options_data": len(signals_with_options),
-        "skip_options": skip_options,
+        "skip_options": effective_skip,
         "cohorts": cohorts,
         "counterfactual": _counterfactual_comparison(events),
         "events": events,
@@ -497,7 +591,8 @@ def format_study_md(study: dict[str, Any]) -> str:
         f"**Generated:** {study.get('generated_at')}",
         f"**Window:** {study.get('window_start')} to today "
         f"({len(study.get('window_trading_days') or [])} trading days)",
-        f"**Scans in window:** {study.get('scans_in_window')}",
+        f"**Scans in window:** {study.get('scans_in_window')} "
+        f"(source={study.get('scan_source') or 'legacy_tsd'})",
         f"**Signals passed:** {study.get('signals_passed')}",
         f"**Signals with options data:** {study.get('signals_with_options_data')}",
         "",

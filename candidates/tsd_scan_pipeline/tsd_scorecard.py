@@ -102,6 +102,42 @@ def build_scorecard(*, days: int = 5) -> dict[str, Any]:
         for leg in pos.get("legs") or []:
             closed_legs += len(leg.get("exits") or [])
 
+    # Peak Hour PHP funnel (live path) — separate from legacy scan_*.json card.
+    php: dict[str, Any] = {
+        "scans_run": 0,
+        "launches_n": 0,
+        "take_n": 0,
+        "entered_n": 0,
+        "take_to_entered_rate": None,
+        "note": "Peak Hour live path (php_scan_*.json); legacy TSD scan_*.json may be 0",
+    }
+    try:
+        from tsd_scan_pipeline.php_scan_funnel import list_scan_funnels_since
+
+        php_paths = list_scan_funnels_since(days)
+        take_n = 0
+        entered_n = 0
+        launches_n = 0
+        for path in php_paths:
+            try:
+                doc = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            launches_n += int(doc.get("launches_n") or 0)
+            take_n += int(doc.get("take_n") or 0)
+            entered_n += int(doc.get("entered_n") or 0)
+        php.update({
+            "scans_run": len(php_paths),
+            "launches_n": launches_n,
+            "take_n": take_n,
+            "entered_n": entered_n,
+            "take_to_entered_rate": (
+                round(entered_n / take_n, 4) if take_n else None
+            ),
+        })
+    except Exception as exc:
+        php["error"] = str(exc)
+
     return {
         "generated_at": datetime.now(ET).isoformat(),
         "window_trading_days": [d.isoformat() for d in window_days],
@@ -109,8 +145,14 @@ def build_scorecard(*, days: int = 5) -> dict[str, Any]:
         "scans_total": len(scans),
         "scans_live": live_scans,
         "scans_dry_run": dry_scans,
+        "scans_note": (
+            "Legacy TSD profiler scans (scan_*.json). "
+            "Live Peak Hour activity is under php_peak_hour below — "
+            "scans_total=0 is expected when only PHP is live."
+        ),
         "signals_total": signals,
         "entries_total": entries,
+        "php_peak_hour": php,
         "trail_passes": len(trails),
         "trail_actions": trail_actions,
         "trail_exits": exits,
@@ -125,14 +167,25 @@ def build_scorecard(*, days: int = 5) -> dict[str, Any]:
 
 def format_scorecard_md(card: dict[str, Any]) -> str:
     """Render scorecard as markdown."""
+    php = card.get("php_peak_hour") or {}
+    php_rate = php.get("take_to_entered_rate")
+    php_rate_s = f"{100 * float(php_rate):.1f}%" if php_rate is not None else "n/a"
     lines = [
         "# TSD Pipeline Scorecard",
         "",
         f"**Generated:** {card.get('generated_at')}",
         f"**Window:** {card.get('window_start')} to today ({len(card.get('window_trading_days') or [])} trading days)",
         "",
-        "## Scan activity",
+        "## Peak Hour (live PHP)",
+        f"- PHP scans: **{php.get('scans_run', 0)}**",
+        f"- 1H launches: **{php.get('launches_n', 0)}**",
+        f"- Take / entered: **{php.get('take_n', 0)}** / **{php.get('entered_n', 0)}** "
+        f"(take->entered {php_rate_s})",
+        f"- _Note: {php.get('note', '')}_",
+        "",
+        "## Legacy TSD scan activity",
         f"- Total scans: **{card.get('scans_total')}** (live={card.get('scans_live')}, dry={card.get('scans_dry_run')})",
+        f"- _Note: {card.get('scans_note')}_",
         f"- Signals detected: **{card.get('signals_total')}**",
         f"- Live entries attempted: **{card.get('entries_total')}**",
         "",

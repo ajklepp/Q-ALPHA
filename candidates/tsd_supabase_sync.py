@@ -35,7 +35,9 @@ from tsd_scan_pipeline.tsd_pool import load_pool  # noqa: E402
 from dashboard_tsd_helpers import map_exit_layer, mfe_in_r, next_trail_stop  # noqa: E402
 
 ET = pytz.timezone("America/New_York")
+# Absolute + relative tolerance — fast movers (ATRC/NX) spam at 5c alone.
 MARK_PX_TOL = 0.05
+MARK_PX_TOL_REL = 0.0025  # 25 bps
 TSD_TABLE_MISSING_MSG = (
     "*** TSD: run candidates/sql/tsd_cloud.sql in Supabase SQL editor ***"
 )
@@ -298,8 +300,13 @@ def apply_tws_marks(
     mark_fn: Callable,
     *,
     timeout_sec: float = TWS_MARK_TIMEOUT_SEC,
+    book: dict[str, Any] | None = None,
 ) -> None:
-    """Refresh current_price / PnL from TWS snapshot marks; book last_close fallback."""
+    """Refresh current_price / PnL from TWS snapshot marks; book last_close fallback.
+
+    When ``book`` is provided, write TWS marks back into trail.last_close so
+    local/cloud stay aligned (autopsy P1 mark sync).
+    """
     for row in rows:
         symbol = str(row.get("symbol") or "").upper()
         if not symbol:
@@ -326,6 +333,22 @@ def apply_tws_marks(
             row["pnl_dollars"] = round((mark - entry) * shares, 2)
             row["pnl_pct"] = round((mark - entry) / entry, 4)
         row["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+        if book is not None:
+            leg_opened = str(row.get("leg_opened_at") or "")
+            for pos in book.get("positions") or []:
+                if str(pos.get("symbol") or "").upper() != symbol:
+                    continue
+                for leg in pos.get("legs") or []:
+                    trail = leg.get("trail") or {}
+                    opened = str(leg.get("time") or trail.get("opened_at") or "")
+                    if leg_opened and opened and opened != leg_opened:
+                        continue
+                    if str(leg.get("status") or "").upper() != "OPEN":
+                        continue
+                    trail = dict(trail)
+                    trail["last_close"] = round(mark, 4)
+                    leg["trail"] = trail
 
 
 def _assert_tsd_tables(sync) -> None:
@@ -787,7 +810,13 @@ def sync_tsd_positions_to_supabase(
     rows = flatten_open_legs(book)
     closed_rows = flatten_closed_legs(book)
     if ib is not None and mark_fn is not None and rows:
-        apply_tws_marks(rows, ib, mark_fn)
+        apply_tws_marks(rows, ib, mark_fn, book=book)
+        try:
+            from tsd_scan_pipeline.tsd_capacity import save_state
+
+            save_state(book)
+        except Exception as exc:
+            print(f"  TSD mark book save warn: {exc}")
 
     try:
         sync = SupabaseSync()
@@ -925,9 +954,19 @@ def sync_tsd_positions_to_supabase(
     return summary
 
 
+def _mark_mismatch(local_px: float, cloud_px: float) -> bool:
+    """True when cloud vs local mark differs beyond abs+rel tolerance."""
+    abs_diff = abs(local_px - cloud_px)
+    if abs_diff <= MARK_PX_TOL:
+        return False
+    ref = max(abs(local_px), abs(cloud_px), 1e-9)
+    return (abs_diff / ref) > MARK_PX_TOL_REL
+
+
 def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
     """Confirm Cloud px matches local/TWS after upsert."""
     errors: list[str] = []
+    soft_warns: list[str] = []
     try:
         from supabase_sync import SupabaseSync
 
@@ -961,14 +1000,16 @@ def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
             if (
                 local_px is not None
                 and cloud_px is not None
-                and abs(local_px - cloud_px) > MARK_PX_TOL
+                and _mark_mismatch(local_px, cloud_px)
             ):
+                # Soft warn only — race between trail MTM and TWS mark is common;
+                # do not fail the sync / spam Telegram (autopsy P1).
                 msg = (
-                    f"tsd_mark_mismatch:{symbol} "
+                    f"tsd_mark_drift:{symbol} "
                     f"cloud={cloud_px} local={local_px:.2f}"
                 )
-                errors.append(msg)
-                mismatch = " *** MISMATCH ***"
+                soft_warns.append(msg)
+                mismatch = " (drift warn)"
             print(
                 f"    {symbol}: status={cloud.get('status')} "
                 f"shares={cloud.get('shares')} "
@@ -976,6 +1017,8 @@ def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
                 f"kill={cloud.get('kill_price')}"
                 f"{mismatch}"
             )
+        if soft_warns:
+            print(f"  mark drift warns (non-fatal): {len(soft_warns)}")
     except Exception as exc:
         errors.append(f"tsd_verify:{exc}")
         print(f"  TSD Supabase verify warn: {exc}")

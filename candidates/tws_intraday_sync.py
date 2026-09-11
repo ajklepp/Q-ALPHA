@@ -51,6 +51,7 @@ FILL_CONFIRMED = frozenset({"Filled", "FILLED"})
 EXIT_PX_TOL_FRAC = 0.0025  # 0.25%
 # Post-sync mark verify: Cloud current_price must match TWS within this $ band.
 MARK_PX_TOL = 0.05
+MARK_PX_TOL_REL = 0.0025  # 25 bps — avoid spam on fast movers
 # Per-symbol snapshot mark; abort if IB stalls (prevents hung sync after gap marks).
 TWS_MARK_TIMEOUT_SEC = 8.0
 
@@ -794,13 +795,22 @@ def _verify_supabase_trades(
             mark_note = ""
             if expected_marks and key in expected_marks:
                 tws_px = float(expected_marks[key])
-                if cloud_px is None or abs(cloud_px - tws_px) > MARK_PX_TOL:
-                    msg = (
-                        f"mark_mismatch:{ticker} "
-                        f"cloud={cloud_px} tws={tws_px:.2f}"
+                abs_diff = (
+                    abs(cloud_px - tws_px)
+                    if cloud_px is not None
+                    else float("inf")
+                )
+                rel_ok = False
+                if cloud_px is not None and tws_px:
+                    rel_ok = (abs_diff / max(abs(cloud_px), abs(tws_px), 1e-9)) <= MARK_PX_TOL_REL
+                if cloud_px is None or (abs_diff > MARK_PX_TOL and not rel_ok):
+                    # Soft warn only — do not fail whole sync on transient drift
+                    print(
+                        f"    mark_drift:{ticker} cloud={cloud_px} tws={tws_px:.2f}"
                     )
-                    errors.append(msg)
-                    mark_note = " *** MISMATCH ***"
+                    mark_note = " (drift warn)"
+                elif abs_diff > MARK_PX_TOL:
+                    mark_note = " (within rel tol)"
             print(
                 f"    {r.get('ticker')} {r.get('entry_date')}: "
                 f"status={r.get('status')} shares={r.get('shares_total')} "

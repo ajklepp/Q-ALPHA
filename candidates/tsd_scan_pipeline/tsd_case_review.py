@@ -82,6 +82,20 @@ def _toxic_flags(row: dict[str, Any]) -> list[str]:
         s = str(rf).lower()
         if s in ("dilution", "distress", "guidance_cut", "offering") and s not in flags:
             flags.append(s)
+    # Situational news taxonomy (pt_cut, downgrade, offering, …)
+    try:
+        from tsd_scan_pipeline.tsd_news_schema import (
+            assess_news_situation,
+            collect_row_headlines,
+        )
+
+        sit = assess_news_situation(collect_row_headlines(row))
+        row["_news_situation"] = sit  # stash for dossier / ledger
+        for f in sit.get("toxic_news_flags") or []:
+            if f not in flags:
+                flags.append(str(f))
+    except Exception:
+        pass
     return flags
 
 
@@ -115,6 +129,7 @@ def build_case_dossier(row: dict[str, Any]) -> dict[str, Any]:
     """Deterministic evidence pack for fusion / ledger (no LLM)."""
     room_class = classify_room_class(row)
     toxic = _toxic_flags(row)
+    sit = row.get("_news_situation") if isinstance(row.get("_news_situation"), dict) else {}
     return {
         "symbol": str(row.get("symbol") or "").upper(),
         "continuation_score": float(row.get("continuation_score") or 0.0),
@@ -141,6 +156,8 @@ def build_case_dossier(row: dict[str, Any]) -> dict[str, Any]:
         "deep_summary_line": row.get("deep_summary_line") or "",
         "toxic_flags": toxic,
         "thin_deep_contradiction": _thin_deep_contradiction(row),
+        "news_situation": sit,
+        "news_score_delta": int(sit.get("score_delta") or 0),
     }
 
 
@@ -173,12 +190,17 @@ def deterministic_case_verdict(dossier: dict[str, Any]) -> dict[str, Any] | None
 
     if risks:
         evidence.append(f"toxic={','.join(risks)}")
+        sit = dossier.get("news_situation") if isinstance(dossier.get("news_situation"), dict) else {}
+        worst = sit.get("worst") if isinstance(sit.get("worst"), dict) else {}
+        note = "Toxic catalyst / situational news flags"
+        if worst.get("label"):
+            note = f"Toxic news: {worst.get('label')} (same-day p50={worst.get('same_day_ret_p50')})"
         return _case(
             sym,
             "REJECT",
             0.85,
             dossier,
-            structure_note="Toxic catalyst flags",
+            structure_note=note,
             sentiment_note="",
             risks=risks,
             evidence=evidence,
@@ -241,7 +263,8 @@ def deterministic_case_verdict(dossier: dict[str, Any]) -> dict[str, Any] | None
                 f"popular={dossier.get('tradable_popular')} "
                 f"recent_lb={dossier.get('recent_leaderboard')} "
                 f"tws={dossier.get('tws_popular')} "
-                f"today_gainer={dossier.get('on_gainers')}"
+                f"today_gainer={dossier.get('on_gainers')} "
+                f"news_Δ={dossier.get('news_score_delta')}"
             ),
             risks=[],
             evidence=evidence,
@@ -409,6 +432,107 @@ Return ONLY JSON:
         return None
 
 
+# Hard REJECT risks that must never soften even for CONSTRUCTIVE leaders.
+_HARD_REJECT_RISKS = frozenset({
+    "wreckage_room",
+    "wreckage_override",
+    "dilution",
+    "distress",
+    "guidance_cut",
+    "news_veto",
+})
+
+
+def _soften_leader_reject(case: dict[str, Any], dossier: dict[str, Any]) -> dict[str, Any]:
+    """
+    Autopsy P1: CONSTRUCTIVE_ROOM + momentum leaders should not hard-REJECT
+    on soft contradictions — WAIT so rank/cap can still consider them later.
+    Keep toxic / wreckage REJECT intact.
+    """
+    if str(case.get("verdict") or "").upper() != "REJECT":
+        return case
+    if dossier.get("room_class") != "CONSTRUCTIVE_ROOM":
+        return case
+    if not dossier.get("momentum_context"):
+        return case
+    risks = {str(r) for r in (case.get("risks") or [])}
+    if risks & _HARD_REJECT_RISKS:
+        return case
+    if dossier.get("room_class") == "WRECKAGE_ROOM":
+        return case
+    out = dict(case)
+    out["verdict"] = "WAIT"
+    out["confidence"] = min(float(out.get("confidence") or 0.7), 0.65)
+    out["evidence"] = list(out.get("evidence") or []) + ["leader_reject_softened_to_wait"]
+    out["structure_note"] = (
+        f"{out.get('structure_note') or ''} | softened REJECT→WAIT "
+        "(constructive+momentum leader)"
+    ).strip(" |")
+    out["source"] = f"{out.get('source') or 'rules'}_leader_soften"
+    return out
+
+
+def alert_case_rank_disagreement(
+    reviewed: list[dict[str, Any]],
+    *,
+    notify: bool = True,
+) -> dict[str, Any] | None:
+    """
+    Autopsy P1: log/alert when top continuation is CASE_REJECT while a
+    lower-ranked name is ENTER — rank and case gate disagree.
+    """
+    if not reviewed:
+        return None
+    by_cont = sorted(
+        reviewed,
+        key=lambda r: -float(r.get("continuation_score") or 0),
+    )
+    top = by_cont[0]
+    top_v = str(
+        top.get("case_verdict")
+        or (top.get("case_review") or {}).get("verdict")
+        or ""
+    ).upper()
+    if top_v != "REJECT":
+        return None
+    lower_enter = next(
+        (
+            r for r in by_cont[1:]
+            if str(
+                r.get("case_verdict")
+                or (r.get("case_review") or {}).get("verdict")
+                or ""
+            ).upper()
+            == "ENTER"
+        ),
+        None,
+    )
+    if lower_enter is None:
+        return None
+    payload = {
+        "top_symbol": str(top.get("symbol") or "").upper(),
+        "top_continuation": top.get("continuation_score"),
+        "top_verdict": top_v,
+        "enter_symbol": str(lower_enter.get("symbol") or "").upper(),
+        "enter_continuation": lower_enter.get("continuation_score"),
+    }
+    msg = (
+        f"CASE/rank disagree: top={payload['top_symbol']} REJECT "
+        f"(cont={payload['top_continuation']}) but "
+        f"{payload['enter_symbol']} ENTER "
+        f"(cont={payload['enter_continuation']})"
+    )
+    print(f"  ALERT {msg}")
+    if notify:
+        try:
+            from tsd_scan_pipeline.tsd_notify import notify_tsd
+
+            notify_tsd(f"Peak Hour {msg}")
+        except Exception:
+            pass
+    return payload
+
+
 def review_case(
     row: dict[str, Any],
     *,
@@ -420,6 +544,7 @@ def review_case(
 
     Rules fire first (wreckage / toxic / contradiction / no-momentum WAIT).
     Otherwise LLM fusion; on LLM failure → WAIT (fail-closed, never BUY on score alone).
+    Soften soft REJECT→WAIT for constructive+momentum leaders (autopsy P1).
     """
     dossier = build_case_dossier(row)
     ruled = deterministic_case_verdict(dossier)
@@ -435,16 +560,25 @@ def review_case(
             if llm and llm["verdict"] == "ENTER" and float(llm.get("confidence") or 0) >= 0.6:
                 llm["source"] = "llm_override_wait"
                 return llm
-        return ruled
+        return _soften_leader_reject(ruled, dossier)
 
     if allow_llm:
         llm = fusion_case_llm(dossier, use_web_search=use_web_search)
         if llm is not None:
-            # Never let LLM ENTER wreckage if rules missed
+            # Never let LLM ENTER wreckage / toxic news if rules missed
             if classify_room_class(row) == "WRECKAGE_ROOM" and llm["verdict"] == "ENTER":
                 llm["verdict"] = "REJECT"
                 llm["risks"] = list(llm.get("risks") or []) + ["wreckage_override"]
-            return llm
+            sit = dossier.get("news_situation") if isinstance(dossier.get("news_situation"), dict) else {}
+            if sit.get("veto_long") and llm["verdict"] == "ENTER":
+                llm["verdict"] = "REJECT"
+                llm["risks"] = list(llm.get("risks") or []) + list(
+                    sit.get("toxic_news_flags") or ["news_veto"]
+                )
+                llm["structure_note"] = (
+                    f"Toxic news veto override: {sit.get('toxic_news_flags')}"
+                )
+            return _soften_leader_reject(llm, dossier)
 
     return _case(
         dossier["symbol"],
@@ -494,17 +628,20 @@ def review_attention_pool(
                         erow[k] = row[k]
                 erow["quality_passed"] = ok
                 if not ok:
-                    erow["case_review"] = _case(
+                    dossier = build_case_dossier(erow)
+                    q_case = _case(
                         str(erow.get("symbol") or "").upper(),
                         "REJECT",
                         0.95,
-                        build_case_dossier(erow),
+                        dossier,
                         structure_note=f"quality_gate:{','.join(reasons[:3])}",
                         sentiment_note="",
                         risks=list(reasons[:5]),
                         evidence=reasons[:5],
                         source="quality_gate",
                     )
+                    erow["case_review"] = _soften_leader_reject(q_case, dossier)
+                    erow["case_verdict"] = erow["case_review"].get("verdict")
                 enriched.append(erow)
                 time.sleep(0.05)
             pool = enriched
@@ -543,18 +680,24 @@ def select_enter_rows(
     reviewed: list[dict[str, Any]],
     *,
     max_n: int,
+    exclude_symbols: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Only case ENTER rows with tradable popularity (momentum confirmation).
 
     Autopsy: popular+structure filter kept the green keep-profit book;
     obscure non-popular ENTERs were a drag.
+
+    exclude_symbols: already OPEN / already_confirmed — do not consume take
+    slots (autopsy P0 cap accounting).
     """
+    skip = {str(s).upper() for s in (exclude_symbols or set())}
     enters = [
         r for r in reviewed
         if str(r.get("case_verdict") or r.get("case_review", {}).get("verdict") or "").upper()
         == "ENTER"
         and bool(r.get("tradable_popular") or r.get("recent_leaderboard") or r.get("on_gainers"))
+        and str(r.get("symbol") or "").upper() not in skip
     ]
     enters.sort(
         key=lambda r: (

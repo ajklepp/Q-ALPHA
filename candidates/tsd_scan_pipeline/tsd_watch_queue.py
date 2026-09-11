@@ -534,6 +534,28 @@ def update_queue_row(
     return True
 
 
+def confirmed_or_watching_symbols() -> set[str]:
+    """Symbols already CONFIRMED or WATCHING — not new take-slot risk."""
+    state = load_queue()
+    out: set[str] = set()
+    for r in state.get("queue") or []:
+        st = str(r.get("status") or "").upper()
+        if st in ("CONFIRMED", "WATCHING"):
+            out.add(str(r.get("symbol") or "").upper())
+    return {s for s in out if s}
+
+
+def confirmed_symbols() -> set[str]:
+    """Symbols already CONFIRMED in the watch queue."""
+    state = load_queue()
+    return {
+        str(r.get("symbol") or "").upper()
+        for r in state.get("queue") or []
+        if str(r.get("status") or "").upper() == "CONFIRMED"
+        and str(r.get("symbol") or "").upper()
+    }
+
+
 def watching_symbols() -> list[str]:
     """Symbols currently WATCHING in the queue."""
     state = load_queue()

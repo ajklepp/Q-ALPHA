@@ -93,6 +93,9 @@ def format_scan_summary(
         f"Peak Hour SCAN hour={hour}",
         f"HTF={htf_pass} launches={launches_n} take={take_n} entered={entered_n}",
     ]
+    if take_n:
+        rate = (100.0 * float(entered_n) / float(take_n)) if take_n else 0.0
+        lines.append(f"take->entered={rate:.0f}%")
     if take_symbols:
         lines.append("take: " + ", ".join(take_symbols[:8]))
     if reject_summary:
