@@ -167,6 +167,14 @@ def _write_launch_artifact(
             "on_gainers": ar.get("on_gainers"),
             "attention_reasons": ar.get("attention_reasons"),
             "room_class": (ar.get("case_review") or {}).get("room_class"),
+            "rs_spy_1h": ar.get("rs_spy_1h"),
+            "rs_spy_5d": ar.get("rs_spy_5d"),
+            "dollar_vol_1h": ar.get("dollar_vol_1h"),
+            "dollar_vol_1h_vs_20d": ar.get("dollar_vol_1h_vs_20d"),
+            "float_shares": ar.get("float_shares"),
+            "micro_dead_tape": ar.get("micro_dead_tape"),
+            "options_call_share": ar.get("options_call_share"),
+            "options_score_lite": ar.get("options_score_lite"),
         })
     payload = {
         "updated_at": now_et.isoformat(),
@@ -254,6 +262,28 @@ def rank_1h_launches(
         except Exception as exc:
             print(f"  deep features warn: {exc}")
 
+    # Decision-time RS_1h / $vol / float / options (autopsy gaps) — then re-rank.
+    try:
+        from tsd_scan_pipeline.tsd_decision_context import attach_decision_context
+
+        # Preliminary score so options_top_n prefers strong names
+        for row in passed:
+            if row.get("continuation_score") is None:
+                prelim = enrich_launch_fields(row)
+                row["continuation_score"] = prelim.get("continuation_score")
+        passed = attach_decision_context(
+            passed, api_key=polygon_key or load_polygon_key(), now=now, options_top_n=12,
+        )
+        n_rs = sum(1 for r in passed if int(r.get("rs_spy_1h_ok") or 0) == 1)
+        n_opt = sum(1 for r in passed if r.get("options_call_share") is not None)
+        n_dead = sum(1 for r in passed if int(r.get("micro_dead_tape") or 0) == 1)
+        print(
+            f"  Decision context: rs_1h_ok={n_rs}/{len(passed)} "
+            f"options={n_opt} dead_tape={n_dead}"
+        )
+    except Exception as exc:
+        print(f"  decision context warn: {exc}")
+
     for row in passed:
         enriched = enrich_launch_fields(row)
         if row.get("htf_range_20d_pct") is not None:
@@ -272,6 +302,9 @@ def rank_1h_launches(
             "ticker_prior_n", "ticker_prior_source",
             "gap_pct", "prior_close", "day_open",
             "rs_spy_5d", "rs_sector_5d", "rs_ok", "sector_etf", "sic_code",
+            "rs_spy_1h", "rs_spy_1h_ok", "dollar_vol_1h", "dollar_vol_1h_vs_20d",
+            "float_shares", "micro_dead_tape", "options_call_share",
+            "options_score_lite", "decision_context_ok",
         ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
@@ -291,6 +324,9 @@ def rank_1h_launches(
             "ticker_prior_source",
             "gap_pct", "prior_close", "day_open",
             "rs_spy_5d", "rs_sector_5d", "rs_ok", "sector_etf", "sic_code",
+            "rs_spy_1h", "rs_spy_1h_ok", "dollar_vol_1h", "dollar_vol_1h_vs_20d",
+            "float_shares", "micro_dead_tape", "options_call_share",
+            "options_score_lite", "decision_context_ok",
         ):
             if k in merged:
                 row[k] = merged.get(k)

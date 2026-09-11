@@ -244,6 +244,17 @@ def add_to_watch_queue(
             "ticker_prior_source": qh_row.get(
                 "ticker_prior_source", cand.get("ticker_prior_source")
             ),
+            "rs_spy_1h": qh_row.get("rs_spy_1h", cand.get("rs_spy_1h")),
+            "rs_spy_5d": qh_row.get("rs_spy_5d", cand.get("rs_spy_5d")),
+            "dollar_vol_1h": qh_row.get("dollar_vol_1h", cand.get("dollar_vol_1h")),
+            "dollar_vol_1h_vs_20d": qh_row.get(
+                "dollar_vol_1h_vs_20d", cand.get("dollar_vol_1h_vs_20d")
+            ),
+            "float_shares": qh_row.get("float_shares", cand.get("float_shares")),
+            "micro_dead_tape": qh_row.get("micro_dead_tape", cand.get("micro_dead_tape")),
+            "options_call_share": qh_row.get(
+                "options_call_share", cand.get("options_call_share")
+            ),
             "case_review": cand.get("case_review") or qh_row.get("case_review") or {},
             "case_verdict": cand.get("case_verdict")
             or (cand.get("case_review") or {}).get("verdict"),

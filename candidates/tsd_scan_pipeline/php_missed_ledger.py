@@ -74,6 +74,14 @@ def _evidence_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         "ticker_prior_source",
         "continuation_score",
         "bar_state",
+        "rs_spy_1h",
+        "rs_spy_5d",
+        "dollar_vol_1h",
+        "dollar_vol_1h_vs_20d",
+        "float_shares",
+        "micro_dead_tape",
+        "options_call_share",
+        "options_score_lite",
     )
     out: dict[str, Any] = {}
     for k in keys:

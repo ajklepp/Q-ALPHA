@@ -62,7 +62,7 @@ BAR_STATE_PTS_V1 = {
     "extended": -20.0,
 }
 RANKER_LIST_LAUNCH_FLOOR = 40.0  # admit if launch>=40 OR scan<=55
-CONTINUATION_SCORE_VERSION = "v1.4"  # v1.3 + soft boost catalyst_type=earnings (blind-spot #5)
+CONTINUATION_SCORE_VERSION = "v1.5"  # v1.4 + decision-time RS_1h / $vol / float / options lite
 # Blind-spot #2: soft-skip extreme overnight gaps
 EXTREME_GAP_PCT = 0.05
 EXTREME_GAP_SOFT_PENALTY = 20.0
@@ -327,6 +327,8 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     v1.2: soft-skip extreme gaps (gap_pct >= 5%) — blind-spot #2 bakeoff.
     v1.3: soft RS vs SPY / sector ETF (5d, prior closes) — blind-spot #4.
     v1.4: soft boost catalyst_type=earnings — blind-spot #5.
+    v1.5: decision-time same-session RS vs SPY, $vol_1h, float, options call-share,
+          dead-tape demotion (taken-vs-missed autopsy).
     """
     hour = _row_hour(row)
     peak = 25.0 if hour is not None and hour in PEAK_HOUR_BONUS_HOURS else 0.0
@@ -439,11 +441,19 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     if str(row.get("catalyst_type") or "").strip().lower() == "earnings":
         score += CATALYST_EARNINGS_SOFT_PTS
 
+    # v1.5 decision-time overlays (taken-vs-missed autopsy gaps)
+    try:
+        from tsd_scan_pipeline.tsd_decision_context import apply_decision_context_score_terms
+
+        score = apply_decision_context_score_terms(score, row)
+    except Exception:
+        pass
+
     return round(score, 2)
 
 
 def compute_continuation_score(row: dict[str, Any]) -> float:
-    """Live ranker entrypoint — currently v1.4."""
+    """Live ranker entrypoint — currently v1.5."""
     return compute_continuation_score_v1_1(row)
 
 

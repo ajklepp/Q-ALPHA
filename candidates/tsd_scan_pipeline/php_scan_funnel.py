@@ -128,6 +128,17 @@ def build_scan_funnel_doc(
                 str(t.get("symbol") or "").upper() == str(r.get("symbol") or "").upper()
                 for t in take
             ),
+            # Decision-time context (taken-vs-missed autopsy)
+            "rs_spy_1h": r.get("rs_spy_1h"),
+            "rs_spy_5d": r.get("rs_spy_5d"),
+            "dollar_vol_1h": r.get("dollar_vol_1h"),
+            "dollar_vol_1h_vs_20d": r.get("dollar_vol_1h_vs_20d"),
+            "float_shares": r.get("float_shares"),
+            "micro_dead_tape": r.get("micro_dead_tape"),
+            "options_call_share": r.get("options_call_share"),
+            "options_score_lite": r.get("options_score_lite"),
+            "vol_ratio_20": r.get("vol_ratio_20"),
+            "bar_state": r.get("bar_state"),
         })
 
     bar_hour = None
