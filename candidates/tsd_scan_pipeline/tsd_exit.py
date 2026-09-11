@@ -16,26 +16,69 @@ from tsd_scan_pipeline.tsd_entry import (
     POLL_SEC,
     SessionKind,
     classify_session,
+    session_allows_exit_orders,
 )
 from tsd_scan_pipeline.tsd_pool import release_on_exit
 from tsd_scan_pipeline.tsd_trail import remaining_shares
 
 EXIT_LIMIT_SLIP = 0.998
+# Aggressive AH/overnight limit for kill_escalate when STP LMT is stuck through.
+# Slightly wider than 0.97 so 04:00 overnight-open / AH prints have a better shot.
+KILL_ESCALATE_SLIP = 0.95
+# One retry after no-fill with a modestly wider band (overnight open / RTH only).
+KILL_ESCALATE_RETRY_SLIP = 0.93
+# Stuck if last is this far through the kill limit (relative) or by absolute cents.
+STUCK_KILL_LIMIT_FRAC = 0.995
+STUCK_KILL_LIMIT_EPS = 0.01
 
 
 def build_exit_order(
     session: SessionKind,
     shares: int,
     ref_price: float,
+    *,
+    limit_slip: float | None = None,
 ) -> MarketOrder | LimitOrder:
     """Build session-appropriate SELL order."""
     if session == "RTH":
         return MarketOrder(action="SELL", totalQuantity=shares, tif="DAY")
 
-    lmt = round(ref_price * EXIT_LIMIT_SLIP, 2)
+    slip = EXIT_LIMIT_SLIP if limit_slip is None else float(limit_slip)
+    lmt = round(ref_price * slip, 2)
     order = LimitOrder(action="SELL", totalQuantity=shares, lmtPrice=lmt, tif="DAY")
     order.outsideRth = True
     return order
+
+
+def kill_stop_is_stuck(
+    *,
+    last_price: float,
+    stop_price: float,
+    limit_price: float,
+) -> bool:
+    """
+    True when last has traded through a working STP LMT kill.
+
+    Cases:
+      - last meaningfully below limit (crash gap / no fill at lmtPrice)
+      - last at/below stop while order still working (caller confirms open)
+    """
+    try:
+        last = float(last_price or 0)
+        stop = float(stop_price or 0)
+        limit = float(limit_price or 0)
+    except (TypeError, ValueError):
+        return False
+    if last <= 0:
+        return False
+    if limit > 0 and (
+        last < limit * STUCK_KILL_LIMIT_FRAC
+        or last < limit - STUCK_KILL_LIMIT_EPS
+    ):
+        return True
+    if stop > 0 and last <= stop:
+        return True
+    return False
 
 
 def cancel_order_safe(ib: IB, order_id: int | None) -> bool:
@@ -427,6 +470,208 @@ def sync_kill_quantity(
     return False
 
 
+def escalate_stuck_kill_stops(
+    ib: IB,
+    leg: dict[str, Any],
+    symbol: str,
+    last_price: float,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Cancel a stuck STP LMT kill and flatten with an aggressive software exit.
+
+    Safety net for fast crashes where stop elects but limit never fills
+    (e.g. SELL STP LMT @ 18.89 while last ~17.69 after hours).
+
+    Skipped during OVERNIGHT dead window (~20:00–04:00 ET) when fills cannot
+    happen — caller should keep/sync the broker kill only.
+    """
+    sym = symbol.upper()
+    result: dict[str, Any] = {
+        "symbol": sym,
+        "escalated": False,
+        "cancelled": [],
+        "exit": None,
+        "reason": None,
+    }
+
+    session = classify_session()
+    if not session_allows_exit_orders(session):
+        result["reason"] = "exits_not_tradeable"
+        result["session"] = session
+        return result
+
+    try:
+        last = float(last_price or 0)
+    except (TypeError, ValueError):
+        last = 0.0
+    if last <= 0:
+        result["reason"] = "no_last_price"
+        return result
+
+    try:
+        broker_qty = float(_broker_qty_map(ib).get(sym, 0.0))
+    except Exception as exc:
+        result["reason"] = f"broker_qty_unavailable:{exc}"
+        return result
+    if broker_qty <= 0:
+        result["reason"] = "no_broker_long"
+        return result
+
+    preferred_oid = leg.get("kill_order_id")
+    try:
+        preferred_oid_i = int(preferred_oid) if preferred_oid is not None else None
+    except (TypeError, ValueError):
+        preferred_oid_i = None
+
+    stuck_trade = None
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.35)
+    except Exception:
+        pass
+
+    candidates: list[Any] = []
+    for trade in list(ib.openTrades() or []):
+        try:
+            if str(getattr(trade.contract, "symbol", "") or "").upper() != sym:
+                continue
+            if str(trade.order.action or "").upper() != "SELL":
+                continue
+            status = str(trade.orderStatus.status or "")
+            if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                continue
+            otype = str(trade.order.orderType or "").upper().replace("_", " ")
+            # IB reports StopLimitOrder as "STP LMT"
+            if not ("STP" in otype and "LMT" in otype):
+                continue
+            candidates.append(trade)
+        except Exception:
+            continue
+
+    # Prefer kill_order_id, but only if that order is actually stuck.
+    # Otherwise scan other working STP LMTs (orphan / replace races).
+    ordered: list[Any] = []
+    if preferred_oid_i is not None:
+        for trade in candidates:
+            try:
+                if int(trade.order.orderId or 0) == preferred_oid_i:
+                    ordered.append(trade)
+                    break
+            except Exception:
+                continue
+    for trade in candidates:
+        if trade not in ordered:
+            ordered.append(trade)
+
+    for trade in ordered:
+        stop_px = float(getattr(trade.order, "stopPrice", 0) or 0)
+        lmt_px = float(getattr(trade.order, "lmtPrice", 0) or 0)
+        if kill_stop_is_stuck(last_price=last, stop_price=stop_px, limit_price=lmt_px):
+            stuck_trade = trade
+            break
+
+    if stuck_trade is None:
+        if not candidates:
+            result["reason"] = "no_working_stp_lmt"
+            return result
+        # Surface the preferred / first order for diagnostics.
+        sample = ordered[0] if ordered else candidates[0]
+        result["reason"] = "not_stuck"
+        result["stop_price"] = float(getattr(sample.order, "stopPrice", 0) or 0)
+        result["limit_price"] = float(getattr(sample.order, "lmtPrice", 0) or 0)
+        result["last_price"] = last
+        return result
+
+    stop_px = float(getattr(stuck_trade.order, "stopPrice", 0) or 0)
+    lmt_px = float(getattr(stuck_trade.order, "lmtPrice", 0) or 0)
+    oid = int(stuck_trade.order.orderId or 0)
+
+    trail = leg.get("trail") or {}
+    rem_book = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
+    qty = max(1, int(min(int(broker_qty), rem_book if rem_book > 0 else int(broker_qty))))
+
+    print(
+        f"  {sym} STUCK KILL escalate oid={oid} last={last:.4f} "
+        f"stop={stop_px:.4f} lmt={lmt_px:.4f} qty={qty}"
+    )
+
+    if dry_run:
+        result["escalated"] = True
+        result["cancelled"] = [oid]
+        result["reason"] = "dry_run"
+        result["exit"] = {"status": "DRY_RUN", "shares": qty, "fill_price": last}
+        return result
+
+    cancelled = cancel_working_sells_for_symbol(ib, sym, dry_run=False)
+    if oid and oid not in cancelled:
+        if cancel_order_safe(ib, oid):
+            cancelled = list(cancelled) + [oid]
+    result["cancelled"] = cancelled
+    # Keep prior kill_order_id until a successful flatten so sync_kill_quantity
+    # can re-place if the aggressive exit rejects / times out.
+    trail["kill_stop_cancelled"] = False
+    leg["trail"] = trail
+
+    entry_px = float(trail.get("entry_price") or leg.get("price") or 0) or None
+    exit_res = place_tsd_exit(
+        ib,
+        sym,
+        qty,
+        ref_price=last,
+        entry_price=entry_px,
+        reason="kill_escalate",
+    )
+    # One modest retry on timeout / reject when session is still tradeable
+    # (overnight open ~04:00 ET or RTH) — wider limit slip only.
+    status0 = str(exit_res.get("status") or "")
+    filled0 = int(exit_res.get("shares") or 0)
+    if (
+        not (status0 in ("FILLED", "PARTIAL") and filled0 > 0)
+        and session_allows_exit_orders()
+        and status0 in ("REJECTED",)
+        and str(exit_res.get("reason") or "") in ("no_fill_timeout", "order_Cancelled", "order_Inactive")
+    ):
+        print(
+            f"  {sym} kill_escalate retry slip={KILL_ESCALATE_RETRY_SLIP} "
+            f"(first={status0}/{exit_res.get('reason')})"
+        )
+        exit_res = place_tsd_exit(
+            ib,
+            sym,
+            qty,
+            ref_price=last,
+            entry_price=entry_px,
+            reason="kill_escalate",
+            escalate_slip=KILL_ESCALATE_RETRY_SLIP,
+        )
+    result["exit"] = exit_res
+    status = str(exit_res.get("status") or "")
+    filled = int(exit_res.get("shares") or 0)
+
+    if status in ("FILLED", "PARTIAL") and filled > 0:
+        result["escalated"] = True
+        result["reason"] = "kill_escalate"
+        if status == "FILLED" or filled >= qty:
+            leg["kill_order_id"] = None
+            trail["kill_stop_cancelled"] = True
+            leg["trail"] = trail
+        else:
+            # Residual: caller updates trail then sync_kill_quantity.
+            trail["kill_stop_cancelled"] = False
+            leg["trail"] = trail
+        return result
+
+    # Exit failed — re-arm STP LMT kill for remaining long.
+    trail["kill_stop_cancelled"] = False
+    leg["trail"] = trail
+    sync_kill_quantity(ib, leg, sym, dry_run=False)
+    result["escalated"] = True
+    result["reason"] = f"exit_{status or 'failed'}"
+    return result
+
+
 def place_tsd_exit(
     ib: IB,
     symbol: str,
@@ -435,6 +680,7 @@ def place_tsd_exit(
     ref_price: float | None = None,
     entry_price: float | None = None,
     reason: str = "trail",
+    escalate_slip: float | None = None,
 ) -> dict[str, Any]:
     """
     Place session-aware SELL for a tranche exit. Updates pool on fill.
@@ -442,6 +688,10 @@ def place_tsd_exit(
     sym = symbol.upper()
     if shares <= 0:
         return {"status": "SKIPPED", "reason": "shares_zero", "symbol": sym}
+
+    # Avoid stacking a software kill sell on top of a working STP LMT kill.
+    if str(reason or "").lower().startswith("kill"):
+        cancel_working_sells_for_symbol(ib, sym, dry_run=False)
 
     contract = Stock(sym, "SMART", "USD")
     ib.qualifyContracts(contract)
@@ -468,7 +718,19 @@ def place_tsd_exit(
         return {"status": "REJECTED", "reason": "no_price", "symbol": sym}
 
     session = classify_session()
-    order = build_exit_order(session, shares, px)
+    # IB does not allow unprotected MarketOrder outside RTH for US stocks —
+    # use a wide LimitOrder so crash exits can still print AH/overnight-open.
+    if str(reason or "") == "kill_escalate" and session != "RTH":
+        slip = (
+            float(escalate_slip)
+            if escalate_slip is not None
+            else KILL_ESCALATE_SLIP
+        )
+        order = build_exit_order(
+            session, shares, float(px), limit_slip=slip,
+        )
+    else:
+        order = build_exit_order(session, shares, px)
     trade = ib.placeOrder(contract, order)
 
     deadline = time.time() + FILL_WAIT_SEC

@@ -5,8 +5,10 @@ LONG ONLY. Phase 4 software trail replaces emergency T1 kill stop.
 
 Session rules:
   - RTH (09:30-16:00 ET weekdays): MarketOrder BUY
-  - Pre-market / after-hours: LimitOrder BUY, outsideRth=True
-  - Overnight (20:00-04:00 ET): LimitOrder BUY only, outsideRth=True
+  - EXTENDED (04:00-09:30 and 16:00-20:00 ET): LimitOrder BUY, outsideRth=True
+    IBKR overnight open for many US stocks is typically ~04:00–20:00 ET.
+  - OVERNIGHT (20:00-04:00 ET): dead window for most names — no reliable fills.
+    Broker GTC STP LMT kills may rest; do not cancel/escalate software exits.
 
 Emergency T1 kill: StopLimitOrder SELL at kill_pct (fallback 5%) until Phase 4.
 Never place broker kill at structure/area-low (Chat A bakeoff failed).
@@ -27,11 +29,22 @@ SessionKind = Literal["RTH", "EXTENDED", "OVERNIGHT"]
 
 FILL_WAIT_SEC = 45
 POLL_SEC = 0.5
-KILL_LIMIT_SLIP = 0.995
+# Limit below stop so STP LMT can fill in a fast crash; escalate_stuck_kill_stops
+# is still the safety net if last trades through this band.
+KILL_LIMIT_SLIP = 0.97
+
+# IBKR overnight session for many US equities (~04:00–20:00 ET).
+# Outside that window (OVERNIGHT classifier) exits generally cannot print.
+OVERNIGHT_OPEN_ET = time(4, 0)
+OVERNIGHT_CLOSE_ET = time(20, 0)
 
 
 def classify_session(now: datetime | None = None) -> SessionKind:
-    """Classify current ET session for order type selection."""
+    """Classify current ET session for order type selection.
+
+    OVERNIGHT here means the post-overnight-close dead window (20:00–04:00 ET),
+    not the IBKR overnight *trading* session (which maps to EXTENDED + RTH).
+    """
     dt = now or datetime.now(ET)
     if dt.tzinfo is None:
         dt = ET.localize(dt)
@@ -39,7 +52,7 @@ def classify_session(now: datetime | None = None) -> SessionKind:
         dt = dt.astimezone(ET)
 
     t = dt.time()
-    overnight = time(20, 0) <= t or t < time(4, 0)
+    overnight = t >= OVERNIGHT_CLOSE_ET or t < OVERNIGHT_OPEN_ET
     if overnight:
         return "OVERNIGHT"
 
@@ -47,6 +60,24 @@ def classify_session(now: datetime | None = None) -> SessionKind:
         return "RTH"
 
     return "EXTENDED"
+
+
+def session_allows_exit_orders(
+    session: SessionKind | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """True when software exits / kill escalate can reasonably fill.
+
+    False during OVERNIGHT dead window (~20:00–04:00 ET) after IBKR overnight
+    close until overnight open. RTH and EXTENDED (overnight open / pre / AH) OK.
+    """
+    s = session if session is not None else classify_session(now)
+    return s != "OVERNIGHT"
+
+
+def exits_tradeable_now(now: datetime | None = None) -> bool:
+    """Time-based alias: exits allowed now in America/New_York."""
+    return session_allows_exit_orders(now=now)
 
 
 def load_tsd_pool() -> float:

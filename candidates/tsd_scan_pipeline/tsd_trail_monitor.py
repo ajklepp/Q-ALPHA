@@ -35,8 +35,12 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     record_leg_exit,
     save_state,
 )
-from tsd_scan_pipeline.tsd_entry import classify_session  # noqa: E402
+from tsd_scan_pipeline.tsd_entry import (  # noqa: E402
+    classify_session,
+    session_allows_exit_orders,
+)
 from tsd_scan_pipeline.tsd_exit import (  # noqa: E402
+    escalate_stuck_kill_stops,
     housekeep_orphan_sell_orders,
     place_tsd_exit,
     sync_kill_quantity,
@@ -452,6 +456,97 @@ def _process_leg(
     return results
 
 
+def _apply_kill_escalate_fill(
+    ib: IB,
+    pos: dict[str, Any],
+    leg_index: int,
+    leg: dict[str, Any],
+    sym: str,
+    *,
+    fill: dict[str, Any],
+    last_px: float,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Update book after escalate_stuck_kill_stops places a software exit."""
+    trail = leg.get("trail") or {}
+    rem = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
+    filled_sh = int(fill.get("shares") or 0)
+    status = str(fill.get("status") or "")
+    if status not in ("FILLED", "PARTIAL", "DRY_RUN") or filled_sh <= 0:
+        return {
+            "symbol": sym,
+            "leg": leg_index,
+            "reason": "kill_escalate",
+            "status": "EXIT_FAIL",
+            "fill": fill,
+        }
+
+    exit_px = float(fill.get("fill_price") or last_px)
+    entry_px = float(trail.get("entry_price") or leg.get("price") or 0)
+    record_leg_exit(
+        pos,
+        leg_index=leg_index,
+        shares=filled_sh,
+        exit_price=exit_px,
+        reason="kill_escalate",
+        tranche_id="KILL",
+        order_id=fill.get("order_id"),
+    )
+    left = filled_sh
+    for tranche in trail.get("tranches") or []:
+        if left <= 0:
+            break
+        if tranche.get("closed"):
+            continue
+        t_sh = int(tranche.get("shares") or 0)
+        if t_sh <= 0:
+            continue
+        if t_sh <= left:
+            tranche["closed"] = True
+            tranche["trailing"] = False
+            tranche["exit_price"] = exit_px
+            tranche["exit_time"] = datetime.now(ET).isoformat()
+            tranche["exit_reason"] = "kill_escalate"
+            left -= t_sh
+        else:
+            tranche["shares"] = t_sh - left
+            left = 0
+
+    still = remaining_shares(trail) if trail else max(0, rem - filled_sh)
+    if still <= 0:
+        leg["status"] = "CLOSED"
+        trail["kill_stop_cancelled"] = True
+        leg["kill_order_id"] = None
+    else:
+        leg["status"] = "OPEN"
+        leg["shares"] = still
+        trail["kill_stop_cancelled"] = False
+    leg["trail"] = trail
+    pos["legs"][leg_index] = leg
+
+    if not dry_run and still > 0:
+        sync_kill_quantity(ib, leg, sym, dry_run=False)
+
+    pnl = (exit_px - entry_px) * filled_sh if entry_px > 0 else None
+    if not dry_run:
+        notify_tsd(
+            format_exited(
+                sym,
+                reason="kill_escalate" if still <= 0 else "kill_escalate_partial",
+                shares=filled_sh,
+                exit_price=exit_px,
+                pnl_dollars=pnl,
+            )
+        )
+    return {
+        "symbol": sym,
+        "leg": leg_index,
+        "reason": "kill_escalate",
+        "fill": fill,
+        "remaining": still,
+    }
+
+
 def _process_position(
     ib: IB,
     pos: dict[str, Any],
@@ -462,15 +557,56 @@ def _process_position(
     sym = str(pos["symbol"]).upper()
     results: list[dict[str, Any]] = []
     session = classify_session()
+    exits_ok = session_allows_exit_orders(session)
 
     if session != "RTH":
-        print(f"  {sym}: session={session} — kill backstop only (no software trail)")
+        if exits_ok:
+            print(
+                f"  {sym}: session={session} — kill backstop + stuck-kill escalate "
+                f"(no software trail)"
+            )
+        else:
+            print(
+                f"  {sym}: session={session} — kill sync only "
+                f"(exits dead window ~20:00–04:00 ET; no escalate)"
+            )
+        quote = _fetch_quote(ib, sym)
+        last_px = float((quote or {}).get("last") or (quote or {}).get("close") or 0)
         for i, leg in enumerate(list(pos.get("legs") or [])):
             if leg.get("status") == "CLOSED":
                 continue
             if not dry_run:
                 sync_kill_quantity(ib, leg, sym, dry_run=False)
+            # Overnight-open / AH (EXTENDED): escalate stuck through-limit kills.
+            # Dead window (OVERNIGHT): keep broker STP LMT; do not cancel/flatten.
+            if exits_ok and last_px > 0:
+                esc = escalate_stuck_kill_stops(
+                    ib, leg, sym, last_px, dry_run=dry_run,
+                )
+                if esc.get("escalated"):
+                    fill = esc.get("exit") or {}
+                    if str(fill.get("status") or "") in ("FILLED", "PARTIAL", "DRY_RUN"):
+                        results.append(
+                            _apply_kill_escalate_fill(
+                                ib, pos, i, leg, sym,
+                                fill=fill,
+                                last_px=last_px,
+                                dry_run=dry_run,
+                            )
+                        )
+                    else:
+                        results.append({
+                            "symbol": sym,
+                            "leg": i,
+                            "reason": "kill_escalate",
+                            "status": "EXIT_FAIL",
+                            "escalate": esc,
+                        })
             pos["legs"][i] = leg
+        if all(l.get("status") == "CLOSED" for l in pos.get("legs") or []):
+            pos["status"] = "CLOSED"
+            pos["closed_at"] = datetime.now(ET).isoformat()
+            print(f"  {sym}: position CLOSED (kill_escalate)")
         return results
 
     quote = _fetch_quote(ib, sym)
@@ -479,12 +615,40 @@ def _process_position(
         return results
 
     when = datetime.now(ET).isoformat()
+    last_px = float(quote.get("last") or quote.get("close") or 0)
     pos_closed = True
 
     for i, leg in enumerate(list(pos.get("legs") or [])):
         if leg.get("status") == "CLOSED":
             continue
         pos_closed = False
+        if last_px > 0:
+            esc = escalate_stuck_kill_stops(
+                ib, leg, sym, last_px, dry_run=dry_run,
+            )
+            if esc.get("escalated"):
+                fill = esc.get("exit") or {}
+                if str(fill.get("status") or "") in ("FILLED", "PARTIAL", "DRY_RUN"):
+                    results.append(
+                        _apply_kill_escalate_fill(
+                            ib, pos, i, leg, sym,
+                            fill=fill,
+                            last_px=last_px,
+                            dry_run=dry_run,
+                        )
+                    )
+                    pos["legs"][i] = leg
+                    if leg.get("status") == "CLOSED":
+                        continue
+                else:
+                    results.append({
+                        "symbol": sym,
+                        "leg": i,
+                        "reason": "kill_escalate",
+                        "status": "EXIT_FAIL",
+                        "escalate": esc,
+                    })
+                    pos["legs"][i] = leg
         leg_results = _process_leg(
             ib, pos, i, leg, sym, quote, dry_run=dry_run, when=when,
         )
