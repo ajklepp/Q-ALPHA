@@ -25,7 +25,7 @@ RATE_SLEEP = 0.12
 _CACHE: dict[str, tuple[float, Any]] = {}
 CACHE_TTL_SEC = 900.0
 
-# Soft score hooks (also mirrored in tsd_launch_score v1.5)
+# Soft score hooks (also mirrored in tsd_launch_score v1.5+)
 RS_1H_LEAD = 0.015
 RS_1H_LEAD_STRONG = 0.03
 RS_1H_LAG = -0.015
@@ -339,7 +339,7 @@ def attach_decision_context(
 
 
 def apply_decision_context_score_terms(score: float, row: dict[str, Any]) -> float:
-    """Soft v1.5 overlays used by continuation ranker."""
+    """Soft decision-time overlays used by continuation ranker (v1.5+)."""
     s = float(score)
 
     if int(row.get("rs_spy_1h_ok") or 0) == 1:

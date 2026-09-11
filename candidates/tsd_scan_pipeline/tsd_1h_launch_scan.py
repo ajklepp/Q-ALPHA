@@ -221,7 +221,7 @@ def rank_1h_launches(
     now: datetime | None = None,
     attach_social: bool = True,
 ) -> list[dict[str, Any]]:
-    """Rank by continuation_score_v1.1 (EXP-0021); peak hour is bonus only."""
+    """Rank by continuation_score (v1.6 same-day objective); peak hour is not a hard gate."""
     from tsd_scan_pipeline.universe_tsd import load_polygon_key
     from tsd_scan_pipeline.tsd_social import attach_social_to_rows
     from tsd_scan_pipeline.tsd_deep_features import attach_deep_features

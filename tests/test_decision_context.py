@@ -18,8 +18,8 @@ from tsd_scan_pipeline.tsd_launch_score import (  # noqa: E402
 )
 
 
-def test_version_is_v15() -> None:
-    assert CONTINUATION_SCORE_VERSION.startswith("v1.5")
+def test_version_is_v16() -> None:
+    assert CONTINUATION_SCORE_VERSION.startswith("v1.6")
 
 
 def test_rs_and_dead_tape_move_score() -> None:
@@ -69,8 +69,27 @@ def test_continuation_uses_decision_fields() -> None:
     assert compute_continuation_score(strong) > compute_continuation_score(weak)
 
 
+def test_early_session_outranks_late_identical_setup() -> None:
+    """v1.6: same setup at hour 7 should beat hour 13 (same-day path ablation)."""
+    base = {
+        "buy_signal": True,
+        "scan_score": 40,
+        "launch_score": 55,
+        "htf_score": 50,
+        "bar_state": "yellow",
+        "dist_20d_high_pct": 0.08,
+        "vol_ratio_20": 1.5,
+        "ticker_prior_hit1r_rate": 0.3,
+        "ticker_prior_mfe_p50": 0.03,
+    }
+    early = compute_continuation_score({**base, "htf_1h_bar_hour": 7})
+    late = compute_continuation_score({**base, "htf_1h_bar_hour": 13})
+    assert early > late
+
+
 if __name__ == "__main__":
-    test_version_is_v15()
+    test_version_is_v16()
     test_rs_and_dead_tape_move_score()
     test_continuation_uses_decision_fields()
+    test_early_session_outranks_late_identical_setup()
     print("OK test_decision_context")

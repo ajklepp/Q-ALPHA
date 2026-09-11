@@ -7,7 +7,7 @@ High scan_score (65+) = EXTENSION — soft penalty in ranker; hard-block only >=
 Chat A bar-state bakeoff: drop hard red veto; yellow best, red ok, green ok,
 orange admit-but-deprioritize.
 
-Live slot pick: continuation_score_v1.1 (peak-hour bonus, not hard hour gate).
+Live slot pick: continuation_score (v1.6 same-day extension objective).
 """
 from __future__ import annotations
 
@@ -52,8 +52,16 @@ DEFAULT_HOUR_MULT = 1.0
 SCAN_EARLY_WEIGHT = 0.2
 GUIDANCE_CUT_PENALTY = 25.0
 
-# EXP-0021 continuation ranker
-PEAK_HOUR_BONUS_HOURS = frozenset({7, 11, 12, 13})
+# EXP-0021 continuation ranker — LIVE Peak Hour objective (v1.6+)
+# Optimize same-day extension after the signal bar, NOT multi-day "setup beauty".
+# Ablation (week of 2026-09-08): score vs MFE r≈0.06 (noise); hour vs win_proxy r≈-0.34;
+# launch_score is the only legacy term with useful positive MFE corr (~0.14).
+PEAK_HOUR_BONUS_HOURS = frozenset({7, 11, 12, 13})  # legacy telemetry only
+# Same-day MFE is stronger in the morning session on the live week — prefer early hours.
+EARLY_SESSION_BONUS_HOURS = frozenset({5, 6, 7, 8, 9})
+EARLY_SESSION_BONUS_PTS = 12.0
+LATE_SESSION_HOURS = frozenset({11, 12, 13, 14, 15})
+LATE_SESSION_PENALTY_PTS = 10.0
 BAR_STATE_PTS_V1 = {
     "yellow": 12.0,
     "red": 8.0,
@@ -62,7 +70,7 @@ BAR_STATE_PTS_V1 = {
     "extended": -20.0,
 }
 RANKER_LIST_LAUNCH_FLOOR = 40.0  # admit if launch>=40 OR scan<=55
-CONTINUATION_SCORE_VERSION = "v1.5"  # v1.4 + decision-time RS_1h / $vol / float / options lite
+CONTINUATION_SCORE_VERSION = "v1.6"  # first-principles same-day objective reweight
 # Blind-spot #2: soft-skip extreme overnight gaps
 EXTREME_GAP_PCT = 0.05
 EXTREME_GAP_SOFT_PENALTY = 20.0
@@ -79,6 +87,15 @@ RS_SECTOR_LEAD_PTS = 8.0
 RS_SECTOR_LAG_PENALTY = 8.0
 # Blind-spot #5: soft boost when news tags earnings (thin but ship-gate PASS)
 CATALYST_EARNINGS_SOFT_PTS = 6.0
+
+# v1.6 hist/room — keep as soft context only (EXP-0021 upweighted these for a
+# different label; they inflate #1–2 without predicting same-day MFE).
+HIST_HIT_WEIGHT = 6.0
+HIST_MFE_WEIGHT = 6.0
+ROOM_WEIGHT = 10.0
+BOUNCE_WEIGHT = 8.0
+LAUNCH_TERM_WEIGHT = 0.28  # ablation: launch_score best positive legacy predictor
+HTF_TERM_WEIGHT = 0.08
 
 
 def signal_bar_red(row: dict[str, Any]) -> bool:
@@ -313,45 +330,60 @@ def compute_continuation_score_v1(row: dict[str, Any]) -> float:
 
 def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     """
-    Study-backed ranker for live paper (EXP-0021 deep-edge + ship grid).
+    Live Peak Hour continuation ranker (v1.6 first-principles objective).
 
-    Verified on HTF social corpus vs v1:
-      prior↑ + scan/launch↓ → higher slot expectancy (ship gate PASS).
+    Objective
+    ---------
+    Rank 1H launches by expected *same-day* extension after the signal bar:
+    higher P(hit +2% MFE before -5% MAE) / higher expected same-day MFE.
 
-    Changes vs v1:
-      - prior (ticker hist) upweighted — ablation hurt most when removed
-      - scan + launch downweighted — removing them raised slot expectancy
-      - softer scan>55 pile-on (-10 vs -20)
-      - keep 20d room (blend/52w did not beat this grid)
+    This is NOT the EXP-0021 multi-day "setup quality" objective. Ablation on the
+    live week (2026-09-08..11, top-10/hour) showed continuation rank ≈ noise vs
+    same-day MFE (r≈0.06) while clock hour was strongly anti-predictive for late
+    session (r≈-0.34 vs win_proxy). launch_score was the best legacy positive
+    correlator (~0.14). Skipping to rank #3–5 is a symptom workaround — fix the
+    objective/weights instead.
 
-    v1.2: soft-skip extreme gaps (gap_pct >= 5%) — blind-spot #2 bakeoff.
-    v1.3: soft RS vs SPY / sector ETF (5d, prior closes) — blind-spot #4.
-    v1.4: soft boost catalyst_type=earnings — blind-spot #5.
-    v1.5: decision-time same-session RS vs SPY, $vol_1h, float, options call-share,
-          dead-tape demotion (taken-vs-missed autopsy).
+    v1.6 changes vs v1.5
+    --------------------
+      - Early-session bonus (5–9) replaces flat peak-hour calendar boost (7/11–13)
+      - Late-session soft penalty (11–15)
+      - Slash hist prior + 20d room/bounce weights (they crowned hollow #1–2s)
+      - Upweight launch_score / keep tape+RS_1h overlays from v1.5
     """
     hour = _row_hour(row)
-    peak = 25.0 if hour is not None and hour in PEAK_HOUR_BONUS_HOURS else 0.0
+    # Same-day path quality by clock (ablation), not EXP-0021 peak-hour calendar.
+    if hour is not None and hour in EARLY_SESSION_BONUS_HOURS:
+        session_pts = EARLY_SESSION_BONUS_PTS
+    elif hour is not None and hour in LATE_SESSION_HOURS:
+        session_pts = -LATE_SESSION_PENALTY_PTS
+    else:
+        session_pts = 0.0
+
     bs = str(row.get("bar_state") or classify_bar_state(row))
     bar_pts = float(BAR_STATE_PTS_V1.get(bs, 0.0))
 
     room = float(row.get("dist_20d_high_pct") or 0.0)
     if room < 0:
-        room_term = -15.0 * _clip01((-room) / 0.05)
+        room_term = -0.5 * ROOM_WEIGHT * _clip01((-room) / 0.05)
     else:
-        room_term = 20.0 * _clip01(room / 0.15)
+        room_term = ROOM_WEIGHT * _clip01(room / 0.15)
 
     bounce = float(row.get("dist_20d_low_bounce") or 0.0)
-    bounce_term = 15.0 * _clip01(bounce)
+    bounce_term = BOUNCE_WEIGHT * _clip01(bounce)
 
     vr = float(row.get("vol_ratio_20") or row.get("vol_ratio") or 1.0)
-    vol_term = 15.0 * _clip01(math.log1p(max(vr, 0.0)) / math.log1p(5.0))
+    vol_term = 18.0 * _clip01(math.log1p(max(vr, 0.0)) / math.log1p(5.0))
     if vr < 0.5:
-        vol_term -= 8.0
+        vol_term -= 10.0
 
+    # Soft context only — do not let ticker history dominate the slot pick.
     prior_hit = float(row.get("ticker_prior_hit1r_rate") or 0.0)
     prior_mfe = float(row.get("ticker_prior_mfe_p50") or 0.0)
-    hist_term = 16.0 * _clip01(prior_hit) + 18.0 * _clip01(prior_mfe / 0.05)
+    hist_term = (
+        HIST_HIT_WEIGHT * _clip01(prior_hit)
+        + HIST_MFE_WEIGHT * _clip01(prior_mfe / 0.05)
+    )
 
     news_v = float(
         row.get("news_velocity_24h")
@@ -371,9 +403,9 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     )
 
     launch = float(row.get("launch_score") or compute_launch_score(row))
-    launch_term = 0.10 * launch
+    launch_term = LAUNCH_TERM_WEIGHT * launch
     htf = float(row.get("htf_score") or 0.0)
-    htf_term = 0.15 * htf
+    htf_term = HTF_TERM_WEIGHT * htf
 
     scan = float(row.get("scan_score") or 55.0)
     if 25.0 <= scan <= 45.0:
@@ -384,7 +416,7 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
         scan_term = -5.0
 
     score = (
-        peak + bar_pts + room_term + bounce_term + vol_term + hist_term
+        session_pts + bar_pts + room_term + bounce_term + vol_term + hist_term
         + news_term + st_term + x_term + launch_term + htf_term + scan_term
     )
 
@@ -396,17 +428,15 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     if row.get("distress_flag"):
         score -= 40.0
     if scan > LAUNCH_SCAN_MAX:
-        score -= 10.0  # was -20 in v1
+        score -= 10.0
     if str(row.get("phase") or row.get("phase_3h") or "") == "EXTENSION":
         score -= 15.0
 
-    # Deep lookback narrative (soft): older story / pending expectation — not 48h-only
     if int(row.get("expectation_pending") or 0) == 1:
-        score += 8.0
+        score += 4.0  # was 8 — narrative soft only
     if int(row.get("stale_relevant") or 0) == 1 and int(row.get("fresh_catalyst") or 0) == 0:
-        score += 5.0
+        score += 3.0
 
-    # Soft-skip extreme gaps (user: soft skip; bakeoff preferred hard skip ≥5%)
     try:
         gap = float(row.get("gap_pct") or 0.0)
     except (TypeError, ValueError):
@@ -414,7 +444,6 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
     if gap >= EXTREME_GAP_PCT:
         score -= EXTREME_GAP_SOFT_PENALTY
 
-    # Soft RS vs SPY / sector (blind-spot #4; both soft variants passed ship gate)
     if int(row.get("rs_ok") or 0) == 1:
         try:
             rs_spy = float(row.get("rs_spy_5d"))
@@ -437,11 +466,10 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
             elif rs_sec <= RS_SECTOR_LAG:
                 score -= RS_SECTOR_LAG_PENALTY
 
-    # Soft earnings-catalyst boost (blind-spot #5; small but ship-gate PASS)
     if str(row.get("catalyst_type") or "").strip().lower() == "earnings":
         score += CATALYST_EARNINGS_SOFT_PTS
 
-    # v1.5 decision-time overlays (taken-vs-missed autopsy gaps)
+    # v1.5+ decision-time overlays (RS_1h, $vol_1h, float, options, dead tape)
     try:
         from tsd_scan_pipeline.tsd_decision_context import apply_decision_context_score_terms
 
@@ -453,7 +481,7 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
 
 
 def compute_continuation_score(row: dict[str, Any]) -> float:
-    """Live ranker entrypoint — currently v1.5."""
+    """Live ranker entrypoint — currently v1.6 (same-day extension objective)."""
     return compute_continuation_score_v1_1(row)
 
 
