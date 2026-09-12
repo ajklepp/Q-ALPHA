@@ -35,6 +35,7 @@ candidates/entry_study/rollup.csv
 
 *.log
 candidates/*.log
+candidates/logs/*.pid
 candidates/dashboard_stdout.log
 candidates/dashboard_stderr.log
 
