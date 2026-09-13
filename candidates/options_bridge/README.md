@@ -61,6 +61,8 @@ Hung qualify / snapshot / `reqSecDefOptParams` / hist (weekend MD) → HTTP **50
 
 `/v1/health` never waits on the IB worker thread (`ThreadingHTTPServer` + lock-free health flag), so a hung quote/chain cannot block health.
 
+The `options-bridge-ib` worker creates its own `asyncio` event loop before importing `ib_insync` (eventkit requires `get_event_loop()` on that thread).
+
 `ts_utc` is ISO-8601 UTC. Health `data` never includes account ids.
 
 ## Endpoints

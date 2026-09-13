@@ -9,6 +9,7 @@ Never calls placeOrder / cancelOrder / reqGlobalCancel / whatIfOrder.
 """
 from __future__ import annotations
 
+import asyncio
 import math
 import queue
 import threading
@@ -37,6 +38,25 @@ from options_bridge.config import (
 from options_bridge.errors import BridgeError, TwsDisconnected, TwsTimeout
 
 T = TypeVar("T")
+
+
+def ensure_thread_event_loop() -> asyncio.AbstractEventLoop:
+    """
+    Give this thread an asyncio loop before ib_insync / eventkit import.
+
+    WHY: eventkit calls asyncio.get_event_loop() at import time. The dedicated
+    options-bridge-ib worker is not the main thread, so Python 3.10+ raises
+    RuntimeError: There is no current event loop in thread 'options-bridge-ib'.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop is not None and not loop.is_closed():
+            return loop
+    except RuntimeError:
+        pass
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop
 
 # IB write / order methods — blocked even if a future caller reaches the IB object.
 _BLOCKED_IB_METHODS = frozenset(
@@ -210,6 +230,7 @@ class ReadOnlyIBSession:
         self._connected_flag = False
         self._jobs: queue.Queue[tuple[Callable[[], Any], Future] | None] = queue.Queue()
         self._stop = threading.Event()
+        self._worker_loop: asyncio.AbstractEventLoop | None = None
         self._ib_thread = threading.Thread(
             target=self._ib_worker_loop,
             name="options-bridge-ib",
@@ -521,18 +542,29 @@ class ReadOnlyIBSession:
 
     def _ib_worker_loop(self) -> None:
         """Single thread that owns ib_insync. HTTP threads only wait on Futures."""
-        while not self._stop.is_set():
-            try:
-                item = self._jobs.get(timeout=0.25)
-            except queue.Empty:
-                continue
-            if item is None:
-                return
-            fn, fut = item
-            try:
-                fut.set_result(fn())
-            except BaseException as exc:
-                fut.set_exception(exc)
+        # Must run BEFORE any ib_insync import/connect on this thread.
+        loop = ensure_thread_event_loop()
+        self._worker_loop = loop
+        try:
+            while not self._stop.is_set():
+                try:
+                    item = self._jobs.get(timeout=0.25)
+                except queue.Empty:
+                    continue
+                if item is None:
+                    return
+                fn, fut = item
+                try:
+                    fut.set_result(fn())
+                except BaseException as exc:
+                    fut.set_exception(exc)
+        finally:
+            if loop is not None and not loop.is_closed() and not loop.is_running():
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+            self._worker_loop = None
 
     def _submit(self, fn: Callable[[], T], *, timeout: float | None = None, what: str = "TWS request") -> T:
         """
@@ -826,6 +858,8 @@ class ReadOnlyIBSession:
             except Exception:
                 pass
         self._disconnect_unlocked()
+        # Defense in depth: loop must exist before ib_insync/eventkit import.
+        ensure_thread_event_loop()
         try:
             from ib_insync import IB, util
         except ImportError as exc:

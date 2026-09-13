@@ -38,6 +38,7 @@ from options_bridge.ib_session import (  # noqa: E402
     _next_lower_strike,
     _nearest_strike_at_or_below,
     _pick_expiry,
+    ensure_thread_event_loop,
     short_put_target_strike,
 )
 from options_bridge.server import (  # noqa: E402
@@ -567,6 +568,24 @@ class TestBoundedIbWaits(unittest.TestCase):
             self.assertEqual(ctx.exception.status, 504)
         finally:
             release.set()
+            session.close()
+
+    def test_ib_worker_has_event_loop_before_ib_insync(self) -> None:
+        """eventkit-style get_event_loop() must work on options-bridge-ib."""
+        session = ReadOnlyIBSession()
+        try:
+
+            def probe() -> str:
+                loop = ensure_thread_event_loop()
+                # Same call eventkit makes at import — must not raise RuntimeError.
+                current = __import__("asyncio").get_event_loop()
+                self.assertIs(current, loop)
+                self.assertFalse(current.is_closed())
+                return threading.current_thread().name
+
+            name = session._submit(probe, timeout=2.0, what="loop-probe")
+            self.assertEqual(name, "options-bridge-ib")
+        finally:
             session.close()
 
     def test_health_payload_not_blocked_by_hung_job(self) -> None:
