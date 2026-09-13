@@ -145,6 +145,7 @@ Daily starter log: `candidates/logs/microstructure_YYYY-MM-DD.log`
 ## Tests (no live IB)
 
 ```powershell
+.\venv\Scripts\python.exe tests\test_microstructure_logger.py
 .\venv\Scripts\python.exe -m pytest tests/test_microstructure_logger.py -q
 ```
 
