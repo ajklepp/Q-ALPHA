@@ -10,10 +10,13 @@ Never calls placeOrder / cancelOrder / reqGlobalCancel / whatIfOrder.
 from __future__ import annotations
 
 import math
+import queue
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from options_bridge.config import (
     CONNECT_TIMEOUT_SEC,
@@ -24,14 +27,16 @@ from options_bridge.config import (
     MAX_BATCH_QUOTES,
     MAX_QUALIFY_CONTRACTS,
     RECONNECT_ATTEMPTS,
-    REQUEST_TIMEOUT_SEC,
     SNAPSHOT_WAIT_SEC,
     TWS_CLIENT_ID,
     TWS_HOST,
     TWS_PORT,
+    request_timeout_sec,
     validate_client_id,
 )
-from options_bridge.errors import BridgeError, TwsDisconnected
+from options_bridge.errors import BridgeError, TwsDisconnected, TwsTimeout
+
+T = TypeVar("T")
 
 # IB write / order methods — blocked even if a future caller reaches the IB object.
 _BLOCKED_IB_METHODS = frozenset(
@@ -181,8 +186,9 @@ class ReadOnlyIBSession:
     """
     Long-lived TWS paper session used by the HTTP handler.
 
-    All IB calls take a lock (ib_insync is not thread-safe). Disconnects
-    trigger a bounded reconnect; callers get TwsDisconnected instead of hanging.
+    ib_insync is not thread-safe. All IB calls run on one dedicated worker
+    thread. HTTP threads wait on a Future capped at REQUEST_TIMEOUT_SEC.
+    /v1/health never joins that queue and never calls into ib_insync.
     """
 
     def __init__(
@@ -197,73 +203,86 @@ class ReadOnlyIBSession:
         self.tws_port = int(tws_port)
         self.client_id = validate_client_id(client_id)
         self.connect_timeout = float(connect_timeout)
-        self._lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._ib: Any = None
         self._raw_ib: Any = None
         self._accounts_n = 0
+        self._connected_flag = False
+        self._jobs: queue.Queue[tuple[Callable[[], Any], Future] | None] = queue.Queue()
+        self._stop = threading.Event()
+        self._ib_thread = threading.Thread(
+            target=self._ib_worker_loop,
+            name="options-bridge-ib",
+            daemon=True,
+        )
+        self._ib_thread.start()
 
     @property
     def connected(self) -> bool:
-        """True when the ib_insync socket reports connected."""
-        raw = self._raw_ib
-        try:
-            return bool(raw is not None and raw.isConnected())
-        except Exception:
-            return False
+        """True when the last successful connect is still believed live.
+
+        WHY: health must not call ib.isConnected() — that can block if MD is wedged.
+        """
+        with self._state_lock:
+            return bool(self._connected_flag)
 
     def health_payload(self) -> dict[str, Any]:
-        """Phase 9A /v1/health data — no account ids, no secrets."""
+        """Phase 9A /v1/health data — no IB wait, no account ids, no secrets."""
+        with self._state_lock:
+            connected = bool(self._connected_flag)
+            accounts_n = int(self._accounts_n) if connected else 0
         return {
-            "tws_connected": self.connected,
+            "tws_connected": connected,
             "host": self.tws_host,
             "port": self.tws_port,
             "readonly": True,
-            "accounts_n": int(self._accounts_n) if self.connected else 0,
+            "accounts_n": accounts_n,
             "client_id": self.client_id,
         }
 
     def connect(self) -> None:
         """Connect once. Raises TwsDisconnected on failure (bounded timeout)."""
-        with self._lock:
-            self._connect_unlocked()
+        self._submit(
+            self._connect_unlocked,
+            timeout=self.connect_timeout + 1.0,
+            what="tws_connect",
+        )
 
     def disconnect(self) -> None:
-        """Drop the TWS socket if present."""
-        with self._lock:
-            self._disconnect_unlocked()
+        """Drop the TWS socket if present (bounded)."""
+        try:
+            self._submit(
+                self._disconnect_unlocked,
+                timeout=min(self.connect_timeout, request_timeout_sec()),
+                what="tws_disconnect",
+            )
+        except TwsTimeout:
+            self._abandon_hung_socket("tws_disconnect")
+
+    def close(self) -> None:
+        """Disconnect and stop the IB worker thread (process shutdown)."""
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+        self._stop.set()
+        self._jobs.put(None)
 
     def ensure_connected(self) -> None:
         """Reconnect up to RECONNECT_ATTEMPTS times; then raise 503."""
-        if self.connected:
-            return
-        last_exc: Exception | None = None
-        for _attempt in range(RECONNECT_ATTEMPTS):
-            try:
-                self.connect()
-                return
-            except TwsDisconnected as exc:
-                last_exc = exc
-        raise last_exc or TwsDisconnected()
+        self._submit(
+            self._ensure_connected_impl,
+            timeout=self.connect_timeout * RECONNECT_ATTEMPTS + 2.0,
+            what="tws_ensure_connected",
+        )
 
     def underlying_quote(self, symbol: str) -> dict[str, Any]:
         """Snapshot bid/ask/last/close/mid/market_price for a stock/ETF."""
         sym = _require_symbol(symbol)
-        self.ensure_connected()
-        with self._lock:
-            contract = self._qualify_stock_unlocked(sym)
-            snap = self._snapshot_unlocked(contract)
-        return {
-            "symbol": sym,
-            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
-            **snap,
-            "market_price": _market_price(
-                snap.get("last"),
-                snap.get("mid"),
-                snap.get("close"),
-                snap.get("bid"),
-                snap.get("ask"),
-            ),
-        }
+        return self._submit(
+            lambda: self._underlying_quote_impl(sym),
+            what=f"underlying_quote {sym}",
+        )
 
     def option_chain(self, symbol: str) -> dict[str, Any]:
         """
@@ -273,38 +292,10 @@ class ReadOnlyIBSession:
         primary SMART/CBOE-style listing without scanning empty venues.
         """
         sym = _require_symbol(symbol)
-        self.ensure_connected()
-        with self._lock:
-            ib = self._require_ib_unlocked()
-            stock = self._qualify_stock_unlocked(sym)
-            und_id = int(stock.conId)
-            try:
-                chains = ib.reqSecDefOptParams(sym, "", "STK", und_id)
-            except Exception as exc:
-                raise BridgeError(
-                    "CHAIN_FAILED",
-                    f"reqSecDefOptParams failed for {sym}: {exc}",
-                    status=502,
-                ) from exc
-        exchanges: list[dict[str, Any]] = []
-        for ch in chains or []:
-            expirations = sorted({str(x) for x in (getattr(ch, "expirations", None) or [])})
-            strikes = sorted({float(x) for x in (getattr(ch, "strikes", None) or [])})
-            exchanges.append(
-                {
-                    "exchange": str(getattr(ch, "exchange", "") or ""),
-                    "tradingClass": str(getattr(ch, "tradingClass", "") or ""),
-                    "multiplier": str(getattr(ch, "multiplier", "") or ""),
-                    "expirations": expirations,
-                    "strikes": strikes,
-                }
-            )
-        exchanges.sort(key=lambda row: len(row["strikes"]), reverse=True)
-        return {
-            "symbol": sym,
-            "underlying_conId": und_id,
-            "exchanges": exchanges,
-        }
+        return self._submit(
+            lambda: self._option_chain_impl(sym),
+            what=f"option_chain {sym}",
+        )
 
     def qualify_contracts(self, specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Qualify option specs; each row gets conId/ok/error (no 500 on one miss)."""
@@ -316,12 +307,10 @@ class ReadOnlyIBSession:
                 f"at most {MAX_QUALIFY_CONTRACTS} contracts per qualify call",
                 status=400,
             )
-        self.ensure_connected()
-        out: list[dict[str, Any]] = []
-        with self._lock:
-            for spec in specs:
-                out.append(self._qualify_one_unlocked(spec))
-        return out
+        return self._submit(
+            lambda: self._qualify_contracts_impl(specs),
+            what="qualify_contracts",
+        )
 
     def option_quote(
         self,
@@ -335,9 +324,8 @@ class ReadOnlyIBSession:
         currency: str = "USD",
     ) -> dict[str, Any]:
         """Single option (or stock-by-conId) snapshot."""
-        self.ensure_connected()
-        with self._lock:
-            contract = self._resolve_contract_unlocked(
+        return self._submit(
+            lambda: self._option_quote_impl(
                 con_id=con_id,
                 symbol=symbol,
                 expiry=expiry,
@@ -345,16 +333,9 @@ class ReadOnlyIBSession:
                 right=right,
                 exchange=exchange,
                 currency=currency,
-            )
-            snap = self._snapshot_unlocked(contract)
-        return {
-            "symbol": str(getattr(contract, "symbol", "") or symbol or ""),
-            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
-            "expiry": str(getattr(contract, "lastTradeDateOrContractMonth", "") or expiry or ""),
-            "strike": _finite(getattr(contract, "strike", None)) if hasattr(contract, "strike") else None,
-            "right": str(getattr(contract, "right", "") or right or ""),
-            **snap,
-        }
+            ),
+            what="option_quote",
+        )
 
     def option_quotes(self, con_ids: list[int]) -> list[dict[str, Any]]:
         """Batch snapshots by conId. Paced to stay under TWS snapshot load."""
@@ -366,31 +347,10 @@ class ReadOnlyIBSession:
                 f"at most {MAX_BATCH_QUOTES} conIds per quotes call",
                 status=400,
             )
-        self.ensure_connected()
-        rows: list[dict[str, Any]] = []
-        with self._lock:
-            for i, raw_id in enumerate(con_ids):
-                try:
-                    cid = int(raw_id)
-                    contract = self._qualify_conid_unlocked(cid)
-                    snap = self._snapshot_unlocked(contract)
-                    rows.append({"conId": cid, "ok": True, "error": None, **snap})
-                except BridgeError as exc:
-                    rows.append(
-                        {
-                            "conId": raw_id,
-                            "ok": False,
-                            "error": exc.message,
-                            "bid": None,
-                            "ask": None,
-                            "last": None,
-                            "close": None,
-                            "mid": None,
-                        }
-                    )
-                if i + 1 < len(con_ids):
-                    time.sleep(INTER_QUOTE_SLEEP_SEC)
-        return rows
+        return self._submit(
+            lambda: self._option_quotes_impl(con_ids),
+            what="option_quotes",
+        )
 
     def hist_bars(
         self,
@@ -413,84 +373,23 @@ class ReadOnlyIBSession:
 
         Default what=MIDPOINT / bar_size=1 hour matches Phase 9A.
         """
-        self.ensure_connected()
-        with self._lock:
-            ib = self._require_ib_unlocked()
-            if con_id:
-                contract = self._qualify_conid_unlocked(int(con_id))
-            elif (sec_type or "").upper() in {"STK", "STOCK", ""} and not expiry:
-                if not symbol:
-                    raise BridgeError(
-                        "BAD_REQUEST",
-                        "hist requires conId or symbol (+ option fields if OPT)",
-                        status=400,
-                    )
-                contract = self._qualify_stock_unlocked(_require_symbol(symbol))
-            else:
-                contract = self._resolve_contract_unlocked(
-                    con_id=con_id,
-                    symbol=symbol,
-                    expiry=expiry,
-                    strike=strike,
-                    right=right,
-                    exchange=exchange,
-                    currency=currency,
-                )
-            try:
-                bars = ib.reqHistoricalData(
-                    contract,
-                    endDateTime="",
-                    durationStr=duration,
-                    barSizeSetting=bar_size,
-                    whatToShow=what,
-                    useRTH=bool(use_rth),
-                    formatDate=1,
-                    timeout=REQUEST_TIMEOUT_SEC,
-                )
-            except TypeError:
-                # Older ib_insync has no timeout kwarg — still bound connect; don't loop.
-                try:
-                    bars = ib.reqHistoricalData(
-                        contract,
-                        endDateTime="",
-                        durationStr=duration,
-                        barSizeSetting=bar_size,
-                        whatToShow=what,
-                        useRTH=bool(use_rth),
-                        formatDate=1,
-                    )
-                except Exception as exc:
-                    raise BridgeError(
-                        "HIST_FAILED",
-                        f"reqHistoricalData failed: {exc}",
-                        status=502,
-                    ) from exc
-            except Exception as exc:
-                raise BridgeError(
-                    "HIST_FAILED",
-                    f"reqHistoricalData failed: {exc}",
-                    status=502,
-                ) from exc
-        out_bars = []
-        for bar in bars or []:
-            out_bars.append(
-                {
-                    "ts": _bar_ts(bar),
-                    "open": _finite(getattr(bar, "open", None)),
-                    "high": _finite(getattr(bar, "high", None)),
-                    "low": _finite(getattr(bar, "low", None)),
-                    "close": _finite(getattr(bar, "close", None)),
-                }
-            )
-        return {
-            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
-            "symbol": str(getattr(contract, "symbol", "") or symbol or ""),
-            "bar_size": bar_size,
-            "duration": duration,
-            "what": what,
-            "use_rth": bool(use_rth),
-            "bars": out_bars,
-        }
+        return self._submit(
+            lambda: self._hist_bars_impl(
+                con_id=con_id,
+                symbol=symbol,
+                expiry=expiry,
+                strike=strike,
+                right=right,
+                sec_type=sec_type,
+                bar_size=bar_size,
+                duration=duration,
+                what=what,
+                use_rth=use_rth,
+                exchange=exchange,
+                currency=currency,
+            ),
+            what="hist_bars",
+        )
 
     def put_credit_snapshot(
         self,
@@ -509,9 +408,29 @@ class ReadOnlyIBSession:
         """
         if dte_min < 0 or dte_max < 0 or dte_min > dte_max:
             raise BridgeError("BAD_REQUEST", "dte_min/dte_max must satisfy 0 <= min <= max", status=400)
+        return self._submit(
+            lambda: self._put_credit_impl(
+                symbol=symbol,
+                und_px=und_px,
+                dte_min=dte_min,
+                dte_max=dte_max,
+                short_moneyness=short_moneyness,
+            ),
+            what="put_credit_snapshot",
+        )
+
+    def _put_credit_impl(
+        self,
+        *,
+        symbol: str,
+        und_px: float | None,
+        dte_min: int,
+        dte_max: int,
+        short_moneyness: float,
+    ) -> dict[str, Any]:
         quote = None
         if und_px is None:
-            quote = self.underlying_quote(symbol)
+            quote = self._underlying_quote_impl(symbol)
             mark = quote.get("market_price")
             if mark is None:
                 raise BridgeError(
@@ -522,7 +441,7 @@ class ReadOnlyIBSession:
             und_px = float(mark)
         else:
             und_px = float(und_px)
-        chain = self.option_chain(symbol)
+        chain = self._option_chain_impl(symbol)
         exchanges = chain.get("exchanges") or []
         if not exchanges:
             raise BridgeError("CHAIN_EMPTY", f"no option exchanges for {symbol}", status=502)
@@ -541,7 +460,7 @@ class ReadOnlyIBSession:
                 status=502,
             )
         exchange = str(primary.get("exchange") or "SMART")
-        qualified = self.qualify_contracts(
+        qualified = self._qualify_contracts_impl(
             [
                 {
                     "symbol": symbol,
@@ -567,8 +486,8 @@ class ReadOnlyIBSession:
                 f"put legs: short={short_q.get('error')} long={long_q.get('error')}",
                 status=502,
             )
-        short_px = self.option_quote(con_id=int(short_q["conId"]))
-        long_px = self.option_quote(con_id=int(long_q["conId"]))
+        short_px = self._option_quote_impl(con_id=int(short_q["conId"]))
+        long_px = self._option_quote_impl(con_id=int(long_q["conId"]))
         short_mid = short_px.get("mid")
         long_mid = long_px.get("mid")
         credit = None
@@ -598,11 +517,314 @@ class ReadOnlyIBSession:
             "width": float(short_k) - float(long_k),
         }
 
-    # ----- internals (lock already held unless noted) -----
+    # ----- IB worker + timeouts (never block /v1/health) -----
+
+    def _ib_worker_loop(self) -> None:
+        """Single thread that owns ib_insync. HTTP threads only wait on Futures."""
+        while not self._stop.is_set():
+            try:
+                item = self._jobs.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            if item is None:
+                return
+            fn, fut = item
+            try:
+                fut.set_result(fn())
+            except BaseException as exc:
+                fut.set_exception(exc)
+
+    def _submit(self, fn: Callable[[], T], *, timeout: float | None = None, what: str = "TWS request") -> T:
+        """
+        Run fn on the IB thread. HTTP callers wait at most REQUEST_TIMEOUT_SEC.
+
+        Nested calls from the IB thread run inline (no self-deadlock).
+        """
+        cap = float(timeout if timeout is not None else request_timeout_sec())
+        if threading.current_thread() is self._ib_thread:
+            return fn()
+        fut: Future = Future()
+        self._jobs.put((fn, fut))
+        try:
+            return fut.result(timeout=cap)
+        except FuturesTimeout as exc:
+            self._abandon_hung_socket(what)
+            raise TwsTimeout(
+                f"{what} exceeded {cap:.1f}s (TWS did not finish; retry when paper MD responds)"
+            ) from exc
+
+    def _watchdog(self, fn: Callable[[], T], *, timeout: float | None = None, what: str = "TWS request") -> T:
+        """
+        Bound one IB primitive on the IB thread.
+
+        A Timer disconnects the socket if fn does not return — that is how we
+        unblock reqSecDefOptParams / qualifyContracts / reqMktData with no timeout kwarg.
+        """
+        cap = float(timeout if timeout is not None else request_timeout_sec())
+        timed_out = threading.Event()
+
+        def kill() -> None:
+            timed_out.set()
+            self._abandon_hung_socket(what)
+
+        timer = threading.Timer(cap, kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            result = fn()
+        except Exception as exc:
+            if timed_out.is_set():
+                raise TwsTimeout(f"{what} exceeded {cap:.1f}s") from exc
+            raise
+        finally:
+            timer.cancel()
+        if timed_out.is_set():
+            raise TwsTimeout(f"{what} exceeded {cap:.1f}s")
+        return result
+
+    def _abandon_hung_socket(self, what: str) -> None:
+        """Drop the TWS socket from a non-IB thread so a hung call can unblock."""
+        with self._state_lock:
+            raw = self._raw_ib
+            self._raw_ib = None
+            self._ib = None
+            self._accounts_n = 0
+            self._connected_flag = False
+        if raw is None:
+            return
+        try:
+            raw.disconnect()
+        except Exception:
+            pass
+
+    def _ensure_connected_impl(self) -> None:
+        if self._connected_flag and self._raw_ib is not None:
+            try:
+                if self._raw_ib.isConnected():
+                    return
+            except Exception:
+                pass
+        last_exc: Exception | None = None
+        for _attempt in range(RECONNECT_ATTEMPTS):
+            try:
+                self._connect_unlocked()
+                return
+            except TwsDisconnected as exc:
+                last_exc = exc
+        raise last_exc or TwsDisconnected()
+
+    def _underlying_quote_impl(self, sym: str) -> dict[str, Any]:
+        self._ensure_connected_impl()
+        contract = self._qualify_stock_unlocked(sym)
+        snap = self._snapshot_unlocked(contract)
+        return {
+            "symbol": sym,
+            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
+            **snap,
+            "market_price": _market_price(
+                snap.get("last"),
+                snap.get("mid"),
+                snap.get("close"),
+                snap.get("bid"),
+                snap.get("ask"),
+            ),
+        }
+
+    def _option_chain_impl(self, sym: str) -> dict[str, Any]:
+        self._ensure_connected_impl()
+        ib = self._require_ib_unlocked()
+        stock = self._qualify_stock_unlocked(sym)
+        und_id = int(stock.conId)
+        try:
+            chains = self._watchdog(
+                lambda: ib.reqSecDefOptParams(sym, "", "STK", und_id),
+                what=f"reqSecDefOptParams {sym}",
+            )
+        except TwsTimeout:
+            raise
+        except Exception as exc:
+            raise BridgeError(
+                "CHAIN_FAILED",
+                f"reqSecDefOptParams failed for {sym}: {exc}",
+                status=502,
+            ) from exc
+        exchanges: list[dict[str, Any]] = []
+        for ch in chains or []:
+            expirations = sorted({str(x) for x in (getattr(ch, "expirations", None) or [])})
+            strikes = sorted({float(x) for x in (getattr(ch, "strikes", None) or [])})
+            exchanges.append(
+                {
+                    "exchange": str(getattr(ch, "exchange", "") or ""),
+                    "tradingClass": str(getattr(ch, "tradingClass", "") or ""),
+                    "multiplier": str(getattr(ch, "multiplier", "") or ""),
+                    "expirations": expirations,
+                    "strikes": strikes,
+                }
+            )
+        exchanges.sort(key=lambda row: len(row["strikes"]), reverse=True)
+        return {
+            "symbol": sym,
+            "underlying_conId": und_id,
+            "exchanges": exchanges,
+        }
+
+    def _qualify_contracts_impl(self, specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._ensure_connected_impl()
+        return [self._qualify_one_unlocked(spec) for spec in specs]
+
+    def _option_quote_impl(
+        self,
+        *,
+        con_id: int | None = None,
+        symbol: str | None = None,
+        expiry: str | None = None,
+        strike: float | None = None,
+        right: str | None = None,
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> dict[str, Any]:
+        self._ensure_connected_impl()
+        contract = self._resolve_contract_unlocked(
+            con_id=con_id,
+            symbol=symbol,
+            expiry=expiry,
+            strike=strike,
+            right=right,
+            exchange=exchange,
+            currency=currency,
+        )
+        snap = self._snapshot_unlocked(contract)
+        return {
+            "symbol": str(getattr(contract, "symbol", "") or symbol or ""),
+            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
+            "expiry": str(getattr(contract, "lastTradeDateOrContractMonth", "") or expiry or ""),
+            "strike": _finite(getattr(contract, "strike", None)) if hasattr(contract, "strike") else None,
+            "right": str(getattr(contract, "right", "") or right or ""),
+            **snap,
+        }
+
+    def _option_quotes_impl(self, con_ids: list[int]) -> list[dict[str, Any]]:
+        self._ensure_connected_impl()
+        rows: list[dict[str, Any]] = []
+        for i, raw_id in enumerate(con_ids):
+            try:
+                cid = int(raw_id)
+                contract = self._qualify_conid_unlocked(cid)
+                snap = self._snapshot_unlocked(contract)
+                rows.append({"conId": cid, "ok": True, "error": None, **snap})
+            except BridgeError as exc:
+                rows.append(
+                    {
+                        "conId": raw_id,
+                        "ok": False,
+                        "error": exc.message,
+                        "bid": None,
+                        "ask": None,
+                        "last": None,
+                        "close": None,
+                        "mid": None,
+                    }
+                )
+            if i + 1 < len(con_ids):
+                time.sleep(INTER_QUOTE_SLEEP_SEC)
+        return rows
+
+    def _hist_bars_impl(
+        self,
+        *,
+        con_id: int | None,
+        symbol: str | None,
+        expiry: str | None,
+        strike: float | None,
+        right: str | None,
+        sec_type: str | None,
+        bar_size: str,
+        duration: str,
+        what: str,
+        use_rth: bool,
+        exchange: str,
+        currency: str,
+    ) -> dict[str, Any]:
+        self._ensure_connected_impl()
+        ib = self._require_ib_unlocked()
+        if con_id:
+            contract = self._qualify_conid_unlocked(int(con_id))
+        elif (sec_type or "").upper() in {"STK", "STOCK", ""} and not expiry:
+            if not symbol:
+                raise BridgeError(
+                    "BAD_REQUEST",
+                    "hist requires conId or symbol (+ option fields if OPT)",
+                    status=400,
+                )
+            contract = self._qualify_stock_unlocked(_require_symbol(symbol))
+        else:
+            contract = self._resolve_contract_unlocked(
+                con_id=con_id,
+                symbol=symbol,
+                expiry=expiry,
+                strike=strike,
+                right=right,
+                exchange=exchange,
+                currency=currency,
+            )
+
+        def _hist() -> Any:
+            try:
+                return ib.reqHistoricalData(
+                    contract,
+                    endDateTime="",
+                    durationStr=duration,
+                    barSizeSetting=bar_size,
+                    whatToShow=what,
+                    useRTH=bool(use_rth),
+                    formatDate=1,
+                    timeout=request_timeout_sec(),
+                )
+            except TypeError:
+                return ib.reqHistoricalData(
+                    contract,
+                    endDateTime="",
+                    durationStr=duration,
+                    barSizeSetting=bar_size,
+                    whatToShow=what,
+                    useRTH=bool(use_rth),
+                    formatDate=1,
+                )
+
+        try:
+            bars = self._watchdog(_hist, what="reqHistoricalData")
+        except TwsTimeout:
+            raise
+        except Exception as exc:
+            raise BridgeError("HIST_FAILED", f"reqHistoricalData failed: {exc}", status=502) from exc
+        out_bars = []
+        for bar in bars or []:
+            out_bars.append(
+                {
+                    "ts": _bar_ts(bar),
+                    "open": _finite(getattr(bar, "open", None)),
+                    "high": _finite(getattr(bar, "high", None)),
+                    "low": _finite(getattr(bar, "low", None)),
+                    "close": _finite(getattr(bar, "close", None)),
+                }
+            )
+        return {
+            "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
+            "symbol": str(getattr(contract, "symbol", "") or symbol or ""),
+            "bar_size": bar_size,
+            "duration": duration,
+            "what": what,
+            "use_rth": bool(use_rth),
+            "bars": out_bars,
+        }
 
     def _connect_unlocked(self) -> None:
-        if self.connected:
-            return
+        if self._connected_flag and self._raw_ib is not None:
+            try:
+                if self._raw_ib.isConnected():
+                    return
+            except Exception:
+                pass
         self._disconnect_unlocked()
         try:
             from ib_insync import IB, util
@@ -653,17 +875,22 @@ class ReadOnlyIBSession:
             raise TwsDisconnected("TWS connect returned but isConnected() is false.")
         try:
             accounts = list(raw.managedAccounts() or [])
-            self._accounts_n = len(accounts)
+            accounts_n = len(accounts)
         except Exception:
-            self._accounts_n = 0
-        self._raw_ib = raw
-        self._ib = _OrderBlockedIB(raw)
+            accounts_n = 0
+        with self._state_lock:
+            self._raw_ib = raw
+            self._ib = _OrderBlockedIB(raw)
+            self._accounts_n = accounts_n
+            self._connected_flag = True
 
     def _disconnect_unlocked(self) -> None:
-        raw = self._raw_ib
-        self._ib = None
-        self._raw_ib = None
-        self._accounts_n = 0
+        with self._state_lock:
+            raw = self._raw_ib
+            self._ib = None
+            self._raw_ib = None
+            self._accounts_n = 0
+            self._connected_flag = False
         if raw is None:
             return
         try:
@@ -672,7 +899,7 @@ class ReadOnlyIBSession:
             pass
 
     def _require_ib_unlocked(self) -> Any:
-        if not self.connected or self._ib is None:
+        if self._ib is None or not self._connected_flag:
             raise TwsDisconnected()
         return self._ib
 
@@ -681,7 +908,10 @@ class ReadOnlyIBSession:
 
         ib = self._require_ib_unlocked()
         contract = Stock(symbol, "SMART", "USD")
-        qualified = ib.qualifyContracts(contract)
+        qualified = self._watchdog(
+            lambda: ib.qualifyContracts(contract),
+            what=f"qualifyContracts {symbol}",
+        )
         if not qualified:
             raise BridgeError("QUALIFY_FAILED", f"could not qualify stock {symbol}", status=502)
         return qualified[0]
@@ -691,7 +921,10 @@ class ReadOnlyIBSession:
 
         ib = self._require_ib_unlocked()
         contract = Contract(conId=int(con_id))
-        qualified = ib.qualifyContracts(contract)
+        qualified = self._watchdog(
+            lambda: ib.qualifyContracts(contract),
+            what=f"qualifyContracts conId={con_id}",
+        )
         if not qualified:
             raise BridgeError("QUALIFY_FAILED", f"could not qualify conId={con_id}", status=502)
         return qualified[0]
@@ -726,7 +959,10 @@ class ReadOnlyIBSession:
             exchange or "SMART",
             currency=currency or "USD",
         )
-        qualified = ib.qualifyContracts(contract)
+        qualified = self._watchdog(
+            lambda: ib.qualifyContracts(contract),
+            what=f"qualifyContracts {_require_symbol(symbol)} {expiry} {strike}{right}",
+        )
         if not qualified:
             raise BridgeError(
                 "QUALIFY_FAILED",
@@ -777,14 +1013,31 @@ class ReadOnlyIBSession:
         ib = self._require_ib_unlocked()
         ticker = None
         try:
-            ticker = ib.reqMktData(contract, "", False, False)
-            ib.sleep(SNAPSHOT_WAIT_SEC)
+            ticker = self._watchdog(
+                lambda: ib.reqMktData(contract, "", False, False),
+                what="reqMktData",
+            )
+            wait = getattr(ib, "waitOnUpdate", None)
+            if callable(wait):
+                wait(timeout=SNAPSHOT_WAIT_SEC)
+            else:
+                # Wall-clock poll — do not use ib.sleep (can deadlock off-loop).
+                deadline = time.monotonic() + SNAPSHOT_WAIT_SEC
+                while time.monotonic() < deadline:
+                    if any(
+                        _finite(getattr(ticker, attr, None))
+                        for attr in ("last", "close", "bid", "ask")
+                    ):
+                        break
+                    time.sleep(0.05)
             bid = _finite(getattr(ticker, "bid", None))
             ask = _finite(getattr(ticker, "ask", None))
             last = _finite(getattr(ticker, "last", None))
             close = _finite(getattr(ticker, "close", None))
             mid = _mid(bid, ask)
             return {"bid": bid, "ask": ask, "last": last, "close": close, "mid": mid}
+        except TwsTimeout:
+            raise
         except Exception as exc:
             raise BridgeError("QUOTE_FAILED", f"reqMktData failed: {exc}", status=502) from exc
         finally:

@@ -42,7 +42,12 @@ from options_bridge.config import (  # noqa: E402
     validate_bind_host,
     validate_client_id,
 )
-from options_bridge.errors import BridgeError, OrderRouteForbidden, TwsDisconnected  # noqa: E402
+from options_bridge.errors import (  # noqa: E402
+    BridgeError,
+    OrderRouteForbidden,
+    TwsDisconnected,
+    TwsTimeout,
+)
 from options_bridge.ib_session import ReadOnlyIBSession, _parse_bool  # noqa: E402
 
 
@@ -176,6 +181,8 @@ def _handle_get(
                 currency=_qfirst(query, "currency") or "USD",
             )
             return 200, success_envelope(data)
+    except TwsTimeout as exc:
+        return exc.status, error_envelope(exc.code, exc.message)
     except TwsDisconnected as exc:
         return exc.status, error_envelope(exc.code, exc.message)
     except BridgeError as exc:
@@ -210,6 +217,8 @@ def _handle_post(
                 short_moneyness=float(body.get("short_moneyness")),
             )
             return 200, success_envelope(data)
+    except TwsTimeout as exc:
+        return exc.status, error_envelope(exc.code, exc.message)
     except TwsDisconnected as exc:
         return exc.status, error_envelope(exc.code, exc.message)
     except BridgeError as exc:
@@ -266,6 +275,8 @@ class OptionsBridgeHandler(BaseHTTPRequestHandler):
             return
         try:
             status, payload = handle_request(method, path, query, body, session)
+        except TwsTimeout as exc:
+            status, payload = exc.status, error_envelope(exc.code, exc.message)
         except TwsDisconnected as exc:
             status, payload = exc.status, error_envelope(exc.code, exc.message)
         except BridgeError as exc:
@@ -310,7 +321,12 @@ class OptionsBridgeHandler(BaseHTTPRequestHandler):
 
 
 class OptionsBridgeServer(ThreadingHTTPServer):
-    """Threading HTTP server that holds the read-only IB session."""
+    """
+    Threading HTTP server that holds the read-only IB session.
+
+    WHY ThreadingHTTPServer: a hung MD/secdef call on one worker must not
+    stall /v1/health or order-refuse on another worker.
+    """
 
     allow_reuse_address = True
     daemon_threads = True
@@ -412,7 +428,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{utc_now_iso()}] shutting down", flush=True)
     finally:
         try:
-            session.disconnect()
+            closer = getattr(session, "close", None) or session.disconnect
+            closer()
         except Exception:
             pass
         server.server_close()

@@ -33,7 +33,8 @@ From repo root, using the project venv:
 
 Env overrides (still validated): `OPTIONS_BRIDGE_PORT`, `OPTIONS_BRIDGE_HOST`
 (loopback only), `OPTIONS_BRIDGE_CLIENT_ID` (rejects reserved ids),
-`OPTIONS_BRIDGE_TWS_HOST`, `OPTIONS_BRIDGE_TWS_PORT`.
+`OPTIONS_BRIDGE_TWS_HOST`, `OPTIONS_BRIDGE_TWS_PORT`,
+`OPTIONS_BRIDGE_REQUEST_TIMEOUT` (seconds, default 20).
 
 TWS must be logged into **paper**, **Enable ActiveX and Socket Clients** on,
 socket port **7497**. Confirm clientId **71** is unused in TWS API settings.
@@ -52,6 +53,14 @@ Error (TWS down → HTTP 503 on data routes; health still 200):
 {"ok": false, "error": {"code": "TWS_DISCONNECTED", "message": "TWS paper API is not connected (127.0.0.1:7497)."}}
 ```
 
+Hung qualify / snapshot / `reqSecDefOptParams` / hist (weekend MD) → HTTP **504** within `REQUEST_TIMEOUT_SEC` (default 20s). The client must not wait 60–95s:
+
+```json
+{"ok": false, "error": {"code": "TWS_TIMEOUT", "message": "underlying_quote SPY exceeded 20.0s (TWS did not finish; retry when paper MD responds)"}}
+```
+
+`/v1/health` never waits on the IB worker thread (`ThreadingHTTPServer` + lock-free health flag), so a hung quote/chain cannot block health.
+
 `ts_utc` is ISO-8601 UTC. Health `data` never includes account ids.
 
 ## Endpoints
@@ -60,7 +69,8 @@ Base: `http://127.0.0.1:8787`
 
 ### `GET /v1/health`
 
-Service up. Reports TWS socket state. No secrets.
+Service up. Reports TWS socket state. No secrets. Does **not** call into
+`ib_insync` (safe while a quote/chain is in flight or hung).
 
 Query: none.
 

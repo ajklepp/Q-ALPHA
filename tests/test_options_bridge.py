@@ -9,7 +9,9 @@ import ast
 import json
 import sys
 import threading
+import time
 import unittest
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -21,6 +23,7 @@ sys.path.insert(0, str(CAND))
 from options_bridge.config import (  # noqa: E402
     BIND_HOST,
     DEFAULT_PORT,
+    REQUEST_TIMEOUT_SEC,
     RESERVED_CLIENT_IDS,
     TWS_CLIENT_ID,
     TWS_PORT,
@@ -28,8 +31,9 @@ from options_bridge.config import (  # noqa: E402
     validate_bind_host,
     validate_client_id,
 )
-from options_bridge.errors import BridgeError, TwsDisconnected  # noqa: E402
+from options_bridge.errors import BridgeError, TwsDisconnected, TwsTimeout  # noqa: E402
 from options_bridge.ib_session import (  # noqa: E402
+    ReadOnlyIBSession,
     _OrderBlockedIB,
     _next_lower_strike,
     _nearest_strike_at_or_below,
@@ -236,6 +240,7 @@ class TestConstantsAndGuards(unittest.TestCase):
         self.assertEqual(validate_bind_host("127.0.0.1"), "127.0.0.1")
         self.assertEqual(validate_bind_host("localhost"), "127.0.0.1")
         self.assertEqual(validate_client_id(71), 71)
+        self.assertEqual(REQUEST_TIMEOUT_SEC, 20.0)
 
     def test_refuse_non_loopback_bind(self) -> None:
         with self.assertRaises(ValueError):
@@ -418,6 +423,24 @@ class TestEnvelopeAndRouter(unittest.TestCase):
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["error"]["code"], "TWS_DISCONNECTED")
 
+    def test_data_route_504_on_tws_timeout(self) -> None:
+        class TimeoutSession(FakeSession):
+            def underlying_quote(self, symbol: str) -> dict:
+                raise TwsTimeout("underlying_quote SPY exceeded 20.0s")
+
+            def option_chain(self, symbol: str) -> dict:
+                raise TwsTimeout("reqSecDefOptParams SPY exceeded 20.0s")
+
+        sess = TimeoutSession()
+        for path in ("/v1/underlying/quote", "/v1/options/chain"):
+            status, payload = handle_request(
+                "GET", path, {"symbol": ["SPY"]}, None, sess
+            )
+            self.assertEqual(status, 504, path)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "TWS_TIMEOUT")
+            self.assertIn("exceeded", payload["error"]["message"])
+
     def test_old_sketch_paths_are_gone(self) -> None:
         for path in ("/health", "/v1/option-chain", "/v1/underlying", "/v1/hist-bars"):
             status, payload = handle_request("GET", path, {"symbol": ["SPY"]}, None, FakeSession())
@@ -524,8 +547,61 @@ class TestIsolationAndNoOrders(unittest.TestCase):
         self.assertIn("ORDER", getattr(ctx.exception, "code", "") or str(ctx.exception))
 
 
+class TestBoundedIbWaits(unittest.TestCase):
+    """Timeouts without TWS — hang a dummy job, never ib.connect."""
+
+    def test_submit_times_out_instead_of_hanging(self) -> None:
+        session = ReadOnlyIBSession()
+        release = threading.Event()
+        try:
+
+            def hang() -> None:
+                release.wait(timeout=30)
+
+            t0 = time.monotonic()
+            with self.assertRaises(TwsTimeout) as ctx:
+                session._submit(hang, timeout=0.3, what="hang-test")
+            elapsed = time.monotonic() - t0
+            self.assertLess(elapsed, 2.0)
+            self.assertEqual(ctx.exception.code, "TWS_TIMEOUT")
+            self.assertEqual(ctx.exception.status, 504)
+        finally:
+            release.set()
+            session.close()
+
+    def test_health_payload_not_blocked_by_hung_job(self) -> None:
+        session = ReadOnlyIBSession()
+        started = threading.Event()
+        release = threading.Event()
+        try:
+
+            def hang() -> None:
+                started.set()
+                release.wait(timeout=30)
+
+            worker = threading.Thread(
+                target=lambda: session._submit(hang, timeout=1.5, what="hang-health"),
+                daemon=True,
+            )
+            worker.start()
+            self.assertTrue(started.wait(timeout=1.0))
+            t0 = time.monotonic()
+            payload = session.health_payload()
+            self.assertLess(time.monotonic() - t0, 0.4)
+            self.assertIn("tws_connected", payload)
+            self.assertIn("client_id", payload)
+            release.set()
+            worker.join(timeout=3.0)
+        finally:
+            release.set()
+            session.close()
+
+
 class TestHttpLoopback(unittest.TestCase):
     """Spin a real stdlib server on 127.0.0.1 — still no TWS."""
+
+    def test_server_is_threading(self) -> None:
+        self.assertTrue(issubclass(OptionsBridgeServer, ThreadingHTTPServer))
 
     def test_http_health_and_order_refuse(self) -> None:
         session = FakeSession()
@@ -553,6 +629,42 @@ class TestHttpLoopback(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 405)
             err_body = json.loads(ctx.exception.read().decode("utf-8"))
             self.assertEqual(err_body["error"]["code"], "ORDER_ROUTE_FORBIDDEN")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_http_health_stays_up_while_quote_is_slow(self) -> None:
+        class SlowSession(FakeSession):
+            def underlying_quote(self, symbol: str) -> dict:
+                time.sleep(1.5)
+                return super().underlying_quote(symbol)
+
+        session = SlowSession()
+        server = OptionsBridgeServer(("127.0.0.1", 0), session)
+        _host, port = server.server_address[:2]
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+        thread.daemon = True
+        thread.start()
+        quote_err: list[BaseException] = []
+
+        def _quote() -> None:
+            try:
+                urlopen(f"http://127.0.0.1:{port}/v1/underlying/quote?symbol=SPY", timeout=3)
+            except BaseException as exc:  # noqa: BLE001 — collect for the test thread
+                quote_err.append(exc)
+
+        try:
+            qthread = threading.Thread(target=_quote, daemon=True)
+            qthread.start()
+            time.sleep(0.15)
+            t0 = time.monotonic()
+            with urlopen(f"http://127.0.0.1:{port}/v1/health", timeout=0.6) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            self.assertLess(time.monotonic() - t0, 0.6)
+            self.assertTrue(body["ok"])
+            self.assertEqual(body["data"]["client_id"], 71)
+            qthread.join(timeout=3.0)
         finally:
             server.shutdown()
             server.server_close()

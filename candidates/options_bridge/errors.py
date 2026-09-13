@@ -27,6 +27,13 @@ class TwsDisconnected(BridgeError):
         super().__init__("TWS_DISCONNECTED", message, status=503)
 
 
+class TwsTimeout(BridgeError):
+    """An IB call did not finish within REQUEST_TIMEOUT_SEC — never hang the HTTP client."""
+
+    def __init__(self, message: str = "TWS request timed out.") -> None:
+        super().__init__("TWS_TIMEOUT", message, status=504)
+
+
 class OrderRouteForbidden(BridgeError):
     """Any order-like path is refused. This process never calls placeOrder."""
 

@@ -30,11 +30,11 @@ BSF_CLIENT_ID_RANGES = (
     range(39100, 39200),
 )
 
-# Connect / request bounds — never hang forever when TWS is down.
+# Connect / request bounds — never hang forever when TWS is down / weekend MD.
 CONNECT_TIMEOUT_SEC = 8.0
-REQUEST_TIMEOUT_SEC = 20.0
+REQUEST_TIMEOUT_SEC = 20.0  # qualify / snapshot / secdef / hist — hard cap
 RECONNECT_ATTEMPTS = 2
-SNAPSHOT_WAIT_SEC = 1.25
+SNAPSHOT_WAIT_SEC = 1.25  # bounded waitOnUpdate; empty ticks are OK, hang is not
 INTER_QUOTE_SLEEP_SEC = 0.15
 MAX_BODY_BYTES = 256 * 1024
 MAX_QUALIFY_CONTRACTS = 40
@@ -80,6 +80,14 @@ ALLOWED_GET_PATHS = frozenset(
         "/v1/options/hist",
     }
 )
+
+
+def request_timeout_sec() -> float:
+    """REQUEST_TIMEOUT_SEC, optionally overridden by OPTIONS_BRIDGE_REQUEST_TIMEOUT."""
+    raw = os.environ.get("OPTIONS_BRIDGE_REQUEST_TIMEOUT")
+    if raw is None or str(raw).strip() == "":
+        return float(REQUEST_TIMEOUT_SEC)
+    return float(raw)
 
 
 def env_int(name: str, default: int) -> int:
