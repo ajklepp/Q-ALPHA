@@ -125,9 +125,9 @@ def test_book_pressure_deltas_and_flicker() -> None:
     snaps = [
         (t0 + timedelta(seconds=0), [BookLevel(10.00, 50)], [BookLevel(10.02, 10)]),
         (t0 + timedelta(seconds=1), [BookLevel(10.00, 50)], [BookLevel(10.02, 10)]),
-        (t0 + timedelta(seconds=2), [BookLevel(10.01, 10)], [BookLevel(10.03, 50)]),
-        (t0 + timedelta(seconds=3), [BookLevel(10.00, 10)], [BookLevel(10.02, 50)]),
-        (t0 + timedelta(seconds=4), [BookLevel(10.01, 10)], [BookLevel(10.03, 50)]),
+        (t0 + timedelta(seconds=5), [BookLevel(10.01, 10)], [BookLevel(10.03, 50)]),
+        (t0 + timedelta(seconds=6), [BookLevel(10.00, 10)], [BookLevel(10.02, 50)]),
+        (t0 + timedelta(seconds=7), [BookLevel(10.01, 10)], [BookLevel(10.03, 50)]),
     ]
     last = None
     for ts, bids, asks in snaps:
