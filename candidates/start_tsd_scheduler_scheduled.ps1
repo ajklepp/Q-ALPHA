@@ -13,6 +13,7 @@ Set-Location -LiteralPath $Root
 
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
+$env:PYTHONUNBUFFERED = "1"
 $env:PYTHONPATH = $Root
 
 $Python = Join-Path $Root "venv\Scripts\python.exe"

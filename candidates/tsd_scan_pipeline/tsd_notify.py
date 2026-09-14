@@ -84,16 +84,22 @@ def format_scan_summary(
     htf_pass: int,
     launches_n: int,
     take_n: int,
-    entered_n: int = 0,
+    entered_n: int | None = 0,
     reject_summary: dict[str, Any] | None = None,
     take_symbols: list[str] | None = None,
 ) -> str:
-    """Telegram summary for every live 1H launch scan (including 0 launches)."""
+    """Telegram summary for every live 1H launch scan (including 0 launches).
+
+    entered_n=None means fills are still pending (early SCAN before enter/sync).
+    """
+    ht_line = f"HTF={htf_pass} launches={launches_n} take={take_n}"
+    if entered_n is not None:
+        ht_line += f" entered={entered_n}"
     lines = [
         f"Peak Hour SCAN hour={hour}",
-        f"HTF={htf_pass} launches={launches_n} take={take_n} entered={entered_n}",
+        ht_line,
     ]
-    if take_n:
+    if take_n and entered_n is not None:
         rate = (100.0 * float(entered_n) / float(take_n)) if take_n else 0.0
         lines.append(f"take->entered={rate:.0f}%")
     if take_symbols:

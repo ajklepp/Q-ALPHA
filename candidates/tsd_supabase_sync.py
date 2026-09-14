@@ -745,15 +745,19 @@ def push_dashboard_best_effort(
     mark_fn: Callable | None = None,
     book: dict[str, Any] | None = None,
     telegram_on_fail: bool = False,
+    refresh_missed_peaks: bool = True,
 ) -> dict[str, Any]:
     """
     Best-effort book → Supabase push after entry/exit/queue admit.
 
     Never raises. Optional Telegram if sync fails hard.
+    refresh_missed_peaks: Polygon daily peak refresh for missed_moves (slow;
+    skip on the 1H LAUNCH hot path — still upserts the local ledger).
     """
     try:
         summary = sync_tsd_positions_to_supabase(
             ib, mark_fn=mark_fn, book=book,
+            refresh_missed_peaks=refresh_missed_peaks,
         )
     except Exception as exc:
         print(f"  dashboard sync warn: {exc}")
@@ -786,6 +790,7 @@ def sync_tsd_positions_to_supabase(
     *,
     mark_fn: Callable | None = None,
     book: dict[str, Any] | None = None,
+    refresh_missed_peaks: bool = True,
 ) -> dict[str, Any]:
     """
     Upsert open TSD legs + pool snapshot to Supabase; prune stale OPEN rows.
@@ -921,7 +926,8 @@ def sync_tsd_positions_to_supabase(
     try:
         from tsd_scan_pipeline.php_missed_ledger import _load_ledger, mark_ran_up
 
-        mark_ran_up(days=14, only_missed=True)
+        if refresh_missed_peaks:
+            mark_ran_up(days=14, only_missed=True)
         missed_rows = list((_load_ledger().get("rows") or []))
         summary["missed_synced"] = sync.upsert_tsd_missed_moves(missed_rows)
         print(f"  missed_moves_synced={summary['missed_synced']}")

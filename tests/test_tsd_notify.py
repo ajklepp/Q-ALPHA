@@ -11,6 +11,7 @@ from tsd_scan_pipeline.tsd_notify import (  # noqa: E402
     format_entered,
     format_exited,
     format_queue_skip_summary,
+    format_scan_summary,
     notify_tsd,
 )
 
@@ -26,6 +27,20 @@ def test_formatters() -> None:
     assert "EXITED ABC" in x and "idle_no_1r" in x
     s = format_queue_skip_summary(2, [{"symbol": "ZZ", "status": "SKIPPED", "reason": "full"}])
     assert "0 queue-admitted" in s
+    early = format_scan_summary(
+        hour=10, htf_pass=147, launches_n=3, take_n=2, entered_n=None,
+        reject_summary={"no_1h_buy": 80}, take_symbols=["AAA", "BBB"],
+    )
+    assert "Peak Hour SCAN hour=10" in early
+    assert "HTF=147 launches=3 take=2" in early
+    assert "entered=" not in early
+    assert "take->entered" not in early
+    assert "take: AAA, BBB" in early
+    late = format_scan_summary(
+        hour=10, htf_pass=147, launches_n=3, take_n=2, entered_n=1,
+    )
+    assert "entered=1" in late
+    assert "take->entered=50%" in late
 
 
 if __name__ == "__main__":

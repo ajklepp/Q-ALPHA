@@ -202,7 +202,7 @@ def _trail_backup_allowed(now: datetime) -> bool:
 def tick(*, dry_run: bool = False, live: bool = True) -> int:
     """Evaluate ET schedule and run any due passes."""
     now = datetime.now(ET)
-    print(f"TSD scheduler tick ET={now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"TSD scheduler tick ET={now.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
     if now.weekday() >= 5:
         print("Weekend — tick skipped.")
@@ -213,7 +213,7 @@ def tick(*, dry_run: bool = False, live: bool = True) -> int:
 
     rc = 0
     for bar_hour, sched in _due_slots(now, kind="launch"):
-        print(f"DUE 1H launch bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}")
+        print(f"DUE 1H launch bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}", flush=True)
         if dry_run:
             continue
         rc = max(rc, run_launch_pass(live=live))
