@@ -16,8 +16,11 @@ from typing import Any
 
 from .constants import (
     BOOK_SNAPSHOT_SEC,
+    DEFAULT_DEPTH_MAX,
     DEFAULT_TOP_N,
     DEPTH_SOURCE,
+    DEPTH_SOURCE_L1_ONLY,
+    IB_ACCOUNT_DEPTH_CAP,
     IDLE_POLL_SEC,
     JSONL_ROOT_REL,
     SOURCE_L2,
@@ -26,6 +29,7 @@ from .constants import (
     TWS_HOST,
     TWS_PAPER_PORT,
 )
+from .depth import merge_l1_and_depth_symbols, select_depth_symbols
 from .features import BookHistory, TapeEngine, book_features
 from .ib_worker import IBWorker, assert_paper_endpoint
 from .jsonl_writer import JsonlWriter
@@ -39,23 +43,43 @@ def _utcnow() -> datetime:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """CLI: --symbols override, --top N, RTH-primary unless --allow-extended."""
+    """CLI: --symbols / --top for L1+tape; --depth-max / --depth-symbols for L2."""
     p = argparse.ArgumentParser(
         description=(
             "READ-ONLY Peak Hour microstructure logger (Features A book + B tape). "
-            f"TWS paper {TWS_HOST}:{TWS_PAPER_PORT} clientId {TWS_CLIENT_ID}."
+            f"TWS paper {TWS_HOST}:{TWS_PAPER_PORT} clientId {TWS_CLIENT_ID}. "
+            f"reqMktDepth capped at --depth-max (default {DEFAULT_DEPTH_MAX}; "
+            f"IB Error 309 cap is {IB_ACCOUNT_DEPTH_CAP}). L1/tape is not capped by that."
         )
     )
     p.add_argument(
         "--symbols",
         default="",
-        help="Comma-separated override (skips Peak Hour artifacts).",
+        help="Comma-separated L1/tape override (skips Peak Hour artifacts). Still capped by --top.",
     )
     p.add_argument(
         "--top",
         type=int,
         default=DEFAULT_TOP_N,
-        help=f"Max names to subscribe (default {DEFAULT_TOP_N}).",
+        help=f"Max names for L1/tape reqMktData (default {DEFAULT_TOP_N}). Depth is --depth-max.",
+    )
+    p.add_argument(
+        "--depth-max",
+        type=int,
+        default=DEFAULT_DEPTH_MAX,
+        help=(
+            f"Max concurrent reqMktDepth (default {DEFAULT_DEPTH_MAX}; "
+            f"IB paper Error 309 is {IB_ACCOUNT_DEPTH_CAP}). Does not cap L1/tape."
+        ),
+    )
+    p.add_argument(
+        "--depth-symbols",
+        default="",
+        help=(
+            "Comma-separated depth set, capped by --depth-max. "
+            "Use names that delivered levels_n>=5 in JSONL when known. "
+            "Default: prefer NYSE/ARCA/IEX listings from the L1 universe."
+        ),
     )
     p.add_argument(
         "--allow-extended",
@@ -136,7 +160,12 @@ def _write_pair(
     writer.write(build_row(source=SOURCE_TAPE, **common))
 
 
-def _dry_cycle(symbols: list[str], writer: JsonlWriter) -> int:
+def _dry_cycle(
+    symbols: list[str],
+    writer: JsonlWriter,
+    *,
+    depth_symbols: list[str] | None = None,
+) -> int:
     """Write null-valued schema rows without IB — VM / structure check."""
     now = _utcnow()
     empty_book = {
@@ -161,16 +190,18 @@ def _dry_cycle(symbols: list[str], writer: JsonlWriter) -> int:
         "uptick_ratio_30s": None,
         "tape_burst_z": None,
     }
+    depth_set = {s.upper() for s in (depth_symbols or [])}
     for symbol in symbols:
+        label = DEPTH_SOURCE if symbol.upper() in depth_set else DEPTH_SOURCE_L1_ONLY
         _write_pair(
             writer,
             symbol=symbol,
             now=now,
             book=empty_book,
             tape=empty_tape,
-            depth_source=DEPTH_SOURCE,
+            depth_source=label,
         )
-        print(f"  dry row {symbol} session={session_tag(now)} depth_source={DEPTH_SOURCE}")
+        print(f"  dry row {symbol} session={session_tag(now)} depth_source={label}")
     return 0
 
 
@@ -183,14 +214,32 @@ def run(args: argparse.Namespace) -> int:
         symbols=_parse_symbols(args.symbols),
         top_n=int(args.top),
     )
+    depth_override = _parse_symbols(getattr(args, "depth_symbols", "") or "")
+    depth_max = max(0, int(getattr(args, "depth_max", DEFAULT_DEPTH_MAX)))
+    l1_symbols = merge_l1_and_depth_symbols(uni.symbols, depth_override)
+    planned_depth = select_depth_symbols(
+        l1_symbols,
+        depth_max,
+        depth_symbols=depth_override or None,
+    )
     log_root = Path(args.log_root) if args.log_root else (root / JSONL_ROOT_REL)
     writer = JsonlWriter(log_root)
 
     print("Q-ALPHA microstructure logger — READ-ONLY research (A book + B tape)")
     print(f"  clientId={TWS_CLIENT_ID} host={args.host}:{int(args.port)} (paper)")
-    print(f"  depth_source={DEPTH_SOURCE} (never TotalView; Error 2152 possible)")
+    print(
+        f"  depth-max={depth_max} (IB Error 309 cap={IB_ACCOUNT_DEPTH_CAP}); "
+        "L1/tape not capped by depth-max"
+    )
+    print(
+        f"  depth path=SMART entitled ARCA/NYSE/IEX; "
+        "NASDAQ/BATS/BEX 2152=EXPECTED (no BATS/BEX required; no Telegram)"
+    )
+    print(f"  depth_source default={DEPTH_SOURCE} (never TotalView)")
+    print(f"  planned depth symbols={','.join(planned_depth) or '-'} "
+          f"(override={','.join(depth_override) or 'auto-prefer NYSE/ARCA/IEX listings'})")
     print(f"  jsonl={log_root}")
-    print(f"  symbols={','.join(uni.symbols)} fallback={uni.used_fallback}")
+    print(f"  L1/tape symbols={','.join(l1_symbols)} fallback={uni.used_fallback}")
     if uni.used_fallback:
         print(f"  {uni.fallback_reason}")
     if uni.artifacts_seen:
@@ -201,7 +250,7 @@ def run(args: argparse.Namespace) -> int:
     if args.no_connect:
         print("  --no-connect: skipping TWS (dry structure)")
         try:
-            return _dry_cycle(uni.symbols, writer)
+            return _dry_cycle(l1_symbols, writer, depth_symbols=planned_depth)
         finally:
             writer.close()
 
@@ -224,8 +273,8 @@ def run(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGTERM, _handle_stop)
 
     worker: IBWorker | None = None
-    histories = {s: BookHistory() for s in uni.symbols}
-    tapes = {s: TapeEngine() for s in uni.symbols}
+    histories = {s: BookHistory() for s in l1_symbols}
+    tapes = {s: TapeEngine() for s in l1_symbols}
     started = time.monotonic()
     snapshots = 0
 
@@ -250,9 +299,15 @@ def run(args: argparse.Namespace) -> int:
                     f"  connecting {args.host}:{int(args.port)} clientId={TWS_CLIENT_ID} "
                     f"readonly session={session_tag(now)}"
                 )
-                worker = IBWorker(host=args.host, port=int(args.port), client_id=TWS_CLIENT_ID)
+                worker = IBWorker(
+                    host=args.host,
+                    port=int(args.port),
+                    client_id=TWS_CLIENT_ID,
+                    depth_max=depth_max,
+                    depth_symbols=depth_override or None,
+                )
                 worker.start()
-                subscribed = worker.subscribe(uni.symbols)
+                subscribed = worker.subscribe(l1_symbols)
                 if not subscribed:
                     print("  no symbols subscribed — exiting")
                     return 2
@@ -260,7 +315,7 @@ def run(args: argparse.Namespace) -> int:
                 time.sleep(min(BOOK_SNAPSHOT_SEC, 1.0))
 
             now = _utcnow()
-            for symbol in uni.symbols:
+            for symbol in l1_symbols:
                 book_quote = worker.latest_book(symbol)
                 mid_hint = None
                 if book_quote is not None and book_quote.bids and book_quote.asks:
@@ -274,7 +329,7 @@ def run(args: argparse.Namespace) -> int:
                         asks=[],
                         history=histories[symbol],
                     )
-                    depth_source = worker.depth_source
+                    depth_source = worker.depth_source_for(symbol)
                 else:
                     book_feat = book_features(
                         ts=book_quote.ts,
@@ -295,8 +350,10 @@ def run(args: argparse.Namespace) -> int:
             snapshots += 1
             if snapshots == 1 or snapshots % 25 == 0:
                 extra = ""
-                if worker is not None and worker.error_2152:
-                    extra = " error_2152=yes"
+                if worker is not None and worker.depth_symbols:
+                    extra = " depth=" + ",".join(
+                        f"{s}:{worker.depth_source_for(s)}" for s in worker.depth_symbols
+                    )
                 print(f"  snapshot n={snapshots} session={session_tag(now)}{extra}")
             if args.once:
                 break

@@ -9,6 +9,16 @@ from __future__ import annotations
 from datetime import time
 from pathlib import Path
 
+from .depth import (
+    DEFAULT_DEPTH_MAX,
+    DEPTH_SOURCE,
+    DEPTH_SOURCE_IEX_NATIVE,
+    DEPTH_SOURCE_L1_ONLY,
+    DEPTH_SOURCE_PARTIAL_SMART,
+    IB_ACCOUNT_DEPTH_CAP,
+    IEX_FALLBACK_WAIT_SEC,
+)
+
 # --- Isolation / connection (paper TWS only) ---------------------------------
 TWS_HOST = "127.0.0.1"
 TWS_PAPER_PORT = 7497
@@ -30,11 +40,11 @@ IB_DISCONNECT_TIMEOUT_SEC = 5.0
 IB_WORKER_READY_TIMEOUT_SEC = 20.0
 
 # --- Depth honesty ------------------------------------------------------------
-# Paper SMART depth is IEX/smart-routed and often incomplete (IB Error 2152
-# missing NASDAQ/BATS/ARCA/NYSE). Never claim TotalView / full book.
-DEPTH_SOURCE = "PARTIAL_IEX_SMART"
+# Paper SMART depth aggregates entitled venues only (ARCA / NYSE / IEX).
+# IB Error 2152 for NASDAQ / BATS / BEX is EXPECTED — do not require BATS/BEX.
+# Never claim TotalView / full book. Long-term: add NASDAQ TotalView when able.
 DEPTH_ROWS = 5
-SMART_DEPTH = True
+SMART_DEPTH = True  # SMART aggregate of entitled venues; not TotalView
 
 # --- Cadence / windows --------------------------------------------------------
 BOOK_SNAPSHOT_SEC = 1.0
@@ -62,6 +72,7 @@ POST_END = time(20, 0)
 IDLE_POLL_SEC = 15.0
 
 # --- Universe -----------------------------------------------------------------
+# --top caps L1/tape (reqMktData). --depth-max (default 3) caps reqMktDepth.
 DEFAULT_TOP_N = 8
 FALLBACK_SYMBOLS = (
     "SPY",
