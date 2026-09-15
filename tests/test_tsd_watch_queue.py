@@ -89,7 +89,15 @@ class TestWatchQueue(unittest.TestCase):
 
     @patch("tsd_scan_pipeline.tsd_watch_queue.fetch_regime_bull", return_value=(True, "BULL", {}))
     @patch("tsd_scan_pipeline.tsd_entry_gates.occupied_symbols", return_value=set())
-    def test_skip_extension_weav(self, _occ, _reg):
+    @patch(
+        "tsd_scan_pipeline.tsd_entry_gates.evaluate_htf_daily_gates",
+        return_value=(True, {}, [], 60.0),
+    )
+    @patch(
+        "tsd_scan_pipeline.tsd_entry_gates.evaluate_1h_buy_signal",
+        return_value=(True, {"htf_1h_bar_hour": 12}),
+    )
+    def test_skip_extension_weav(self, _1h, _htf, _occ, _reg):
         weav = {
             "symbol": "WEAV",
             "scan_score": 77.99,
