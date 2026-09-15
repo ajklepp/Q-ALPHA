@@ -75,6 +75,7 @@ class TestEarlyScanTelegram(unittest.TestCase):
              patch.object(scan, "evaluate_1h_symbol", return_value=dict(PASSER)), \
              patch.object(scan, "rank_1h_launches", return_value=[dict(PASSER)]), \
              patch.object(scan, "_non_new_risk_symbols", return_value=set()), \
+             patch.object(scan, "expire_stale_confirmed", return_value=[]), \
              patch.object(scan, "_write_launch_artifact"), \
              patch.object(scan, "_persist_funnel"), \
              patch(
@@ -158,6 +159,7 @@ class TestEarlyScanTelegram(unittest.TestCase):
              patch.object(scan, "evaluate_1h_symbol", return_value=dict(PASSER)), \
              patch.object(scan, "rank_1h_launches", return_value=[dict(TAKE)]), \
              patch.object(scan, "_non_new_risk_symbols", return_value=set()), \
+             patch.object(scan, "expire_stale_confirmed", return_value=[]), \
              patch.object(scan, "_write_launch_artifact"), \
              patch.object(scan, "_persist_funnel"), \
              patch(
@@ -208,6 +210,7 @@ class TestEarlyScanTelegram(unittest.TestCase):
              patch.object(scan, "evaluate_1h_symbol", return_value=dict(PASSER)), \
              patch.object(scan, "rank_1h_launches", return_value=[dict(PASSER)]), \
              patch.object(scan, "_non_new_risk_symbols", return_value=set()), \
+             patch.object(scan, "expire_stale_confirmed", return_value=[]), \
              patch.object(scan, "_write_launch_artifact"), \
              patch.object(scan, "_persist_funnel"), \
              patch(
@@ -241,6 +244,130 @@ class TestEarlyScanTelegram(unittest.TestCase):
             rc = scan.run_1h_launch_scan(live=False, now=now)
         self.assertEqual(rc, 0)
         self.assertEqual(order, [])
+
+
+class TestGhostConfirmedExclude(unittest.TestCase):
+    """_non_new_risk_symbols must not permanently exclude flat historical CONFIRMEDs."""
+
+    def test_stale_confirmed_flat_not_excluded(self):
+        now = ET.localize(datetime(2026, 9, 15, 8, 15))
+        book = {"positions": []}
+        queue = {
+            "queue": [
+                {
+                    "symbol": "NUAI",
+                    "status": "CONFIRMED",
+                    "confirmed_at": "2026-09-11T10:22:00-04:00",
+                },
+                {
+                    "symbol": "IRD",
+                    "status": "CONFIRMED",
+                    "confirmed_at": "2026-09-14T11:05:00-04:00",
+                },
+            ]
+        }
+        with patch(
+            "tsd_scan_pipeline.tsd_watch_queue.load_queue", return_value=queue,
+        ), patch.object(scan, "load_state", return_value=book):
+            skip = scan._non_new_risk_symbols(book, now=now)
+        self.assertEqual(skip, set())
+
+    def test_open_position_excluded(self):
+        now = ET.localize(datetime(2026, 9, 15, 8, 15))
+        book = {"positions": [{"symbol": "NUAI", "status": "OPEN"}]}
+        queue = {
+            "queue": [
+                {
+                    "symbol": "NUAI",
+                    "status": "CONFIRMED",
+                    "confirmed_at": "2026-09-11T10:22:00-04:00",
+                },
+            ]
+        }
+        with patch(
+            "tsd_scan_pipeline.tsd_watch_queue.load_queue", return_value=queue,
+        ):
+            skip = scan._non_new_risk_symbols(book, now=now)
+        self.assertEqual(skip, {"NUAI"})
+
+    def test_todays_confirmed_in_flight_excluded(self):
+        now = ET.localize(datetime(2026, 9, 15, 9, 15))
+        book = {"positions": []}
+        queue = {
+            "queue": [
+                {
+                    "symbol": "IRD",
+                    "status": "CONFIRMED",
+                    "confirmed_at": "2026-09-15T08:18:00-04:00",
+                },
+            ]
+        }
+        with patch(
+            "tsd_scan_pipeline.tsd_watch_queue.load_queue", return_value=queue,
+        ):
+            skip = scan._non_new_risk_symbols(book, now=now)
+        self.assertEqual(skip, {"IRD"})
+
+    def test_enter_exclude_reasons_open_confirmed_popularity(self):
+        """CASE ENTER skip reasons distinguish open vs confirmed vs popularity."""
+        rows = [
+            {
+                "symbol": "NUAI",
+                "case_verdict": "ENTER",
+                "tradable_popular": True,
+            },
+            {
+                "symbol": "IRD",
+                "case_verdict": "ENTER",
+                "tradable_popular": True,
+            },
+            {
+                "symbol": "ELMT",
+                "case_verdict": "ENTER",
+                "tradable_popular": False,
+                "recent_leaderboard": False,
+                "on_gainers": False,
+            },
+        ]
+        self.assertEqual(
+            scan._enter_exclude_reason(
+                rows[0], open_syms={"NUAI"}, confirmed_inflight=set(),
+            ),
+            "open",
+        )
+        self.assertEqual(
+            scan._enter_exclude_reason(
+                rows[1], open_syms=set(), confirmed_inflight={"IRD"},
+            ),
+            "confirmed_inflight",
+        )
+        self.assertEqual(
+            scan._enter_exclude_reason(
+                rows[2], open_syms=set(), confirmed_inflight=set(),
+            ),
+            "popularity",
+        )
+        take = [
+            {**rows[0], "tradable_popular": True},
+        ]
+        # NUAI taken; IRD confirmed; ELMT popularity
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            scan._log_case_enter_exclusions(
+                rows,
+                take,
+                open_syms=set(),
+                confirmed_inflight={"IRD"},
+            )
+        text = buf.getvalue()
+        self.assertIn("CASE ENTER IRD excluded: confirmed_inflight", text)
+        self.assertIn("CASE ENTER ELMT excluded: popularity", text)
+        self.assertNotIn("CASE ENTER NUAI excluded", text)
+        self.assertIn("ENTER skip confirmed_inflight: ['IRD']", text)
+        self.assertIn("ENTER skip popularity: ['ELMT']", text)
 
 
 if __name__ == "__main__":
