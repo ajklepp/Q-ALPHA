@@ -352,6 +352,7 @@ def rank_1h_launches(
             print(f"  deep features warn: {exc}", flush=True)
 
     # Decision-time RS_1h / $vol / float / options (autopsy gaps) — then re-rank.
+    # attach_decision_context is hard-bounded; timeout → degraded rows, not a hung tick.
     try:
         from tsd_scan_pipeline.tsd_decision_context import attach_decision_context
 
@@ -361,15 +362,26 @@ def rank_1h_launches(
             if row.get("continuation_score") is None:
                 prelim = enrich_launch_fields(row)
                 row["continuation_score"] = prelim.get("continuation_score")
+        print(
+            f"  STAGE decision_context: before attach n={len(passed)} options_top_n=12",
+            flush=True,
+        )
         passed = attach_decision_context(
             passed, api_key=polygon_key or load_polygon_key(), now=now, options_top_n=12,
         )
         n_rs = sum(1 for r in passed if int(r.get("rs_spy_1h_ok") or 0) == 1)
         n_opt = sum(1 for r in passed if r.get("options_call_share") is not None)
         n_dead = sum(1 for r in passed if int(r.get("micro_dead_tape") or 0) == 1)
+        n_deg = sum(1 for r in passed if int(r.get("decision_context_degraded") or 0) == 1)
+        print(
+            f"  STAGE decision_context: after attach "
+            f"({time.time() - t_ctx:.1f}s)",
+            flush=True,
+        )
         print(
             f"  Decision context: rs_1h_ok={n_rs}/{len(passed)} "
-            f"options={n_opt} dead_tape={n_dead} ({time.time() - t_ctx:.1f}s)",
+            f"options={n_opt} dead_tape={n_dead} degraded={n_deg} "
+            f"({time.time() - t_ctx:.1f}s)",
             flush=True,
         )
     except Exception as exc:
@@ -396,6 +408,7 @@ def rank_1h_launches(
             "rs_spy_1h", "rs_spy_1h_ok", "dollar_vol_1h", "dollar_vol_1h_vs_20d",
             "float_shares", "micro_dead_tape", "options_call_share",
             "options_score_lite", "decision_context_ok",
+            "decision_context_degraded", "decision_context_skip_reason",
         ) if row.get(k) is not None}, "htf_score": row["htf_score"]}
         enriched2 = enrich_launch_fields(merged)
         row["launch_score"] = enriched2.get("launch_score")
@@ -418,6 +431,7 @@ def rank_1h_launches(
             "rs_spy_1h", "rs_spy_1h_ok", "dollar_vol_1h", "dollar_vol_1h_vs_20d",
             "float_shares", "micro_dead_tape", "options_call_share",
             "options_score_lite", "decision_context_ok",
+            "decision_context_degraded", "decision_context_skip_reason",
         ):
             if k in merged:
                 row[k] = merged.get(k)
