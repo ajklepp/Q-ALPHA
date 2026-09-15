@@ -97,6 +97,18 @@ def _ib_position_map(ib) -> dict[str, float]:
     return out
 
 
+def _refresh_ib_position_map(ib) -> dict[str, float]:
+    """Force a broker snapshot so fills during this run are visible at verify."""
+    try:
+        req = getattr(ib, "reqPositions", None)
+        if callable(req):
+            req()
+        ib.sleep(0.4)
+    except Exception as exc:
+        print(f"  TWS position refresh warn: {exc}")
+    return _ib_position_map(ib)
+
+
 def _tws_mark_price(ib, symbol: str, *, timeout_sec: float = TWS_MARK_TIMEOUT_SEC) -> float | None:
     """Snapshot last/close for an open long; fail-soft with per-symbol timeout."""
     from ib_insync import Stock
@@ -749,11 +761,18 @@ def _verify_supabase_trades(
     *,
     tickers: list[str] | None = None,
     expected_marks: dict[tuple[str, str], float] | None = None,
+    tws_qty_map: dict[str, float] | None = None,
 ) -> list[str]:
     """
     One-line Cloud verification after force upsert.
     Returns error strings when mark px disagrees with TWS by > MARK_PX_TOL.
+
+    ``tws_qty_map`` should be a verify-time TWS snapshot (not start-of-run).
+    Names that were open at sync start but are broker-flat by verify are
+    logged as closed_during_sync, not verify_missing.
     """
+    from tsd_supabase_sync import classify_tsd_verify_row
+
     want = {t.upper() for t in tickers} if tickers else None
     checks: list[tuple[str, str]] = []
     for t in trades:
@@ -785,6 +804,22 @@ def _verify_supabase_trades(
                 .execute()
             )
             rows = result.data or []
+            tws_qty: float | None
+            if tws_qty_map is None:
+                tws_qty = None
+            else:
+                tws_qty = float(tws_qty_map.get(ticker, 0.0))
+            outcome = classify_tsd_verify_row(
+                tws_qty=tws_qty,
+                still_open_book=True,
+                cloud_present=bool(rows),
+            )
+            if outcome == "closed_during_sync":
+                print(
+                    f"    {ticker} {entry_date}: closed_during_sync "
+                    f"(tws_qty={tws_qty if tws_qty is not None else 'n/a'})"
+                )
+                continue
             if not rows:
                 print(f"    {ticker} {entry_date}: (no row)")
                 errors.append(f"verify_missing:{ticker}")
@@ -1232,10 +1267,18 @@ def run_tws_intraday_sync(
             if _is_managed_ibkr(t)
             and str(t.get("status") or "").upper() in OPEN_LEDGER
         })
+        verify_pos_map: dict[str, float] | None
+        try:
+            verify_pos_map = _refresh_ib_position_map(ib)
+            print(f"  verify TWS re-read: {verify_pos_map or '(flat)'}")
+        except Exception as exc:
+            print(f"  verify TWS re-read skipped: {exc}")
+            verify_pos_map = None
         verify_errors = _verify_supabase_trades(
             trades,
             tickers=gap_open_tickers,
             expected_marks=mark_expectations,
+            tws_qty_map=verify_pos_map,
         )
         if verify_errors:
             summary["sync_errors"].extend(verify_errors)
