@@ -148,9 +148,11 @@ class TestCaseReview(unittest.TestCase):
 
     def test_select_enter_only(self):
         rows = [
-            {**_row(symbol="A"), "case_verdict": "ENTER", "case_confidence": 0.9},
+            {**_row(symbol="A"), "case_verdict": "ENTER", "case_confidence": 0.9,
+             "tradable_popular": True},
             {**_row(symbol="B"), "case_verdict": "WAIT", "case_confidence": 0.9},
-            {**_row(symbol="C"), "case_verdict": "ENTER", "case_confidence": 0.7},
+            {**_row(symbol="C"), "case_verdict": "ENTER", "case_confidence": 0.7,
+             "tradable_popular": True},
             {**_row(symbol="D"), "case_verdict": "REJECT", "case_confidence": 0.99},
         ]
         take = select_enter_rows(rows, max_n=2)

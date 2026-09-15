@@ -306,7 +306,9 @@ class TestTelegramMarker(unittest.TestCase):
                 hour=10, htf_pass=10, launches_n=1, take_n=0, entered_n=None,
             )
             self.assertIn("equal_signal=ON", msg)
-            self.assertIn("equal_signal", live_vs_equal_pair(SOFT_EXT))
+            pair = live_vs_equal_pair(SOFT_EXT)
+            self.assertTrue(pair["equal_list_ok"])
+            self.assertFalse(pair["live_list_ok"])
         with php_equal_signal(False):
             msg = format_scan_summary(
                 hour=10, htf_pass=10, launches_n=1, take_n=0, entered_n=None,
