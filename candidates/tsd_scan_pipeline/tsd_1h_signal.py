@@ -13,8 +13,9 @@ Color does NOT veto — bar_state is rank/telemetry only.
 """
 from __future__ import annotations
 
-import time
+import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -37,12 +38,22 @@ from tsd_scan_pipeline.universe_tsd import POLYGON_BASE, load_polygon_key, polyg
 
 ET = pytz.timezone("America/New_York")
 HTF_1H_BARS_MIN = 80
-H1_LOOKBACK_DAYS = 45  # >80 hourly bars without Polygon's 50k base-bar cap.
+# 90d covers ticker path-prior in one cached fetch; last-bar WT uses ~80 bars.
+H1_LOOKBACK_DAYS = 90
 MAX_AGG_PAGES = 10  # Safety cap for unexpected Polygon cursor depth.
 MAX_COMPLETED_BAR_AGE = timedelta(minutes=90)
 # Through 15:00 bar close → 15:15 scan; premarket 05/06/08/09 from EXP-0021 hitch study
 ALLOWED_HOURS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 BAR_SOURCE = "polygon_1h_aggs_start_labeled"
+# Don't let one hung ticker stall a worker for polygon_get's 60s default.
+BARS_GET_TIMEOUT_SEC = 20
+# When disk/mem cache is stale by one hour, pull a short window and merge.
+H1_INCREMENTAL_DAYS = 3
+H1_CACHE_DIR = Path(__file__).resolve().parent / "results" / "h1_bar_cache"
+
+_H1_MEM: dict[str, pd.DataFrame] = {}
+_H1_MEM_LOCK = threading.Lock()
+_H1_DISK_LOCK = threading.Lock()
 
 
 def bar_close_hour_et(ts: datetime | pd.Timestamp) -> int:
@@ -76,6 +87,82 @@ def _as_et(now: datetime | None) -> datetime:
     return dt.astimezone(ET)
 
 
+def _cache_path(symbol: str) -> Path:
+    return H1_CACHE_DIR / f"{symbol.upper()}.pkl"
+
+
+def _mem_get(symbol: str) -> pd.DataFrame | None:
+    with _H1_MEM_LOCK:
+        df = _H1_MEM.get(symbol.upper())
+        if df is None or df.empty:
+            return None
+        return df.copy()
+
+
+def _mem_set(symbol: str, df: pd.DataFrame) -> None:
+    if df is None or df.empty:
+        return
+    with _H1_MEM_LOCK:
+        _H1_MEM[symbol.upper()] = df.copy()
+
+
+def _disk_get(symbol: str) -> pd.DataFrame | None:
+    path = _cache_path(symbol)
+    if not path.exists():
+        return None
+    try:
+        with _H1_DISK_LOCK:
+            df = pd.read_pickle(path)
+        if df is None or getattr(df, "empty", True):
+            return None
+        return df
+    except Exception:
+        return None
+
+
+def _disk_set(symbol: str, df: pd.DataFrame) -> None:
+    if df is None or df.empty:
+        return
+    try:
+        H1_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with _H1_DISK_LOCK:
+            df.to_pickle(_cache_path(symbol))
+    except Exception:
+        pass
+
+
+def clear_1h_bar_cache() -> None:
+    """Drop in-memory 1H bar cache (tests / new session). Disk files kept."""
+    with _H1_MEM_LOCK:
+        _H1_MEM.clear()
+
+
+def _cache_covers_last_completed(df: pd.DataFrame, now: datetime | None) -> bool:
+    """True when cached bars include the 1H bar that has already closed."""
+    if df is None or df.empty:
+        return False
+    completed = last_completed_1h_bar(df, now=now)
+    if completed.empty:
+        return False
+    now_et = _as_et(now)
+    latest_end = pd.Timestamp(completed.index[-1]) + pd.Timedelta(hours=1)
+    expected_end = now_et.replace(minute=0, second=0, microsecond=0)
+    if latest_end.tzinfo is None:
+        latest_end = latest_end.tz_localize(ET)
+    return latest_end >= expected_end - pd.Timedelta(seconds=1)
+
+
+def _merge_1h_frames(old: pd.DataFrame | None, new: pd.DataFrame | None) -> pd.DataFrame:
+    """Concat + last-wins dedupe so incremental fetches update the last hour."""
+    frames = [f for f in (old, new) if f is not None and not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0].sort_index()
+    both = pd.concat(frames)
+    return both[~both.index.duplicated(keep="last")].sort_index()
+
+
 def _bars_1h_polygon(
     symbol: str,
     *,
@@ -91,7 +178,7 @@ def _bars_1h_polygon(
     results_by_time: dict[int, dict[str, Any]] = {}
     pages = 0
     while url and pages < MAX_AGG_PAGES:
-        data = polygon_get(url, params, api_key)
+        data = polygon_get(url, params, api_key, timeout=BARS_GET_TIMEOUT_SEC)
         for bar in data.get("results") or []:
             if bar.get("t") is not None:
                 results_by_time[int(bar["t"])] = bar
@@ -121,6 +208,92 @@ def _bars_1h_polygon(
     if df.empty:
         return df
     return df.set_index("time").sort_index()
+
+
+def load_1h_bars(
+    symbol: str,
+    *,
+    api_key: str,
+    days: int = H1_LOOKBACK_DAYS,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """
+    1H OHLCV for `symbol`, preferring memory then disk cache.
+
+    Fresh cache (last completed hour present) → no Polygon call.
+    Stale cache → 3-day incremental fetch merged onto the cached series.
+    Miss → full `days` lookback. polygon_get already rate-sleeps; no extra sleep.
+    """
+    sym = symbol.upper()
+    cached = _mem_get(sym)
+    if cached is None:
+        cached = _disk_get(sym)
+        if cached is not None:
+            _mem_set(sym, cached)
+
+    if cached is not None and _cache_covers_last_completed(cached, now):
+        return cached.copy()
+
+    fetch_days = H1_INCREMENTAL_DAYS if cached is not None else int(days)
+    try:
+        fresh = _bars_1h_polygon(sym, api_key=api_key, days=fetch_days)
+    except Exception:
+        if cached is not None:
+            return cached.copy()
+        raise
+
+    merged = _merge_1h_frames(cached, fresh)
+    if merged.empty and cached is not None:
+        return cached.copy()
+    if not merged.empty and not _cache_covers_last_completed(merged, now):
+        if fetch_days < int(days):
+            try:
+                full = _bars_1h_polygon(sym, api_key=api_key, days=int(days))
+                merged = _merge_1h_frames(merged, full)
+            except Exception:
+                pass
+    if merged.empty:
+        return merged
+    now_et = _as_et(now)
+    cutoff = now_et - timedelta(days=int(days) + 5)
+    try:
+        merged = merged[merged.index >= cutoff]
+    except Exception:
+        pass
+    _mem_set(sym, merged)
+    _disk_set(sym, merged)
+    return merged.copy()
+
+
+def session_bars_from_cache(symbol: str, day) -> list[dict[str, Any]]:
+    """
+    Convert cached 1H bars for one ET calendar day into decision-context dicts.
+
+    Empty list on cache miss — caller may fall back to a Polygon day fetch.
+    """
+    df = _mem_get(symbol)
+    if df is None:
+        df = _disk_get(symbol)
+    if df is None or df.empty:
+        return []
+    out: list[dict[str, Any]] = []
+    for ts, row in df.iterrows():
+        try:
+            ts_et = ts.tz_convert(ET) if getattr(ts, "tzinfo", None) else ET.localize(ts.to_pydatetime())
+            if ts_et.date() != day:
+                continue
+            out.append({
+                "et": ts_et.to_pydatetime() if hasattr(ts_et, "to_pydatetime") else ts_et,
+                "close_hour": bar_close_hour_et(ts_et),
+                "o": float(row["open"]),
+                "h": float(row["high"]),
+                "l": float(row["low"]),
+                "c": float(row["close"]),
+                "v": float(row["volume"] if "volume" in row else row.get("v") or 0),
+            })
+        except Exception:
+            continue
+    return out
 
 
 def last_completed_1h_bar(
@@ -202,8 +375,7 @@ def evaluate_1h_buy_signal(
 
     key = polygon_key or load_polygon_key()
     try:
-        df = _bars_1h_polygon(sym, api_key=key)
-        time.sleep(0.12)
+        df = load_1h_bars(sym, api_key=key, days=H1_LOOKBACK_DAYS, now=now)
     except Exception as exc:
         return False, {"htf_1h_buy_signal": False, "source": f"fetch_err:{exc}"}
 

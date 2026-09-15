@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import unittest
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ sys.path.insert(0, str(ROOT / "candidates"))
 
 import pytz
 
+import tsd_supabase_sync
 import tws_intraday_sync
 from tsd_scan_pipeline import scheduler, tsd_exit, tsd_trail_monitor
 
@@ -249,6 +251,225 @@ class TestScheduledTwsSyncLiveness(unittest.TestCase):
         self.assertEqual(result["tsd_closed"], 1)
         self.assertTrue(result["tsd_pool"])
         self.assertGreaterEqual(fake.disconnect_calls, 1)
+
+
+NX_OPENED_AT = "2026-09-14T09:03:00-04:00"
+NX_START_ROW = {
+    "symbol": "NX",
+    "leg_opened_at": NX_OPENED_AT,
+    "current_price": 20.63,
+    "shares": 7,
+    "kill_price": 19.60,
+}
+
+
+def _nx_open_book() -> dict:
+    return {
+        "positions": [
+            {
+                "symbol": "NX",
+                "status": "OPEN",
+                "legs": [
+                    {
+                        "status": "OPEN",
+                        "time": NX_OPENED_AT,
+                        "price": 20.50,
+                        "shares": 7,
+                        "trail": {
+                            "entry_price": 20.50,
+                            "last_close": 20.63,
+                            "tranches": [],
+                        },
+                        "exits": [],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+class _FakePos:
+    def __init__(self, symbol: str, qty: float):
+        self.contract = type("C", (), {"symbol": symbol})()
+        self.position = qty
+
+
+class _FakeVerifyIB:
+    def __init__(self, positions: list | None = None):
+        self._positions = list(positions or [])
+        self.req_calls = 0
+
+    def reqPositions(self):
+        self.req_calls += 1
+
+    def sleep(self, _seconds):
+        return None
+
+    def positions(self):
+        return list(self._positions)
+
+
+class _FakeQuery:
+    def __init__(self, rows_by_key: dict):
+        self.rows_by_key = rows_by_key
+        self._symbol = ""
+        self._leg = ""
+
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, field, value):
+        if field in {"symbol", "ticker"}:
+            self._symbol = str(value or "").upper()
+        elif field in {"leg_opened_at", "entry_date"}:
+            self._leg = str(value or "")
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        row = self.rows_by_key.get((self._symbol, self._leg))
+        return type("R", (), {"data": [row] if row else []})()
+
+
+class _FakeSupabase:
+    def __init__(self, rows_by_key: dict | None = None):
+        self.rows_by_key = rows_by_key or {}
+        self.client = self
+
+    def table(self, _name):
+        return _FakeQuery(self.rows_by_key)
+
+
+class TestTsdVerifyClosedDuringSync(unittest.TestCase):
+    """NX 2026-09-14 race: trail flattened while intraday sync was verifying."""
+
+    def test_classifier_distinguishes_closed_during_sync_from_missing(self):
+        classify = tsd_supabase_sync.classify_tsd_verify_row
+        self.assertEqual(
+            classify(tws_qty=0.0, still_open_book=True, cloud_present=False),
+            "closed_during_sync",
+        )
+        self.assertEqual(
+            classify(tws_qty=7.0, still_open_book=True, cloud_present=False),
+            "tsd_verify_missing",
+        )
+        self.assertEqual(
+            classify(tws_qty=7.0, still_open_book=True, cloud_present=True),
+            "ok",
+        )
+        self.assertEqual(
+            classify(tws_qty=None, still_open_book=False, cloud_present=False),
+            "closed_during_sync",
+        )
+        self.assertEqual(
+            classify(tws_qty=None, still_open_book=True, cloud_present=False),
+            "tsd_verify_missing",
+        )
+
+    def test_nx_flat_at_verify_is_closed_during_sync_not_missing(self):
+        closed_book = {"positions": []}
+        ib = _FakeVerifyIB([])
+        buf = io.StringIO()
+        with (
+            patch.object(tsd_supabase_sync, "load_state", return_value=closed_book),
+            patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase()),
+            patch("sys.stdout", buf),
+        ):
+            errors = tsd_supabase_sync._verify_tsd_supabase_rows(
+                [NX_START_ROW],
+                ib=ib,
+                book=closed_book,
+            )
+        self.assertEqual(errors, [])
+        self.assertGreaterEqual(ib.req_calls, 1)
+        self.assertIn("closed_during_sync", buf.getvalue())
+        self.assertNotIn("tsd_verify_missing", buf.getvalue())
+
+    def test_nx_still_held_without_cloud_row_is_missing(self):
+        open_book = _nx_open_book()
+        ib = _FakeVerifyIB([_FakePos("NX", 7)])
+        with (
+            patch.object(tsd_supabase_sync, "load_state", return_value=open_book),
+            patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase()),
+        ):
+            errors = tsd_supabase_sync._verify_tsd_supabase_rows(
+                [NX_START_ROW],
+                ib=ib,
+                book=open_book,
+            )
+        self.assertEqual(errors, ["tsd_verify_missing:NX"])
+
+    def test_nx_still_held_with_cloud_row_is_ok(self):
+        open_book = _nx_open_book()
+        ib = _FakeVerifyIB([_FakePos("NX", 7)])
+        cloud = {
+            ("NX", NX_OPENED_AT): {
+                "symbol": "NX",
+                "status": "OPEN",
+                "shares": 7,
+                "current_price": 20.63,
+                "kill_price": 19.60,
+            }
+        }
+        with (
+            patch.object(tsd_supabase_sync, "load_state", return_value=open_book),
+            patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase(cloud)),
+        ):
+            errors = tsd_supabase_sync._verify_tsd_supabase_rows(
+                [NX_START_ROW],
+                ib=ib,
+                book=open_book,
+            )
+        self.assertEqual(errors, [])
+
+    def test_book_closed_without_tws_is_closed_during_sync(self):
+        closed_book = {"positions": []}
+        with (
+            patch.object(tsd_supabase_sync, "load_state", return_value=closed_book),
+            patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase()),
+        ):
+            errors = tsd_supabase_sync._verify_tsd_supabase_rows(
+                [NX_START_ROW],
+                ib=None,
+                book=closed_book,
+            )
+        self.assertEqual(errors, [])
+
+    def test_gap_verify_skips_ticker_flat_on_tws_at_verify_time(self):
+        trades = [
+            {
+                "ticker": "NX",
+                "entry_date": "2026-09-14",
+                "status": "OPEN",
+                "approved_by": "autonomous_agent",
+                "execution_mode": "IBKR_PAPER",
+            }
+        ]
+        with patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase()):
+            errors = tws_intraday_sync._verify_supabase_trades(
+                trades,
+                tickers=["NX"],
+                tws_qty_map={"ATRC": 2.0},
+            )
+        self.assertEqual(errors, [])
+
+    def test_gap_verify_missing_when_tws_still_holds(self):
+        trades = [
+            {
+                "ticker": "NX",
+                "entry_date": "2026-09-14",
+                "status": "OPEN",
+            }
+        ]
+        with patch("supabase_sync.SupabaseSync", return_value=_FakeSupabase()):
+            errors = tws_intraday_sync._verify_supabase_trades(
+                trades,
+                tickers=["NX"],
+                tws_qty_map={"NX": 7.0},
+            )
+        self.assertEqual(errors, ["verify_missing:NX"])
 
 
 if __name__ == "__main__":

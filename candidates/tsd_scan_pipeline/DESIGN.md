@@ -135,6 +135,7 @@ First trading day after Labor Day weekend = **Tue 2026-09-08** (Mon 9/7 holiday 
 
 1. TWS paper API on **7497** before **05:15 ET** (trail loop needs it from **04:00**).
 2. Confirm Task Scheduler: **QAlpha TSD Scheduler**, **Trail Monitor**, **Live TWS Sync** Enabled; Setup Watch absent/disabled.
+   **QAlpha TSD Scheduler** Settings must be **Do not start a new instance** and **Stop if longer than 2 hours** (hour-8 abort: a 5-min overlap must not kill an in-flight 1H LAUNCH). Re-run `.\candidates\register_tsd_tasks.ps1` or set it in the GUI.
 3. First `:15` log line shows `score=v1.1` and `slots=2`.
 4. HTF refresh at **04:30** (or first launch rebuilds if cache miss).
 5. Keep laptop awake / plugged if possible — tasks now allow battery, but sleep still kills ticks.

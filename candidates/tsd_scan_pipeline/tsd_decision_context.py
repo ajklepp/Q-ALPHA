@@ -106,7 +106,6 @@ def _fetch_1h_bars_day(
         data = polygon_get(
             url, {"adjusted": "true", "sort": "asc", "limit": 50000}, api_key,
         )
-        time.sleep(RATE_SLEEP)
         for b in data.get("results") or []:
             ts = int(b.get("t") or 0)
             if ts <= 0:
@@ -163,7 +162,6 @@ def fetch_float_shares(symbol: str, *, api_key: str) -> float | None:
     out: float | None = None
     try:
         data = polygon_get(url, {}, api_key)
-        time.sleep(RATE_SLEEP)
         res = data.get("results") or {}
         for k in (
             "share_class_shares_outstanding",
@@ -253,7 +251,11 @@ def decision_context_for_row(
         hour = when.hour
 
     day = when.date()
-    stock_bars = _fetch_1h_bars_day(sym, day=day, api_key=key)
+    from tsd_scan_pipeline.tsd_1h_signal import session_bars_from_cache
+
+    stock_bars = session_bars_from_cache(sym, day)
+    if not stock_bars:
+        stock_bars = _fetch_1h_bars_day(sym, day=day, api_key=key)
     stock_ret, dv1h = _session_return_through_hour(stock_bars, signal_hour=hour)
     if dv1h is not None:
         out["dollar_vol_1h"] = round(dv1h, 2)

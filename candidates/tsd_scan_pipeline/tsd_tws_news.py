@@ -46,6 +46,44 @@ def _cache_set(key: str, val: dict[str, Any]) -> None:
     _CACHE[key] = (time.time(), dict(val))
 
 
+def open_tws_news_connection() -> Any | None:
+    """
+    One IB connection for a scan's TWS headline fetches.
+
+    Returns None if TWS is down / clientId busy. Caller must not retry per symbol
+    (8s timeout × N passers is a multi-minute stall).
+    """
+    try:
+        from ib_insync import IB, util
+
+        try:
+            util.startLoop()
+        except Exception:
+            pass
+        conn = IB()
+        conn.connect(TWS_HOST, TWS_PORT, clientId=TWS_CLIENT_ID, timeout=8)
+        if not getattr(conn, "isConnected", lambda: False)():
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            return None
+        return conn
+    except Exception as exc:
+        print(f"  TWS news connect skipped: {exc}", flush=True)
+        return None
+
+
+def close_tws_news_connection(ib: Any | None) -> None:
+    """Disconnect a connection opened by open_tws_news_connection."""
+    if ib is None:
+        return
+    try:
+        ib.disconnect()
+    except Exception:
+        pass
+
+
 def fetch_tws_headlines(
     symbol: str,
     *,
@@ -53,11 +91,14 @@ def fetch_tws_headlines(
     providers: tuple[str, ...] = DEFAULT_PROVIDERS,
     lookback_hours: int = LOOKBACK_HOURS,
     max_per_provider: int = 8,
+    allow_connect: bool = True,
 ) -> dict[str, Any]:
     """
     Pull recent IB historical news for symbol.
 
     Returns headlines, counts, dilution/distress flags. Never raises.
+    When allow_connect=False and ib is missing, skip (empty) instead of a
+    per-symbol TWS connect.
     """
     sym = symbol.upper()
     cache_key = f"tws:{sym}:{lookback_hours}"
@@ -78,6 +119,9 @@ def fetch_tws_headlines(
     conn = ib
     try:
         if conn is None or not getattr(conn, "isConnected", lambda: False)():
+            if not allow_connect:
+                _cache_set(cache_key, empty)
+                return empty
             from ib_insync import IB, Stock, util
 
             try:

@@ -38,6 +38,9 @@ ET = pytz.timezone("America/New_York")
 # Absolute + relative tolerance — fast movers (ATRC/NX) spam at 5c alone.
 MARK_PX_TOL = 0.05
 MARK_PX_TOL_REL = 0.0025  # 25 bps
+# |TWS qty| below this is broker-flat. Verify must not treat a trail/kill
+# fill during this run as tsd_verify_missing.
+TWS_HELD_QTY = 1e-6
 TSD_TABLE_MISSING_MSG = (
     "*** TSD: run candidates/sql/tsd_cloud.sql in Supabase SQL editor ***"
 )
@@ -745,15 +748,19 @@ def push_dashboard_best_effort(
     mark_fn: Callable | None = None,
     book: dict[str, Any] | None = None,
     telegram_on_fail: bool = False,
+    refresh_missed_peaks: bool = True,
 ) -> dict[str, Any]:
     """
     Best-effort book → Supabase push after entry/exit/queue admit.
 
     Never raises. Optional Telegram if sync fails hard.
+    refresh_missed_peaks: Polygon daily peak refresh for missed_moves (slow;
+    skip on the 1H LAUNCH hot path — still upserts the local ledger).
     """
     try:
         summary = sync_tsd_positions_to_supabase(
             ib, mark_fn=mark_fn, book=book,
+            refresh_missed_peaks=refresh_missed_peaks,
         )
     except Exception as exc:
         print(f"  dashboard sync warn: {exc}")
@@ -786,6 +793,7 @@ def sync_tsd_positions_to_supabase(
     *,
     mark_fn: Callable | None = None,
     book: dict[str, Any] | None = None,
+    refresh_missed_peaks: bool = True,
 ) -> dict[str, Any]:
     """
     Upsert open TSD legs + pool snapshot to Supabase; prune stale OPEN rows.
@@ -921,7 +929,8 @@ def sync_tsd_positions_to_supabase(
     try:
         from tsd_scan_pipeline.php_missed_ledger import _load_ledger, mark_ran_up
 
-        mark_ran_up(days=14, only_missed=True)
+        if refresh_missed_peaks:
+            mark_ran_up(days=14, only_missed=True)
         missed_rows = list((_load_ledger().get("rows") or []))
         summary["missed_synced"] = sync.upsert_tsd_missed_moves(missed_rows)
         print(f"  missed_moves_synced={summary['missed_synced']}")
@@ -937,7 +946,7 @@ def sync_tsd_positions_to_supabase(
             summary["verify_errors"].append(f"tsd_missed_moves:{exc}")
             print(f"  *** missed_moves sync FAILED: {exc} ***")
 
-    verify_errors = _verify_tsd_supabase_rows(rows)
+    verify_errors = _verify_tsd_supabase_rows(rows, ib=ib, book=book)
     summary["verify_errors"].extend(verify_errors)
 
     try:
@@ -963,8 +972,97 @@ def _mark_mismatch(local_px: float, cloud_px: float) -> bool:
     return (abs_diff / ref) > MARK_PX_TOL_REL
 
 
-def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
-    """Confirm Cloud px matches local/TWS after upsert."""
+def _open_leg_keys(book: dict[str, Any] | None) -> set[tuple[str, str]]:
+    """(symbol, leg_opened_at) keys currently OPEN in a TSD book."""
+    if not book:
+        return set()
+    keys: set[tuple[str, str]] = set()
+    for row in flatten_open_legs(book):
+        symbol = str(row.get("symbol") or "").upper()
+        opened = str(row.get("leg_opened_at") or "")
+        if symbol:
+            keys.add((symbol, opened))
+    return keys
+
+
+def _tws_qty_map_for_verify(ib) -> dict[str, float]:
+    """Fresh broker qty map for verify (start-of-run snapshot can be stale)."""
+    try:
+        req = getattr(ib, "reqPositions", None)
+        if callable(req):
+            req()
+        sleep = getattr(ib, "sleep", None)
+        if callable(sleep):
+            sleep(0.4)
+    except Exception as exc:
+        print(f"  TSD verify TWS refresh warn: {exc}")
+    out: dict[str, float] = {}
+    for p in ib.positions() or []:
+        contract = getattr(p, "contract", None)
+        sym = str(getattr(contract, "symbol", "") or "").upper()
+        if not sym:
+            continue
+        out[sym] = out.get(sym, 0.0) + float(getattr(p, "position", 0) or 0)
+    return out
+
+
+def tsd_verify_row_required(
+    *,
+    tws_qty: float | None,
+    still_open_book: bool,
+) -> bool:
+    """
+    True when a Cloud tsd_positions row must exist after a claimed upsert.
+
+    TWS is source of truth when a live qty is available: a name that was OPEN
+    at sync start but is broker-flat by verify time closed during this run
+    (trail/kill) and must not raise tsd_verify_missing. When TWS cannot be
+    re-read, fall back to the latest on-disk / in-memory book.
+    """
+    if tws_qty is not None:
+        try:
+            return abs(float(tws_qty)) >= TWS_HELD_QTY
+        except (TypeError, ValueError):
+            return bool(still_open_book)
+    return bool(still_open_book)
+
+
+def classify_tsd_verify_row(
+    *,
+    tws_qty: float | None,
+    still_open_book: bool,
+    cloud_present: bool,
+) -> str:
+    """
+    Classify one verify outcome.
+
+    Returns ``ok``, ``closed_during_sync``, or ``tsd_verify_missing``.
+    A missing Cloud row is a hard error only when the row is still required
+    (TWS still long, or TWS unavailable and the latest book still OPEN).
+    """
+    if not tsd_verify_row_required(
+        tws_qty=tws_qty, still_open_book=still_open_book,
+    ):
+        return "closed_during_sync"
+    if not cloud_present:
+        return "tsd_verify_missing"
+    return "ok"
+
+
+def _verify_tsd_supabase_rows(
+    local_rows: list[dict[str, Any]],
+    *,
+    ib=None,
+    book: dict[str, Any] | None = None,
+) -> list[str]:
+    """Confirm Cloud rows for legs still open at verify time.
+
+    Re-reads TWS + the on-disk book immediately before checking Cloud so a
+    concurrent trail exit (e.g. NX flattening while this sync is still in
+    watch_queue / missed_moves) is logged as closed_during_sync, not
+    tsd_verify_missing. Real missing-row bugs stay errors when TWS still
+    holds the long after this run claimed a successful upsert.
+    """
     errors: list[str] = []
     soft_warns: list[str] = []
     try:
@@ -975,9 +1073,47 @@ def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
         if not local_rows:
             print("    (no open TSD legs locally)")
             return errors
+
+        try:
+            disk_book = load_state()
+        except Exception as exc:
+            print(f"  TSD verify book reload warn: {exc}")
+            disk_book = book or {}
+        disk_keys = _open_leg_keys(disk_book)
+        mem_keys = _open_leg_keys(book) if book is not None else disk_keys
+
+        tws_map: dict[str, float] | None = None
+        if ib is not None:
+            try:
+                tws_map = _tws_qty_map_for_verify(ib)
+                print(f"  TSD verify TWS re-read: {tws_map or '(flat)'}")
+            except Exception as exc:
+                print(f"  TSD verify TWS re-read skipped: {exc}")
+                tws_map = None
+
         for row in local_rows:
             symbol = str(row.get("symbol") or "").upper()
             leg_opened_at = str(row.get("leg_opened_at") or "")
+            key = (symbol, leg_opened_at)
+            still_open_book = key in disk_keys and key in mem_keys
+            tws_qty: float | None
+            if tws_map is None:
+                tws_qty = None
+            else:
+                tws_qty = float(tws_map.get(symbol, 0.0))
+
+            # Decide requirement from TWS/book *before* Cloud so a pruned OPEN
+            # row after a trail fill is not queried as a hard miss.
+            if not tsd_verify_row_required(
+                tws_qty=tws_qty, still_open_book=still_open_book,
+            ):
+                print(
+                    f"    {symbol}: closed_during_sync "
+                    f"(tws_qty={tws_qty if tws_qty is not None else 'n/a'} "
+                    f"book_open={still_open_book})"
+                )
+                continue
+
             result = (
                 sync.client.table("tsd_positions")
                 .select(
@@ -989,7 +1125,12 @@ def _verify_tsd_supabase_rows(local_rows: list[dict[str, Any]]) -> list[str]:
                 .execute()
             )
             cloud = (result.data or [{}])[0] if result.data else {}
-            if not cloud:
+            outcome = classify_tsd_verify_row(
+                tws_qty=tws_qty,
+                still_open_book=still_open_book,
+                cloud_present=bool(cloud),
+            )
+            if outcome == "tsd_verify_missing":
                 msg = f"tsd_verify_missing:{symbol}"
                 errors.append(msg)
                 print(f"    {symbol}: (no row)")
