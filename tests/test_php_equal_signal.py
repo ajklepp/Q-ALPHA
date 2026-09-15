@@ -26,6 +26,7 @@ from tsd_scan_pipeline.tsd_attention import (  # noqa: E402
 from tsd_scan_pipeline.tsd_case_review import review_case  # noqa: E402
 from tsd_scan_pipeline.tsd_entry_gates import evaluate_entry_gates  # noqa: E402
 from tsd_scan_pipeline.tsd_launch_score import (  # noqa: E402
+    apply_php_equal_signal_env,
     classify_bar_state,
     compute_continuation_score,
     compute_continuation_score_v1_1,
@@ -33,6 +34,7 @@ from tsd_scan_pipeline.tsd_launch_score import (  # noqa: E402
     equal_signal_enabled,
     is_continuation_list_candidate,
     is_hard_extension_block,
+    launch_score_banner,
     live_ranker_version_label,
 )
 from tsd_scan_pipeline.tsd_notify import format_scan_summary  # noqa: E402
@@ -111,6 +113,33 @@ class TestEqualSignalFlag(unittest.TestCase):
         with php_equal_signal(False):
             self.assertFalse(equal_signal_enabled())
             self.assertEqual(live_ranker_version_label(), "v1.6")
+            self.assertEqual(
+                launch_score_banner(),
+                "score=v1.6  equal_signal=OFF",
+            )
+
+    def test_empty_env_and_missing_dotenv_default_on(self):
+        """Blank PHP_EQUAL_SIGNAL= must not drop the overlay (mid-day banner bug)."""
+        import tempfile
+        from tsd_scan_pipeline import tsd_launch_score as ls
+
+        prev = os.environ.get("PHP_EQUAL_SIGNAL")
+        try:
+            os.environ["PHP_EQUAL_SIGNAL"] = ""
+            with tempfile.TemporaryDirectory() as td:
+                with patch.object(ls, "_REPO_ROOT", Path(td)):
+                    self.assertTrue(equal_signal_enabled())
+                    self.assertEqual(
+                        launch_score_banner(),
+                        "score=v1.6+equal_signal  equal_signal=ON",
+                    )
+                    apply_php_equal_signal_env()
+                    self.assertEqual(os.environ.get("PHP_EQUAL_SIGNAL"), "1")
+        finally:
+            if prev is None:
+                os.environ.pop("PHP_EQUAL_SIGNAL", None)
+            else:
+                os.environ["PHP_EQUAL_SIGNAL"] = prev
 
 
 class TestSoftExtensionLeak(unittest.TestCase):

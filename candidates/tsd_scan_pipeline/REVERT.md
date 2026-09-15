@@ -39,10 +39,16 @@ restart the Peak Hour scheduler so the next `:15` tick inherits it.
    the env is visible). Do **not** restart trail monitor — trails did not
    change.
 
+Every live 1H path (`scheduler.py --tick --live`, `--launch --live`, and
+direct `tsd_1h_launch_scan.py`) calls `apply_php_equal_signal_env()` at
+process start so a later patch based on `main` cannot silently print
+`score=v1.6` without `equal_signal=…`. Blank `PHP_EQUAL_SIGNAL=` is treated
+as unset (default ON).
+
 Confirm the mode on the next SCAN:
 
-- Log banner: `equal_signal=OFF  score=v1.6`
-- Telegram: `equal_signal=OFF score=v1.6`
+- Scheduler + 1H log: `score=v1.6+equal_signal  equal_signal=ON` (or OFF)
+- Telegram: `equal_signal=OFF score=v1.6` when reverted
 
 To turn it back on: delete the line / unset the var (default is ON), or set
 `PHP_EQUAL_SIGNAL=1`. Telegram / log should show

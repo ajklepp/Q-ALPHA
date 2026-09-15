@@ -1,9 +1,13 @@
 """1H LAUNCH tick ordering: SCAN Telegram before enter/sync; no missed-peak hammer."""
 from __future__ import annotations
 
+import io
+import os
 import sys
+import tempfile
 import types
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -368,6 +372,29 @@ class TestGhostConfirmedExclude(unittest.TestCase):
         self.assertNotIn("CASE ENTER NUAI excluded", text)
         self.assertIn("ENTER skip confirmed_inflight: ['IRD']", text)
         self.assertIn("ENTER skip popularity: ['ELMT']", text)
+
+
+class TestEqualSignalLaunchBanner(unittest.TestCase):
+    def test_banner_reports_equal_signal_on_outside_hour_window(self):
+        """Every 1H tick prints score=v1.6+equal_signal equal_signal=ON by default."""
+        now = ET.localize(datetime(2026, 9, 15, 3, 15))
+        prev = os.environ.pop("PHP_EQUAL_SIGNAL", None)
+        buf = io.StringIO()
+        try:
+            with tempfile.TemporaryDirectory() as td, \
+                 patch("tsd_scan_pipeline.tsd_launch_score._REPO_ROOT", Path(td)), \
+                 redirect_stdout(buf):
+                rc = scan.run_1h_launch_scan(live=False, now=now)
+        finally:
+            if prev is None:
+                os.environ.pop("PHP_EQUAL_SIGNAL", None)
+            else:
+                os.environ["PHP_EQUAL_SIGNAL"] = prev
+        self.assertEqual(rc, 0)
+        text = buf.getvalue()
+        self.assertIn("score=v1.6+equal_signal", text)
+        self.assertIn("equal_signal=ON", text)
+        self.assertNotRegex(text, r"score=v1\.6\s+slots=")
 
 
 if __name__ == "__main__":

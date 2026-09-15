@@ -169,6 +169,9 @@ def can_enter(
     """
     Check capacity before a new TSD entry.
     Returns (ok, reason).
+
+    CLOSED book rows are NEW risk (not already_long). ticker_cap still
+    applies across the position lifetime. Trails / take caps unchanged.
     """
     sym = symbol.upper()
     entries_scan = int(state.get("entries_this_scan") or 0)
@@ -177,17 +180,21 @@ def can_enter(
 
     pos = _position(state, sym)
     cap = int(slot_cap) if slot_cap is not None else current_slot_cap(state)
-    if pos is None:
+    if pos is not None:
+        entry_count = int(pos.get("entry_count") or 1)
+        if entry_count >= MAX_ENTRIES_PER_TICKER:
+            return False, "ticker_cap_3"
+
+    # CLOSED / missing book rows are NEW risk, not already_long.
+    # 2026-09-15 IRD: structure_stop closed the name, _position still found
+    # the row, and already_long skipped a flat book (open=False).
+    if pos is None or str(pos.get("status") or "OPEN").upper() != "OPEN":
         if full_slots_used(state) >= cap:
             return False, f"slots_full_{cap}"
         return True, "new"
 
-    entry_count = int(pos.get("entry_count") or 1)
-    if entry_count >= MAX_ENTRIES_PER_TICKER:
-        return False, "ticker_cap_3"
-
     if is_addon:
-        addons = entry_count - 1
+        addons = int(pos.get("entry_count") or 1) - 1
         if addons >= MAX_ADDONS_PER_TICKER:
             return False, "addon_cap_2"
         return True, "addon"
@@ -350,6 +357,9 @@ def record_entry(
     else:
         pos["entry_count"] = int(pos.get("entry_count") or 1) + 1
         pos.setdefault("legs", []).append(leg)
+        # Re-open a CLOSED book row so a same-symbol NEW fill is live again.
+        pos["status"] = "OPEN"
+        pos["t4_only"] = False
 
     state["entries_this_scan"] = int(state.get("entries_this_scan") or 0) + 1
     return state

@@ -107,24 +107,52 @@ PHP_EQUAL_SIGNAL_ENV = "PHP_EQUAL_SIGNAL"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def _php_equal_signal_raw() -> str:
-    """Env first, then repo .env, then default ON ('1')."""
-    raw = os.environ.get(PHP_EQUAL_SIGNAL_ENV)
-    if raw is not None:
-        return raw
+def _read_php_equal_signal_dotenv() -> str | None:
+    """Read PHP_EQUAL_SIGNAL from repo .env; None if missing/unreadable/empty."""
     env_path = _REPO_ROOT / ".env"
     try:
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#") or "=" not in s:
-                    continue
-                key, _, val = s.partition("=")
-                if key.strip() == PHP_EQUAL_SIGNAL_ENV:
-                    return val.strip().strip('"').strip("'")
+        if not env_path.exists():
+            return None
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            key, _, val = s.partition("=")
+            if key.strip() != PHP_EQUAL_SIGNAL_ENV:
+                continue
+            cleaned = val.strip().strip('"').strip("'")
+            return cleaned or None
     except Exception:
-        pass
+        return None
+    return None
+
+
+def _php_equal_signal_raw() -> str:
+    """Process env (non-empty) first, then repo .env, then default ON ('1').
+
+    Empty ``PHP_EQUAL_SIGNAL=`` is treated as unset so a blank Task Scheduler
+    variable cannot silently disable the overlay.
+    """
+    raw = os.environ.get(PHP_EQUAL_SIGNAL_ENV)
+    if raw is not None and str(raw).strip():
+        return str(raw).strip()
+    from_dotenv = _read_php_equal_signal_dotenv()
+    if from_dotenv:
+        return from_dotenv
     return "1"
+
+
+def apply_php_equal_signal_env() -> str:
+    """
+    Resolve PHP_EQUAL_SIGNAL into os.environ for this 1H launch process.
+
+    Scheduler ``--tick`` / ``--launch`` do not go through autonomous_agent
+    load_dotenv. Call this at the start of every live 1H tick so ranking,
+    the log banner, and Telegram see the same flag (default ON).
+    """
+    resolved = _php_equal_signal_raw().strip() or "1"
+    os.environ[PHP_EQUAL_SIGNAL_ENV] = resolved
+    return resolved
 
 
 def equal_signal_enabled() -> bool:
@@ -148,6 +176,14 @@ def live_ranker_version_label() -> str:
     if equal_signal_enabled():
         return f"{CONTINUATION_SCORE_VERSION}+equal_signal"
     return CONTINUATION_SCORE_VERSION
+
+
+def launch_score_banner() -> str:
+    """Log fragment every 1H launch tick must print (report + apply stay paired)."""
+    return (
+        f"score={live_ranker_version_label()}  "
+        f"equal_signal={equal_signal_mode_label()}"
+    )
 
 
 def _scan_of(row: dict[str, Any]) -> float:

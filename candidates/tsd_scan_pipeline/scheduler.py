@@ -216,6 +216,14 @@ def run_tws_pass(*, live: bool) -> int:
 
 
 def run_launch_pass(*, live: bool) -> int:
+    """Run the hourly 1H LAUNCH; load PHP_EQUAL_SIGNAL before ranking."""
+    from tsd_scan_pipeline.tsd_launch_score import (
+        apply_php_equal_signal_env,
+        launch_score_banner,
+    )
+
+    apply_php_equal_signal_env()
+    print(f"1H LAUNCH tick {launch_score_banner()}", flush=True)
     from tsd_scan_pipeline.tsd_1h_launch_scan import run_1h_launch_scan
 
     return run_1h_launch_scan(live=live)

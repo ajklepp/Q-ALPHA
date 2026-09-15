@@ -39,8 +39,24 @@ ET = pytz.timezone("America/New_York")
 WatchStatus = Literal["WATCHING", "CONFIRMED", "SKIPPED", "CLEARED_STALE"]
 QUEUE_PATH = state_path("tsd_watch_queue.json")
 # Stale CONFIRMED rows (prior session, now flat) are downgraded so they cannot
-# permanently block NEW takes. Same-session CONFIRMED stays in-flight.
+# permanently block NEW takes. Same-session CONFIRMED stays in-flight unless
+# the enter path never opened risk (already_long flat / no fill).
 STALE_CONFIRMED_STATUS = "CLEARED_STALE"
+# Skip/fail reasons that mean CONFIRMED must not occupy a Cap in-flight slot.
+# 2026-09-15 IRD: MICRO CONFIRM then already_long (open=False) left CONFIRMED.
+NO_RISK_CONFIRM_REASON_MARKERS = (
+    "already_long",
+    "no_fill_timeout",
+    "scan_cap",
+    "slots_full",
+    "ticker_cap",
+    "addon_cap",
+    "order_cancelled",
+    "order_inactive",
+    "order_apicancelled",
+    "entry_fail",
+    "no_risk_opened",
+)
 
 
 def load_queue() -> dict[str, Any]:
@@ -110,6 +126,14 @@ def _open_symbol_set(book: dict[str, Any] | None = None) -> set[str]:
         return set()
 
 
+def _row_is_no_risk_confirm(row: dict[str, Any]) -> bool:
+    """True when a confirm never opened (or failed to open) live risk."""
+    if row.get("confirmed_cleared_no_risk"):
+        return True
+    blob = f"{row.get('skip_reason') or ''} {row.get('reason') or ''}".lower()
+    return any(marker in blob for marker in NO_RISK_CONFIRM_REASON_MARKERS)
+
+
 def is_confirmed_in_flight(
     row: dict[str, Any],
     *,
@@ -120,8 +144,9 @@ def is_confirmed_in_flight(
     True when a CONFIRMED queue row must still block NEW risk.
 
     In-flight = currently OPEN in the book, or CONFIRMED on today's ET
-    session (fill pending / same-day lock). Prior-day CONFIRMED that is
-    now flat is a ghost confirm and must not block.
+    session (fill pending / same-day lock). Not in-flight when the enter
+    path skipped/failed without opening risk (already_long + flat, no fill).
+    Prior-day CONFIRMED that is now flat is a ghost confirm and must not block.
     """
     if str(row.get("status") or "").upper() != "CONFIRMED":
         return False
@@ -131,8 +156,51 @@ def is_confirmed_in_flight(
     opens = open_syms if open_syms is not None else _open_symbol_set()
     if sym in opens:
         return True
+    if _row_is_no_risk_confirm(row):
+        return False
     session_d = _confirmed_session_date(row)
     return session_d == _as_et(now).date()
+
+
+def release_confirmed_without_risk(
+    symbol: str,
+    *,
+    reason: str,
+    extra: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Downgrade CONFIRMED when the enter path did not open risk.
+
+    Micro-confirm writes CONFIRMED before execute_live_entries. If capacity
+    then skips (already_long with open=False) or the BUY never fills, that
+    row must not stay Cap-exclude in-flight (2026-09-15 IRD hour-14/15).
+    """
+    sym = str(symbol or "").upper()
+    if not sym:
+        return False
+    state = load_queue()
+    idx = _queue_index(state, sym)
+    if idx is None:
+        return False
+    row = state["queue"][idx]
+    if str(row.get("status") or "").upper() != "CONFIRMED":
+        return False
+    now = datetime.now(ET).isoformat()
+    row["status"] = "SKIPPED"
+    row["skip_reason"] = reason or "no_risk_opened"
+    row["skipped_at"] = now
+    row["confirmed_cleared_no_risk"] = True
+    row["confirmed_cleared_at"] = now
+    if extra:
+        row.update(extra)
+    state["queue"][idx] = row
+    save_queue(state)
+    print(
+        f"  QUEUE CLEAR {sym}: CONFIRMED → SKIPPED "
+        f"({reason}; no risk opened)",
+        flush=True,
+    )
+    return True
 
 
 def add_to_watch_queue(
@@ -409,6 +477,9 @@ def execute_live_entries(
                 "kind": "SKIP",
             })
             print(f"  SKIP {sym}: {reason} (open={has_open}, addon={is_addon})")
+            # Do not leave CONFIRMED in-flight when no new risk opened
+            # (IRD 2026-09-15: already_long with open=False ate hour-15 Cap).
+            release_confirmed_without_risk(sym, reason=reason)
             continue
 
         entry_kind = "ADDON" if reason == "addon" else "NEW"
@@ -436,6 +507,10 @@ def execute_live_entries(
         if fill.get("status") != "FILLED":
             results.append({**fill, "kind": entry_kind})
             print(f"  ENTRY FAIL {sym} ({entry_kind}): {fill.get('reason')}")
+            release_confirmed_without_risk(
+                sym,
+                reason=str(fill.get("reason") or fill.get("status") or "entry_fail"),
+            )
             continue
 
         fill_kill_source = fill.get("kill_source") or kill_source

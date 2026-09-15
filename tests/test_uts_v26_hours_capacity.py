@@ -248,7 +248,22 @@ class TestCapacityCaps(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("slots_full", reason)
 
-    def test_no_daily_cap(self):
+    def test_closed_same_symbol_is_new_not_already_long(self):
+        """IRD 2026-09-15: CLOSED book row must not skip NEW as already_long."""
+        state = {
+            "entries_this_scan": 0,
+            "positions": [
+                {
+                    "symbol": "IRD",
+                    "status": "CLOSED",
+                    "entry_count": 1,
+                    "t4_only": False,
+                },
+            ],
+        }
+        ok, reason = can_enter(state, "IRD", is_addon=False, slot_cap=10)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "new")
         state = {
             "entries_this_scan": 0,
             "positions": [
@@ -261,6 +276,23 @@ class TestCapacityCaps(unittest.TestCase):
             ],
         }
         ok, reason = can_enter(state, "NEW", is_addon=False, slot_cap=10)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "new")
+
+    def test_closed_same_symbol_is_new_not_already_long(self):
+        """IRD 2026-09-15: CLOSED book row must not skip NEW as already_long."""
+        state = {
+            "entries_this_scan": 0,
+            "positions": [
+                {
+                    "symbol": "IRD",
+                    "status": "CLOSED",
+                    "entry_count": 1,
+                    "t4_only": False,
+                },
+            ],
+        }
+        ok, reason = can_enter(state, "IRD", is_addon=False, slot_cap=10)
         self.assertTrue(ok)
         self.assertEqual(reason, "new")
 

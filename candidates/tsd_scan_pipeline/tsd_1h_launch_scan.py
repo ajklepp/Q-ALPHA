@@ -47,9 +47,11 @@ from tsd_scan_pipeline.tsd_capacity import (
 from tsd_scan_pipeline.tsd_htf_gates import compute_htf_rank_score
 from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe, htf_pass_symbols
 from tsd_scan_pipeline.tsd_launch_score import (
+    apply_php_equal_signal_env,
     enrich_launch_fields,
     equal_signal_mode_label,
     is_hard_extension_block,
+    launch_score_banner,
     live_ranker_version_label,
 )
 from tsd_scan_pipeline.tsd_stage_log import StageTimer  # noqa: E402
@@ -613,12 +615,17 @@ def run_1h_launch_scan(
     else:
         now_et = now_et.astimezone(ET)
 
+    # Every live tick (scheduler --tick, --launch, or direct scan) must resolve
+    # PHP_EQUAL_SIGNAL before the banner and before ranking. Do not print the
+    # bare CONTINUATION_SCORE_VERSION — that dropped equal_signal=ON mid-day
+    # when a later patch based on main replaced this file.
+    apply_php_equal_signal_env()
+
     print("=" * 64, flush=True)
     print("1H LAUNCH v3.1 continuation-ranker", flush=True)
     print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}", flush=True)
     print(
-        f"Bar source: {BAR_SOURCE}  score={live_ranker_version_label()}  "
-        f"equal_signal={equal_signal_mode_label()}  "
+        f"Bar source: {BAR_SOURCE}  {launch_score_banner()}  "
         f"slots={MAX_NEW_ENTRIES_PER_SCAN}",
         flush=True,
     )

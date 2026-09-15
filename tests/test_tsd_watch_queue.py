@@ -256,6 +256,67 @@ class TestGhostConfirmed(unittest.TestCase):
         state = json.loads(self._queue_path.read_text(encoding="utf-8"))
         self.assertEqual(state["queue"][0]["status"], "CONFIRMED")
 
+    def test_already_long_open_false_not_confirmed_in_flight(self):
+        """Hour-14 IRD: already_long with open=False must not stay Cap in-flight."""
+        self._write_queue([
+            {
+                "symbol": "IRD",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T14:17:00-04:00",
+            },
+        ])
+        now = wq.ET.localize(datetime(2026, 9, 15, 15, 15))
+        book = {
+            "entries_this_scan": 0,
+            "positions": [
+                {
+                    "symbol": "IRD",
+                    "status": "CLOSED",
+                    "entry_count": 1,
+                    "t4_only": False,
+                    "legs": [],
+                },
+            ],
+        }
+        with patch(
+            "tsd_scan_pipeline.tsd_watch_queue.can_enter",
+            return_value=(False, "already_long"),
+        ):
+            results = wq.execute_live_entries(
+                object(), [{"symbol": "IRD"}], book,
+            )
+        self.assertEqual(results[0]["status"], "SKIPPED")
+        self.assertEqual(results[0]["reason"], "already_long")
+        row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
+        self.assertNotEqual(row["status"], "CONFIRMED")
+        self.assertEqual(row["status"], "SKIPPED")
+        self.assertTrue(row.get("confirmed_cleared_no_risk"))
+        self.assertFalse(
+            wq.is_confirmed_in_flight(row, now=now, open_syms=set()),
+        )
+        self.assertNotIn(
+            "IRD",
+            wq.in_flight_confirmed_symbols(book, now=now),
+        )
+
+    def test_leftover_confirmed_already_long_not_in_flight(self):
+        """Same-session CONFIRMED + already_long skip_reason is not Cap-exclude."""
+        self._write_queue([
+            {
+                "symbol": "IRD",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T14:17:00-04:00",
+                "skip_reason": "already_long",
+            },
+        ])
+        now = wq.ET.localize(datetime(2026, 9, 15, 15, 15))
+        book = {"positions": []}
+        row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
+        self.assertFalse(
+            wq.is_confirmed_in_flight(row, now=now, open_syms=set()),
+        )
+        self.assertEqual(wq.in_flight_confirmed_symbols(book, now=now), set())
+
 
 if __name__ == "__main__":
     unittest.main()
