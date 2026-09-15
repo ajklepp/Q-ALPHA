@@ -1,0 +1,652 @@
+{
+  "date": "2026-09-14",
+  "research_only": true,
+  "live_rules_unchanged": true,
+  "equal_signal_version": "research_v1",
+  "max_new_entries_per_scan": 2,
+  "hard_extension_primary": true,
+  "hard_extension_threshold": 75.0,
+  "case": "rules_equal_signal",
+  "scans_found": 0,
+  "ledger_found": false,
+  "actual_baseline": {
+    "5": {
+      "queued": [
+        "TARS"
+      ],
+      "filled": [],
+      "source": "AARON",
+      "notes": "Take queued (fill not documented in repo)"
+    },
+    "6": {
+      "queued": [
+        "HOOD"
+      ],
+      "filled": [],
+      "source": "AARON",
+      "notes": "Take queued (fill not documented in repo)"
+    },
+    "7": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "No take named in operator baseline or repo artifacts"
+    },
+    "8": {
+      "queued": [],
+      "filled": [],
+      "source": "AARON+CODE",
+      "aborted": true,
+      "notes": "Hour 8 aborted \u2014 DUE 08:15, TICK END exit=-1 at 08:23:45, no SCAN. Counterfactual cannot invent passers without a scan or bar replay."
+    },
+    "9": {
+      "queued": [
+        "IRD"
+      ],
+      "filled": [
+        {
+          "symbol": "IRD",
+          "pnl_usd": 3.63,
+          "status": "FILLED"
+        }
+      ],
+      "source": "AARON",
+      "notes": "IRD FILLED +$3.63 (operator). Repo ops audit did not independently see IRD."
+    },
+    "10": {
+      "queued": [
+        "SNDK"
+      ],
+      "filled": [],
+      "source": "AARON",
+      "notes": "Take queued (fill not documented in repo)"
+    },
+    "11": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "Afternoon unauditable from repo"
+    },
+    "12": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "Afternoon unauditable from repo"
+    },
+    "13": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "Afternoon unauditable from repo"
+    },
+    "14": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "Afternoon unauditable from repo"
+    },
+    "15": {
+      "queued": [],
+      "filled": [],
+      "source": "UNKNOWN",
+      "notes": "Afternoon unauditable from repo"
+    }
+  },
+  "public_session": {
+    "OKTA": {
+      "prev_close": 166.5,
+      "open": 172.8,
+      "high": 189.72,
+      "close": 186.45,
+      "ret_vs_prev_pct": 11.98,
+      "high_vs_prev_pct": 13.95,
+      "room_vs_prior_close_pct": 7.2,
+      "source": "yahoo_1d"
+    },
+    "WIX": {
+      "prev_close": 76.58,
+      "open": 77.8,
+      "high": 85.26,
+      "close": 83.33,
+      "ret_vs_prev_pct": 8.81,
+      "high_vs_prev_pct": 11.33,
+      "room_vs_prior_close_pct": 20.9,
+      "source": "yahoo_1d"
+    },
+    "COIN": {
+      "prev_close": 175.26,
+      "open": 180.81,
+      "high": 193.22,
+      "close": 191.45,
+      "ret_vs_prev_pct": 9.24,
+      "high_vs_prev_pct": 10.25,
+      "room_vs_prior_close_pct": 10.5,
+      "source": "yahoo_1d"
+    },
+    "TARS": {
+      "prev_close": 79.31,
+      "open": 79.69,
+      "high": 80.24,
+      "close": 79.95,
+      "ret_vs_prev_pct": 0.81,
+      "high_vs_prev_pct": 1.17,
+      "room_vs_prior_close_pct": 13.4,
+      "source": "yahoo_1d"
+    },
+    "HOOD": {
+      "prev_close": 112.57,
+      "open": 112.26,
+      "high": 116.35,
+      "close": 114.33,
+      "ret_vs_prev_pct": 1.56,
+      "high_vs_prev_pct": 3.35,
+      "room_vs_prior_close_pct": 10.1,
+      "source": "yahoo_1d"
+    },
+    "IRD": {
+      "prev_close": 6.04,
+      "open": 6.02,
+      "high": 6.22,
+      "close": 5.97,
+      "ret_vs_prev_pct": -1.16,
+      "high_vs_prev_pct": 2.98,
+      "room_vs_prior_close_pct": 14.6,
+      "source": "yahoo_1d"
+    },
+    "SNDK": {
+      "prev_close": 1633.35,
+      "open": 1521.53,
+      "high": 1581.84,
+      "close": 1551.99,
+      "ret_vs_prev_pct": -4.98,
+      "high_vs_prev_pct": -3.15,
+      "room_vs_prior_close_pct": 9.6,
+      "source": "yahoo_1d"
+    }
+  },
+  "mechanism": {
+    "pairs": {
+      "launch": {
+        "symbol": "LAUNCHY",
+        "scan_score": 35.0,
+        "phase": "LAUNCH",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 89.94,
+        "equal_continuation": 75.14,
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "LAUNCH",
+          "scan_score": 35.0,
+          "live_bar_state": "yellow",
+          "ohlc_bar_state": "yellow",
+          "scan_term": 5.0,
+          "scan_over_max_penalty": 0.0,
+          "phase_extension_penalty": 0.0,
+          "live_launch_score": 60.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": 9.8,
+          "bar_state_stage_drag": 0.0,
+          "high_scan_launch_penalty": 0.0,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 4.8
+        },
+        "live_score_raw": 89.94
+      },
+      "soft_extension": {
+        "symbol": "EXTENDY",
+        "scan_score": 68.0,
+        "phase": "EXTENSION",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 7.54,
+        "equal_continuation": 75.14,
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": true,
+        "stage_demotion": {
+          "phase": "EXTENSION",
+          "scan_score": 68.0,
+          "live_bar_state": "extended",
+          "ohlc_bar_state": "yellow",
+          "scan_term": -5.0,
+          "scan_over_max_penalty": 10.0,
+          "phase_extension_penalty": 15.0,
+          "live_launch_score": 5.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": -5.6,
+          "bar_state_stage_drag": -32.0,
+          "high_scan_launch_penalty": 20,
+          "live_soft_stage_leak_hard_block": true,
+          "approx_pts_restored_vs_live": 62.0
+        },
+        "live_score_raw": 7.54
+      },
+      "hard_extension": {
+        "symbol": "HARDX",
+        "scan_score": 80.0,
+        "phase": "EXTENSION",
+        "live_bar_state": "extended",
+        "ohlc_bar_state": "green",
+        "live_continuation": 7.54,
+        "equal_continuation": 68.14,
+        "live_list_ok": false,
+        "equal_list_ok": false,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "EXTENSION",
+          "scan_score": 80.0,
+          "live_bar_state": "extended",
+          "ohlc_bar_state": "green",
+          "scan_term": -5.0,
+          "scan_over_max_penalty": 10.0,
+          "phase_extension_penalty": 15.0,
+          "live_launch_score": 5.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": -5.6,
+          "bar_state_stage_drag": -25.0,
+          "high_scan_launch_penalty": 20,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 55.0
+        },
+        "live_score_raw": 7.54
+      }
+    },
+    "primary_would_take": [
+      "LAUNCHY",
+      "EXTENDY"
+    ],
+    "primary_attention": [
+      "LAUNCHY",
+      "EXTENDY"
+    ],
+    "sensitivity_hard_off_extra": [
+      "HARDX"
+    ]
+  },
+  "funnel_hours": {
+    "5": {
+      "hour": 5,
+      "has_funnel": false
+    },
+    "6": {
+      "hour": 6,
+      "has_funnel": false
+    },
+    "7": {
+      "hour": 7,
+      "has_funnel": false
+    },
+    "8": {
+      "hour": 8,
+      "has_funnel": false
+    },
+    "9": {
+      "hour": 9,
+      "has_funnel": false
+    },
+    "10": {
+      "hour": 10,
+      "has_funnel": false
+    },
+    "11": {
+      "hour": 11,
+      "has_funnel": false
+    },
+    "12": {
+      "hour": 12,
+      "has_funnel": false
+    },
+    "13": {
+      "hour": 13,
+      "has_funnel": false
+    },
+    "14": {
+      "hour": 14,
+      "has_funnel": false
+    },
+    "15": {
+      "hour": 15,
+      "has_funnel": false
+    }
+  },
+  "watchlist_illustrative": {
+    "label": "ILLUSTRATIVE watchlist \u2014 scan_score assumed EXTENSION-class for OKTA/WIX/COIN and LAUNCH-class for actual takes. Not live funnel.",
+    "pairs": {
+      "OKTA": {
+        "symbol": "OKTA",
+        "scan_score": 68.0,
+        "phase": "EXTENSION",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 12.24,
+        "equal_continuation": 79.84,
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": true,
+        "stage_demotion": {
+          "phase": "EXTENSION",
+          "scan_score": 68.0,
+          "live_bar_state": "extended",
+          "ohlc_bar_state": "yellow",
+          "scan_term": -5.0,
+          "scan_over_max_penalty": 10.0,
+          "phase_extension_penalty": 15.0,
+          "live_launch_score": 5.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": -5.6,
+          "bar_state_stage_drag": -32.0,
+          "high_scan_launch_penalty": 20,
+          "live_soft_stage_leak_hard_block": true,
+          "approx_pts_restored_vs_live": 62.0
+        },
+        "live_score_raw": 12.24
+      },
+      "WIX": {
+        "symbol": "WIX",
+        "scan_score": 66.0,
+        "phase": "EXTENSION",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 17.44,
+        "equal_continuation": 85.04,
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": true,
+        "stage_demotion": {
+          "phase": "EXTENSION",
+          "scan_score": 66.0,
+          "live_bar_state": "extended",
+          "ohlc_bar_state": "yellow",
+          "scan_term": -5.0,
+          "scan_over_max_penalty": 10.0,
+          "phase_extension_penalty": 15.0,
+          "live_launch_score": 5.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": -5.6,
+          "bar_state_stage_drag": -32.0,
+          "high_scan_launch_penalty": 20,
+          "live_soft_stage_leak_hard_block": true,
+          "approx_pts_restored_vs_live": 62.0
+        },
+        "live_score_raw": 17.44
+      },
+      "COIN": {
+        "symbol": "COIN",
+        "scan_score": 67.0,
+        "phase": "EXTENSION",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 14.44,
+        "equal_continuation": 82.04,
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": true,
+        "stage_demotion": {
+          "phase": "EXTENSION",
+          "scan_score": 67.0,
+          "live_bar_state": "extended",
+          "ohlc_bar_state": "yellow",
+          "scan_term": -5.0,
+          "scan_over_max_penalty": 10.0,
+          "phase_extension_penalty": 15.0,
+          "live_launch_score": 5.0,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": -5.6,
+          "bar_state_stage_drag": -32.0,
+          "high_scan_launch_penalty": 20,
+          "live_soft_stage_leak_hard_block": true,
+          "approx_pts_restored_vs_live": 62.0
+        },
+        "live_score_raw": 14.44
+      },
+      "TARS": {
+        "symbol": "TARS",
+        "scan_score": 36.0,
+        "phase": "LAUNCH",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 98.08,
+        "equal_continuation": 83.98,
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "LAUNCH",
+          "scan_score": 36.0,
+          "live_bar_state": "yellow",
+          "ohlc_bar_state": "yellow",
+          "scan_term": 5.0,
+          "scan_over_max_penalty": 0.0,
+          "phase_extension_penalty": 0.0,
+          "live_launch_score": 57.5,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": 9.1,
+          "bar_state_stage_drag": 0.0,
+          "high_scan_launch_penalty": 0.0,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 4.1
+        },
+        "live_score_raw": 98.08
+      },
+      "HOOD": {
+        "symbol": "HOOD",
+        "scan_score": 38.0,
+        "phase": "LAUNCH",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 94.48,
+        "equal_continuation": 81.78,
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "LAUNCH",
+          "scan_score": 38.0,
+          "live_bar_state": "yellow",
+          "ohlc_bar_state": "yellow",
+          "scan_term": 5.0,
+          "scan_over_max_penalty": 0.0,
+          "phase_extension_penalty": 0.0,
+          "live_launch_score": 52.5,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": 7.7,
+          "bar_state_stage_drag": 0.0,
+          "high_scan_launch_penalty": 0.0,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 2.7
+        },
+        "live_score_raw": 94.48
+      },
+      "IRD": {
+        "symbol": "IRD",
+        "scan_score": 34.0,
+        "phase": "LAUNCH",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 98.88,
+        "equal_continuation": 84.78,
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "LAUNCH",
+          "scan_score": 34.0,
+          "live_bar_state": "yellow",
+          "ohlc_bar_state": "yellow",
+          "scan_term": 5.0,
+          "scan_over_max_penalty": 0.0,
+          "phase_extension_penalty": 0.0,
+          "live_launch_score": 57.5,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": 9.1,
+          "bar_state_stage_drag": 0.0,
+          "high_scan_launch_penalty": 0.0,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 4.1
+        },
+        "live_score_raw": 98.88
+      },
+      "SNDK": {
+        "symbol": "SNDK",
+        "scan_score": 40.0,
+        "phase": "NEUTRAL",
+        "live_bar_state": "yellow",
+        "ohlc_bar_state": "yellow",
+        "live_continuation": 92.74,
+        "equal_continuation": 81.44,
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "live_soft_stage_leak_hard_block": false,
+        "stage_demotion": {
+          "phase": "NEUTRAL",
+          "scan_score": 40.0,
+          "live_bar_state": "yellow",
+          "ohlc_bar_state": "yellow",
+          "scan_term": 5.0,
+          "scan_over_max_penalty": 0.0,
+          "phase_extension_penalty": 0.0,
+          "live_launch_score": 47.5,
+          "trigger_launch_score": 25.0,
+          "launch_term_stage_drag": 6.3,
+          "bar_state_stage_drag": 0.0,
+          "high_scan_launch_penalty": 0.0,
+          "live_soft_stage_leak_hard_block": false,
+          "approx_pts_restored_vs_live": 1.3
+        },
+        "live_score_raw": 92.74
+      }
+    },
+    "would_take": [
+      "WIX",
+      "IRD"
+    ],
+    "attention": [
+      {
+        "symbol": "WIX",
+        "equal_cont": 85.04,
+        "live_cont": 17.44,
+        "phase": "EXTENSION",
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "leak_hard": true,
+        "case": "ENTER",
+        "case_src": "rules_equal_signal",
+        "reasons": [
+          "top_continuation",
+          "recent_leaderboard",
+          "polygon_gainer_today",
+          "tws_scanner",
+          "soft_extension"
+        ]
+      },
+      {
+        "symbol": "IRD",
+        "equal_cont": 84.78,
+        "live_cont": 98.88,
+        "phase": "LAUNCH",
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "leak_hard": false,
+        "case": "ENTER",
+        "case_src": "rules_momentum+equal_signal",
+        "reasons": [
+          "top_continuation"
+        ]
+      },
+      {
+        "symbol": "TARS",
+        "equal_cont": 83.98,
+        "live_cont": 98.08,
+        "phase": "LAUNCH",
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "leak_hard": false,
+        "case": "ENTER",
+        "case_src": "rules_momentum+equal_signal",
+        "reasons": [
+          "top_continuation"
+        ]
+      },
+      {
+        "symbol": "COIN",
+        "equal_cont": 82.04,
+        "live_cont": 14.44,
+        "phase": "EXTENSION",
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "leak_hard": true,
+        "case": "ENTER",
+        "case_src": "rules_equal_signal",
+        "reasons": [
+          "top_continuation",
+          "recent_leaderboard",
+          "polygon_gainer_today",
+          "tws_scanner",
+          "soft_extension"
+        ]
+      },
+      {
+        "symbol": "HOOD",
+        "equal_cont": 81.78,
+        "live_cont": 94.48,
+        "phase": "LAUNCH",
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "leak_hard": false,
+        "case": "ENTER",
+        "case_src": "rules_momentum+equal_signal",
+        "reasons": [
+          "top_continuation",
+          "recent_leaderboard",
+          "tws_scanner"
+        ]
+      },
+      {
+        "symbol": "SNDK",
+        "equal_cont": 81.44,
+        "live_cont": 92.74,
+        "phase": "NEUTRAL",
+        "live_list_ok": true,
+        "equal_list_ok": true,
+        "leak_hard": false,
+        "case": "WAIT",
+        "case_src": "rules_equal_signal_fail_closed",
+        "reasons": [
+          "top_continuation",
+          "recent_leaderboard"
+        ]
+      },
+      {
+        "symbol": "OKTA",
+        "equal_cont": 79.84,
+        "live_cont": 12.24,
+        "phase": "EXTENSION",
+        "live_list_ok": false,
+        "equal_list_ok": true,
+        "leak_hard": true,
+        "case": "WAIT",
+        "case_src": "rules_equal_signal_fail_closed",
+        "reasons": [
+          "recent_leaderboard",
+          "polygon_gainer_today",
+          "tws_scanner",
+          "soft_extension"
+        ]
+      }
+    ],
+    "case_enter": [
+      "WIX",
+      "IRD",
+      "TARS",
+      "COIN",
+      "HOOD"
+    ]
+  },
+  "stage_penalties_live": {
+    "phase_extension": 15.0,
+    "scan_over_55": 10.0
+  }
+}
