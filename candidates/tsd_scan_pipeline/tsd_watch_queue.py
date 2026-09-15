@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,8 +36,11 @@ from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
 
 ET = pytz.timezone("America/New_York")
 
-WatchStatus = Literal["WATCHING", "CONFIRMED", "SKIPPED"]
+WatchStatus = Literal["WATCHING", "CONFIRMED", "SKIPPED", "CLEARED_STALE"]
 QUEUE_PATH = state_path("tsd_watch_queue.json")
+# Stale CONFIRMED rows (prior session, now flat) are downgraded so they cannot
+# permanently block NEW takes. Same-session CONFIRMED stays in-flight.
+STALE_CONFIRMED_STATUS = "CLEARED_STALE"
 
 
 def load_queue() -> dict[str, Any]:
@@ -60,6 +63,76 @@ def _queue_index(state: dict[str, Any], symbol: str) -> int | None:
         if str(row.get("symbol", "")).upper() == sym:
             return i
     return None
+
+
+def _as_et(now: datetime | None = None) -> datetime:
+    """Normalize *now* to America/New_York."""
+    dt = now or datetime.now(ET)
+    if dt.tzinfo is None:
+        return ET.localize(dt)
+    return dt.astimezone(ET)
+
+
+def _parse_et_date(raw: Any) -> date | None:
+    """Parse an ISO timestamp or YYYY-MM-DD string to an ET calendar date."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return _as_et(dt).date()
+    except (TypeError, ValueError):
+        try:
+            return date.fromisoformat(text[:10])
+        except (TypeError, ValueError):
+            return None
+
+
+def _confirmed_session_date(row: dict[str, Any]) -> date | None:
+    """ET date the row was CONFIRMED; fall back to queue admit timestamps."""
+    for key in ("confirmed_at", "queued_at", "added_at", "scan_at"):
+        parsed = _parse_et_date(row.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _open_symbol_set(book: dict[str, Any] | None = None) -> set[str]:
+    """OPEN book symbols; empty set if the book cannot be read."""
+    try:
+        from tsd_scan_pipeline.tsd_capacity import load_state
+
+        state = book if book is not None else load_state()
+        return {str(s).upper() for s in open_symbols(state) if str(s).upper()}
+    except Exception:
+        return set()
+
+
+def is_confirmed_in_flight(
+    row: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    open_syms: set[str] | None = None,
+) -> bool:
+    """
+    True when a CONFIRMED queue row must still block NEW risk.
+
+    In-flight = currently OPEN in the book, or CONFIRMED on today's ET
+    session (fill pending / same-day lock). Prior-day CONFIRMED that is
+    now flat is a ghost confirm and must not block.
+    """
+    if str(row.get("status") or "").upper() != "CONFIRMED":
+        return False
+    sym = str(row.get("symbol") or "").upper()
+    if not sym:
+        return False
+    opens = open_syms if open_syms is not None else _open_symbol_set()
+    if sym in opens:
+        return True
+    session_d = _confirmed_session_date(row)
+    return session_d == _as_et(now).date()
 
 
 def add_to_watch_queue(
@@ -86,6 +159,8 @@ def add_to_watch_queue(
         gate_now = datetime.now(ET)
     bull, regime_label, regime_detail = fetch_regime_bull(polygon_key=polygon_key)
     results: list[dict[str, Any]] = []
+    open_syms = _open_symbol_set()
+    session_now = gate_now
 
     print(f"  Regime: {regime_label} (bull={bull})")
 
@@ -273,14 +348,21 @@ def add_to_watch_queue(
         idx = _queue_index(state, sym)
         if idx is not None:
             existing = state["queue"][idx]
-            if existing.get("status") == "CONFIRMED":
+            if existing.get("status") == "CONFIRMED" and is_confirmed_in_flight(
+                existing, now=session_now, open_syms=open_syms,
+            ):
                 results.append({
                     "symbol": sym,
                     "status": "UNCHANGED",
                     "reason": "already_confirmed",
                 })
-                print(f"  QUEUE KEEP {sym}: CONFIRMED (not overwritten)")
+                print(f"  QUEUE KEEP {sym}: CONFIRMED in-flight (not overwritten)")
                 continue
+            if existing.get("status") == "CONFIRMED":
+                print(
+                    f"  QUEUE OVERWRITE {sym}: stale CONFIRMED "
+                    f"(confirmed_at={existing.get('confirmed_at')}) eligible for NEW",
+                )
             state["queue"][idx] = row
             action = "UPDATED"
         else:
@@ -567,18 +649,26 @@ def update_queue_row(
 
 
 def confirmed_or_watching_symbols() -> set[str]:
-    """Symbols already CONFIRMED or WATCHING — not new take-slot risk."""
+    """WATCHING plus in-flight CONFIRMED — not new take-slot risk."""
     state = load_queue()
+    now = datetime.now(ET)
+    open_syms = _open_symbol_set()
     out: set[str] = set()
     for r in state.get("queue") or []:
         st = str(r.get("status") or "").upper()
-        if st in ("CONFIRMED", "WATCHING"):
+        if st == "WATCHING":
+            out.add(str(r.get("symbol") or "").upper())
+        elif is_confirmed_in_flight(r, now=now, open_syms=open_syms):
             out.add(str(r.get("symbol") or "").upper())
     return {s for s in out if s}
 
 
 def confirmed_symbols() -> set[str]:
-    """Symbols already CONFIRMED in the watch queue."""
+    """All queue rows currently marked CONFIRMED (including historical ghosts).
+
+    Do not use this for NEW-take exclusion. Use in_flight_confirmed_symbols()
+    so flat prior-session CONFIRMEDs can be taken again.
+    """
     state = load_queue()
     return {
         str(r.get("symbol") or "").upper()
@@ -586,6 +676,64 @@ def confirmed_symbols() -> set[str]:
         if str(r.get("status") or "").upper() == "CONFIRMED"
         and str(r.get("symbol") or "").upper()
     }
+
+
+def in_flight_confirmed_symbols(
+    book: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> set[str]:
+    """
+    CONFIRMED names that still block NEW takes.
+
+    A ghost confirm (status=CONFIRMED on a prior ET day, now flat) is excluded
+    from this set so Peak Hour can take the name again. Same-session CONFIRMED
+    stays blocked even if the fill is still pending and the book is not OPEN yet.
+    """
+    when = _as_et(now)
+    open_syms = _open_symbol_set(book)
+    out: set[str] = set()
+    for row in load_queue().get("queue") or []:
+        if is_confirmed_in_flight(row, now=when, open_syms=open_syms):
+            sym = str(row.get("symbol") or "").upper()
+            if sym:
+                out.add(sym)
+    return out
+
+
+def expire_stale_confirmed(
+    book: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> list[str]:
+    """
+    Downgrade flat historical CONFIRMED rows to CLEARED_STALE.
+
+    Same-session CONFIRMED and currently OPEN names are left alone so an
+    in-flight fill is not overwritten. Returns expired symbols (sorted).
+    """
+    when = _as_et(now)
+    open_syms = _open_symbol_set(book)
+    state = load_queue()
+    expired: list[str] = []
+    changed = False
+    for row in state.get("queue") or []:
+        if str(row.get("status") or "").upper() != "CONFIRMED":
+            continue
+        if is_confirmed_in_flight(row, now=when, open_syms=open_syms):
+            continue
+        sym = str(row.get("symbol") or "").upper()
+        if not sym:
+            continue
+        row["status"] = STALE_CONFIRMED_STATUS
+        row["skip_reason"] = "stale_confirmed_flat"
+        row["cleared_stale_at"] = when.isoformat()
+        expired.append(sym)
+        changed = True
+    if changed:
+        save_queue(state)
+        print(f"  QUEUE EXPIRE stale CONFIRMED: {sorted(expired)}")
+    return sorted(expired)
 
 
 def watching_symbols() -> list[str]:

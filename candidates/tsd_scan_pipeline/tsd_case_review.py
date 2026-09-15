@@ -688,8 +688,9 @@ def select_enter_rows(
     Autopsy: popular+structure filter kept the green keep-profit book;
     obscure non-popular ENTERs were a drag.
 
-    exclude_symbols: already OPEN / already_confirmed — do not consume take
-    slots (autopsy P0 cap accounting).
+    exclude_symbols: already OPEN / in-flight CONFIRMED — do not consume take
+    slots (autopsy P0 cap accounting). Ghost historical CONFIRMEDs should not
+    be passed here.
     """
     skip = {str(s).upper() for s in (exclude_symbols or set())}
     enters = [
