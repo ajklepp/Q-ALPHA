@@ -72,10 +72,14 @@ class TestSchedulerTickLock(unittest.TestCase):
                 line = child.stdout.readline().strip() if child.stdout else ""
                 self.assertEqual(line, "READY")
                 with patch.object(scheduler, "SCHEDULER_LOCK_PATH", lock_path), \
-                     patch.object(scheduler, "run_launch_pass") as launch:
+                     patch.object(scheduler, "run_launch_pass") as launch, \
+                     patch.object(scheduler, "run_trail_pass") as trail:
                     rc = scheduler.tick(dry_run=False, live=True)
                 self.assertEqual(rc, 0)
                 launch.assert_not_called()
+                # Second :20 tick must not start clientId 93 or tick-level
+                # trail backup (08:24 trail restart / TWS contention class).
+                trail.assert_not_called()
             finally:
                 child.kill()
                 child.wait(timeout=5)

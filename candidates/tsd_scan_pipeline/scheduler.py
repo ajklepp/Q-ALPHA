@@ -283,7 +283,7 @@ def tick(*, dry_run: bool = False, live: bool = True) -> int:
     if not acquire_scheduler_tick_lock():
         print(
             "SKIP: another TSD scheduler tick is in flight "
-            "(hour-8 abort guard; Do not start a new instance)",
+            "(hour-8 abort guard; no second clientId 93 / no tick trail backup)",
             flush=True,
         )
         return 0
