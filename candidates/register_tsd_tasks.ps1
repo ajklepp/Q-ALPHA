@@ -75,17 +75,32 @@ foreach ($tn in @("QAlpha TSD Scheduler", "QAlpha TSD Trail Monitor", "QAlpha TS
     $settings = $task.Settings
     $settings.DisallowStartIfOnBatteries = $false
     $settings.StopIfGoingOnBatteries = $false
+    if ($tn -eq "QAlpha TSD Scheduler") {
+        # 2026-09-14 hour-8 abort: overlapping 5-min ticks + ~30 min 1H LAUNCH
+        # produced TICK END exit=-1 at 08:23:45 and no SCAN hour=8.
+        # IgnoreNew = "Do not start a new instance" (must NOT be StopExisting
+        # or Parallel). PT2H so ExecutionTimeLimit cannot kill a long :15 scan.
+        $settings.MultipleInstances = "IgnoreNew"
+        $settings.ExecutionTimeLimit = "PT2H"
+    }
     if ($tn -eq "QAlpha TSD Trail Monitor") {
         # The loop should end at 20:00 ET; this prevents a stale process from
         # blocking the next day's 04:00 restart if it ever fails to exit.
         $settings.ExecutionTimeLimit = "PT17H"
     }
     Set-ScheduledTask -TaskName $tn -Settings $settings | Out-Null
+    if ($tn -eq "QAlpha TSD Scheduler") {
+        Write-Host "  Scheduler: MultipleInstances=IgnoreNew ExecutionTimeLimit=PT2H (hour-8 abort guard)"
+    }
     Write-Host "  Battery OK: $tn"
 }
 
 Write-Host ""
 Write-Host "POLICY: Sole live entry = TSD Scheduler → 1H LAUNCH. Setup Watch / gap agent = off."
+Write-Host "HOUR-8 GUARD: QAlpha TSD Scheduler must be 'Do not start a new instance' + 2h limit."
+Write-Host "  If you did not re-run this script, set it manually in Task Scheduler → Settings:"
+Write-Host "    If the task is already running → Do not start a new instance"
+Write-Host "    Stop the task if it runs longer than → 2 hours (checked)"
 Write-Host "Verify:"
 Write-Host "  schtasks /Query /TN `"QAlpha TSD Scheduler`" /FO LIST /V"
 Write-Host "  schtasks /Query /TN `"QAlpha TSD Trail Monitor`" /FO LIST /V"

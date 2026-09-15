@@ -14,8 +14,11 @@ candidates/tsd_pool_state.json
 candidates/tsd_shadow_mt3_book.json
 candidates/archive/
 candidates/tsd_scan_pipeline/results/tsd_scheduler_state.json
+candidates/logs/*.lock
+candidates/logs/*.pid
 candidates/tsd_scan_pipeline/results/peak_hour_scans/
 candidates/tsd_scan_pipeline/results/popularity_cache/
+candidates/tsd_scan_pipeline/results/h1_bar_cache/
 candidates/pending_approvals.json
 data/*.csv
 data/*.parquet

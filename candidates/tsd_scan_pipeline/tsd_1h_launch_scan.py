@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
 from tsd_scan_pipeline.php_scan_funnel import (  # noqa: E402
+    build_reject_summary,
     build_scan_funnel_doc,
     write_scan_funnel,
 )
@@ -49,6 +51,7 @@ from tsd_scan_pipeline.tsd_launch_score import (
     EXTENSION_SCAN_AUTO,
     enrich_launch_fields,
 )
+from tsd_scan_pipeline.tsd_stage_log import StageTimer  # noqa: E402
 from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
     add_to_watch_queue,
     confirmed_symbols,
@@ -63,6 +66,9 @@ QUEUE_ADMIT_STATUSES = {"ADDED", "UPDATED", "WATCHING"}
 QUEUE_NON_NEW_REASONS = frozenset({"already_confirmed"})
 QUEUE_NON_NEW_STATUSES = frozenset({"UNCHANGED"})
 LAUNCH_CACHE_PATH = PIPELINE_DIR / "results" / "last_1h_launch.json"
+# Overlap Polygon 1H RTT across the HTF universe. polygon_get still 0.12s-paces
+# and retries 429; 8 workers cut ~147 serial fetches from ~20 min toward ~3 min.
+EVAL_WORKERS = 8
 
 
 def _non_new_risk_symbols(book: dict[str, Any] | None = None) -> set[str]:
@@ -84,6 +90,84 @@ def _queue_consumed_new_slot(qr: dict[str, Any]) -> bool:
     if st in QUEUE_NON_NEW_STATUSES or reason in QUEUE_NON_NEW_REASONS:
         return False
     return st in QUEUE_ADMIT_STATUSES or st in {"SKIPPED", "REJECTED"}
+
+
+def _evaluate_universe(
+    symbols: list[str],
+    *,
+    htf_rows: dict[str, dict[str, Any]],
+    polygon_key: str,
+    now_et: datetime,
+) -> list[dict[str, Any]]:
+    """1H launch eval for HTF-pass names, overlapping Polygon RTT."""
+    n = len(symbols)
+    if n == 0:
+        return []
+    workers = max(1, min(EVAL_WORKERS, n))
+    print(f"  Evaluating {n} names with {workers} workers...", flush=True)
+    rows: list[dict[str, Any] | None] = [None] * n
+
+    def _one(item: tuple[int, str]) -> tuple[int, dict[str, Any]]:
+        i, sym = item
+        try:
+            row = evaluate_1h_symbol(
+                sym, htf_row=htf_rows.get(sym), polygon_key=polygon_key, now=now_et,
+            )
+        except Exception as exc:
+            row = {
+                "symbol": str(sym).upper(),
+                "pass": False,
+                "reject_reason": f"fetch_err:{exc}",
+            }
+        return i, row
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, (i, s)) for i, s in enumerate(symbols)]
+        done = 0
+        for fut in as_completed(futs):
+            i, row = fut.result()
+            rows[i] = row
+            done += 1
+            if row.get("pass") or done % 25 == 0 or done <= 5:
+                print(
+                    f"  [{done:>3}/{n}] {str(row.get('symbol') or ''):<6} "
+                    f"1H_buy={row.get('buy_signal')} hour={row.get('htf_1h_bar_hour')} "
+                    f"phase3h={row.get('phase_3h')} -> "
+                    f"{'LAUNCH' if row.get('pass') else row.get('reject_reason')}",
+                    flush=True,
+                )
+    return [r for r in rows if r is not None]
+
+
+def _emit_live_scan_telegram(
+    *,
+    now_et: datetime,
+    htf_pass_count: int,
+    all_rows: list[dict[str, Any]],
+    ranked: list[dict[str, Any]],
+    take: list[dict[str, Any]],
+    entered_n: int | None = None,
+) -> None:
+    """SCAN Telegram as soon as HTF/launches/take/rejects are known (not after sync)."""
+    from tsd_scan_pipeline.tsd_notify import format_scan_summary, notify_tsd
+
+    reject_summary, _ = build_reject_summary(all_rows)
+    notify_tsd(
+        format_scan_summary(
+            hour=now_et.hour,
+            htf_pass=htf_pass_count,
+            launches_n=len(ranked),
+            take_n=len(take),
+            entered_n=entered_n,
+            reject_summary=reject_summary if reject_summary else None,
+            take_symbols=[str(r.get("symbol") or "").upper() for r in take],
+        )
+    )
+    print(
+        f"  Telegram sent: Peak Hour SCAN hour={now_et.hour} "
+        f"(early; entered pending={entered_n is None})",
+        flush=True,
+    )
 
 
 def _promote_next_enter_takes(
@@ -229,6 +313,7 @@ def rank_1h_launches(
     passed = [r for r in rows if r.get("pass")]
     if attach_social and passed:
         key = polygon_key or load_polygon_key()
+        t_social = time.time()
         try:
             passed = attach_social_to_rows(
                 passed,
@@ -243,12 +328,15 @@ def rank_1h_launches(
             n_tws = sum(1 for r in passed if int(r.get("tws_ok") or 0) == 1)
             print(
                 f"  Social/news attached: {len(passed)} passers · "
-                f"news>0={n_news} · ST_ok={n_st} · TWS_ok={n_tws}"
+                f"news>0={n_news} · ST_ok={n_st} · TWS_ok={n_tws} "
+                f"({time.time() - t_social:.1f}s)",
+                flush=True,
             )
         except Exception as exc:
-            print(f"  social attach warn: {exc}")
+            print(f"  social attach warn: {exc}", flush=True)
 
     if passed:
+        t_deep = time.time()
         try:
             key = polygon_key or load_polygon_key()
             passed = attach_deep_features(passed, api_key=key, as_of=now)
@@ -257,15 +345,17 @@ def rank_1h_launches(
             n_path = sum(1 for r in passed if float(r.get("ticker_prior_source") or 0) >= 2.0)
             print(
                 f"  Deep features: room_filled={n_room} prior_filled={n_prior} "
-                f"path_prior={n_path}"
+                f"path_prior={n_path} ({time.time() - t_deep:.1f}s)",
+                flush=True,
             )
         except Exception as exc:
-            print(f"  deep features warn: {exc}")
+            print(f"  deep features warn: {exc}", flush=True)
 
     # Decision-time RS_1h / $vol / float / options (autopsy gaps) — then re-rank.
     try:
         from tsd_scan_pipeline.tsd_decision_context import attach_decision_context
 
+        t_ctx = time.time()
         # Preliminary score so options_top_n prefers strong names
         for row in passed:
             if row.get("continuation_score") is None:
@@ -279,10 +369,11 @@ def rank_1h_launches(
         n_dead = sum(1 for r in passed if int(r.get("micro_dead_tape") or 0) == 1)
         print(
             f"  Decision context: rs_1h_ok={n_rs}/{len(passed)} "
-            f"options={n_opt} dead_tape={n_dead}"
+            f"options={n_opt} dead_tape={n_dead} ({time.time() - t_ctx:.1f}s)",
+            flush=True,
         )
     except Exception as exc:
-        print(f"  decision context warn: {exc}")
+        print(f"  decision context warn: {exc}", flush=True)
 
     for row in passed:
         enriched = enrich_launch_fields(row)
@@ -412,21 +503,26 @@ def run_1h_launch_scan(
 ) -> int:
     """Hourly 1H LAUNCH scan on today's HTF-pass universe."""
     t0 = time.time()
+    timer = StageTimer()
     now_et = now or datetime.now(ET)
     if now_et.tzinfo is None:
         now_et = ET.localize(now_et)
     else:
         now_et = now_et.astimezone(ET)
 
-    print("=" * 64)
-    print("1H LAUNCH v3.1 continuation-ranker")
-    print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}")
-    print(f"Bar source: {BAR_SOURCE}  score={CONTINUATION_SCORE_VERSION}  slots={MAX_NEW_ENTRIES_PER_SCAN}")
-    print("Structure: KILL ONLY until +1R")
-    print("=" * 64)
+    print("=" * 64, flush=True)
+    print("1H LAUNCH v3.1 continuation-ranker", flush=True)
+    print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}", flush=True)
+    print(
+        f"Bar source: {BAR_SOURCE}  score={CONTINUATION_SCORE_VERSION}  "
+        f"slots={MAX_NEW_ENTRIES_PER_SCAN}",
+        flush=True,
+    )
+    print("Structure: KILL ONLY until +1R", flush=True)
+    print("=" * 64, flush=True)
 
     if not is_launch_hour_window(now_et):
-        print(f"  SKIP: hour {now_et.hour} not in {sorted(ALLOWED_HOURS)}")
+        print(f"  SKIP: hour {now_et.hour} not in {sorted(ALLOWED_HOURS)}", flush=True)
         return 0
 
     key = load_polygon_key()
@@ -436,28 +532,21 @@ def run_1h_launch_scan(
     if max_symbols:
         symbols = symbols[:max_symbols]
     htf_pass_count = len(symbols)
-    print(f"HTF-pass universe: {htf_pass_count}")
+    print(f"HTF-pass universe: {htf_pass_count}", flush=True)
+    timer.stage("htf")
 
     book = load_state()
     reset_scan_counter(book)
     save_state(book)
 
-    rows: list[dict[str, Any]] = []
-    for i, sym in enumerate(symbols, 1):
-        row = evaluate_1h_symbol(
-            sym, htf_row=htf_rows.get(sym), polygon_key=key, now=now_et,
-        )
-        rows.append(row)
-        if row.get("pass") or i % 25 == 0 or i <= 5:
-            print(
-                f"  [{i:>3}/{len(symbols)}] {sym:<6} "
-                f"1H_buy={row.get('buy_signal')} hour={row.get('htf_1h_bar_hour')} "
-                f"phase3h={row.get('phase_3h')} -> "
-                f"{'LAUNCH' if row.get('pass') else row.get('reject_reason')}"
-            )
+    rows = _evaluate_universe(
+        symbols, htf_rows=htf_rows, polygon_key=key, now_et=now_et,
+    )
+    timer.stage("bars_eval")
 
     ranked = rank_1h_launches(rows, polygon_key=key, now=now_et)
-    print(f"\n1H launches: {len(ranked)} ranked passers")
+    print(f"\n1H launches: {len(ranked)} ranked passers", flush=True)
+    timer.stage("score")
 
     from tsd_scan_pipeline.tsd_attention import build_attention_pool
     from tsd_scan_pipeline.tsd_case_review import (
@@ -467,6 +556,7 @@ def run_1h_launch_scan(
     )
 
     attention_raw = build_attention_pool(ranked, polygon_key=key)
+    timer.stage("attention")
     # Dry scans: rules-only case (no LLM spend). Live: full fusion + web search.
     attention = review_attention_pool(
         attention_raw,
@@ -476,18 +566,20 @@ def run_1h_launch_scan(
         polygon_key=key,
     )
     alert_case_rank_disagreement(attention, notify=bool(live))
+    timer.stage("case_review")
 
     # Autopsy P0: only NEW risk consumes the 2/hour take cap (skip already_confirmed / OPEN).
     exclude_take = _non_new_risk_symbols(book)
     if exclude_take:
-        print(f"  Cap exclude (OPEN/CONFIRMED): {sorted(exclude_take)}")
+        print(f"  Cap exclude (OPEN/CONFIRMED): {sorted(exclude_take)}", flush=True)
     take = select_enter_rows(
         attention, max_n=MAX_NEW_ENTRIES_PER_SCAN, exclude_symbols=exclude_take,
     )
     print(
         f"\nCase review: attention={len(attention)} "
         f"ENTER={sum(1 for r in attention if str(r.get('case_verdict') or '').upper()=='ENTER')} "
-        f"taking {len(take)} NEW (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)"
+        f"taking {len(take)} NEW (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)",
+        flush=True,
     )
     for r in take:
         case = r.get("case_review") or {}
@@ -497,10 +589,11 @@ def run_1h_launch_scan(
             f"HTF={r.get('htf_score')} cont={r.get('continuation_score')} "
             f"CASE={case.get('verdict')} conf={case.get('confidence')} "
             f"mom={int(bool(r.get('momentum_context')))} "
-            f"reasons={','.join(r.get('attention_reasons') or [])}"
+            f"reasons={','.join(r.get('attention_reasons') or [])}",
+            flush=True,
         )
     if not take and attention:
-        print("  No case-ENTER names this scan (score alone cannot buy)")
+        print("  No case-ENTER names this scan (score alone cannot buy)", flush=True)
 
     queue_results: list[dict[str, Any]] = []
     entry_results: list[dict[str, Any]] = []
@@ -509,12 +602,30 @@ def run_1h_launch_scan(
         str(r.get("symbol") or "").upper() for r in take if r.get("symbol")
     }
 
+    # SCAN TG as soon as HTF / launches / take / rejects are known — before
+    # enter (micro-confirm) and before non-critical dashboard / missed_moves sync.
+    if live:
+        try:
+            _emit_live_scan_telegram(
+                now_et=now_et,
+                htf_pass_count=htf_pass_count,
+                all_rows=rows,
+                ranked=ranked,
+                take=take,
+                entered_n=None,
+            )
+        except Exception as exc:
+            print(f"  early scan telegram warn: {exc}", flush=True)
+        timer.stage("telegram")
+    else:
+        timer.stage("telegram")
+
     def _live_queue_and_enter(ib, candidates: list[dict[str, Any]]) -> None:
         """Admit candidates to queue and micro-confirm → BUY; mutate outer results."""
         nonlocal queue_results, entry_results, book
         if not candidates:
             return
-        print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---")
+        print("\n--- WATCH QUEUE / ENTER (queue-admitted only) ---", flush=True)
         qrs = add_to_watch_queue(candidates, scan_at=now_et.isoformat(), polygon_key=key)
         queue_results.extend(qrs)
         admitted: set[str] = set()
@@ -526,11 +637,14 @@ def run_1h_launch_scan(
                 admitted.add(sym)
             else:
                 skipped.append(qr)
-                print(f"  LIVE SKIP {sym}: status={st} reason={qr.get('reason', '')}")
+                print(
+                    f"  LIVE SKIP {sym}: status={st} reason={qr.get('reason', '')}",
+                    flush=True,
+                )
 
         enter_rows = [r for r in candidates if str(r.get("symbol", "")).upper() in admitted]
         if not enter_rows:
-            print("  No queue-admitted names to micro-confirm")
+            print("  No queue-admitted names to micro-confirm", flush=True)
             if candidates and skipped:
                 try:
                     from tsd_scan_pipeline.tsd_notify import (
@@ -545,7 +659,7 @@ def run_1h_launch_scan(
 
         book = load_state()
         reset_scan_counter(book)
-        print("\n--- MICRO-CONFIRM (1-min tape since 1H close) ---")
+        print("\n--- MICRO-CONFIRM (1-min tape since 1H close) ---", flush=True)
         fills = process_micro_confirm_queue(
             ib, book_state=book, live=True, polygon_key=key,
         )
@@ -554,7 +668,8 @@ def run_1h_launch_scan(
         for fill in fills:
             print(
                 f"  {fill.get('symbol')} {fill.get('status')} "
-                f"{fill.get('reason', '')}"
+                f"{fill.get('reason', '')}",
+                flush=True,
             )
 
     if live and take:
@@ -565,7 +680,7 @@ def run_1h_launch_scan(
         try:
             ib.connect("127.0.0.1", 7497, clientId=93, timeout=12)
         except Exception as exc:
-            print(f"CONNECT FAILED: {exc}")
+            print(f"CONNECT FAILED: {exc}", flush=True)
             exit_code = 1
             ib = None
         if ib is not None:
@@ -620,7 +735,8 @@ def run_1h_launch_scan(
                         print(
                             f"\n--- PROMOTE NEXT ENTER "
                             f"(need={need} non_new_skips={non_new_skips} "
-                            f"no_fill={no_fill_n}) ---"
+                            f"no_fill={no_fill_n}) ---",
+                            flush=True,
                         )
                         for r in promote:
                             tried_syms.add(str(r.get("symbol") or "").upper())
@@ -628,7 +744,8 @@ def run_1h_launch_scan(
                             print(
                                 f"  PROMOTE {r.get('symbol')} "
                                 f"cont={r.get('continuation_score')} "
-                                f"CASE={(r.get('case_review') or {}).get('verdict')}"
+                                f"CASE={(r.get('case_review') or {}).get('verdict')}",
+                                flush=True,
                             )
                         _live_queue_and_enter(ib, promote)
             finally:
@@ -636,6 +753,7 @@ def run_1h_launch_scan(
                     ib.disconnect()
                 except Exception:
                     pass
+    timer.stage("enter")
 
     _write_launch_artifact(
         now_et=now_et,
@@ -645,7 +763,7 @@ def run_1h_launch_scan(
         entry_results=entry_results,
         attention=attention,
     )
-    funnel_path = _persist_funnel(
+    _persist_funnel(
         now_et=now_et,
         htf_pass_count=htf_pass_count,
         symbols_scanned=len(rows),
@@ -657,10 +775,13 @@ def run_1h_launch_scan(
         t0=t0,
         live=live,
     )
+    timer.stage("funnel")
 
-    # Missed-move ledger: ranked launches not filled (Weekly Review highlights)
+    # Missed-move ledger: ranked launches not filled (Weekly Review highlights).
+    # Peak-price Polygon refresh is deferred off this hot path (dashboard sync
+    # also skips mark_ran_up when refresh_missed_peaks=False).
     try:
-        from tsd_scan_pipeline.php_missed_ledger import mark_ran_up, record_scan_outcomes
+        from tsd_scan_pipeline.php_missed_ledger import record_scan_outcomes
 
         taken_syms = {
             str(e.get("symbol") or "").upper()
@@ -685,54 +806,27 @@ def run_1h_launch_scan(
         n_led = record_scan_outcomes(
             now_et=now_et, ranked=ranked, taken_symbols=taken_syms,
         )
-        n_mark = mark_ran_up(days=14, only_missed=True) if live else 0
-        print(f"  Missed ledger upserted={n_led} marked={n_mark}")
+        print(f"  Missed ledger upserted={n_led} (ran-up refresh deferred)", flush=True)
     except Exception as exc:
-        print(f"  missed ledger warn: {exc}")
+        print(f"  missed ledger warn: {exc}", flush=True)
+    timer.stage("ledger")
 
-    # Always refresh dashboard + Telegram after every live scan (incl. 0 launches).
+    # Dashboard / book sync after SCAN TG + enter. Skip Polygon missed-peak
+    # hammer (was ~400+ daily fetches, several minutes) on this tick.
     if live:
         try:
             from tsd_supabase_sync import push_dashboard_best_effort
 
-            push_dashboard_best_effort(telegram_on_fail=True)
-        except Exception as exc:
-            print(f"  post-scan dashboard sync warn: {exc}")
-        try:
-            from tsd_scan_pipeline.tsd_notify import format_scan_summary, notify_tsd
-
-            reject_summary: dict[str, Any] = {}
-            try:
-                import json as _json
-                from pathlib import Path as _Path
-
-                if funnel_path and _Path(str(funnel_path)).exists():
-                    reject_summary = (
-                        _json.loads(_Path(str(funnel_path)).read_text(encoding="utf-8")).get(
-                            "reject_summary"
-                        )
-                        or {}
-                    )
-            except Exception:
-                reject_summary = {}
-            entered_n = sum(
-                1 for e in entry_results if str(e.get("status") or "").upper() == "FILLED"
-            )
-            notify_tsd(
-                format_scan_summary(
-                    hour=now_et.hour,
-                    htf_pass=htf_pass_count,
-                    launches_n=len(ranked),
-                    take_n=len(take),
-                    entered_n=entered_n,
-                    reject_summary=reject_summary if isinstance(reject_summary, dict) else None,
-                    take_symbols=[str(r.get("symbol") or "").upper() for r in take],
-                )
+            push_dashboard_best_effort(
+                telegram_on_fail=True,
+                refresh_missed_peaks=False,
             )
         except Exception as exc:
-            print(f"  post-scan telegram warn: {exc}")
+            print(f"  post-scan dashboard sync warn: {exc}", flush=True)
+    timer.stage("sync")
 
-    print("=" * 64)
+    print(f"  {timer.summary()}", flush=True)
+    print("=" * 64, flush=True)
     return exit_code
 
 

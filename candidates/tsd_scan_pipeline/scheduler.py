@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -38,6 +39,11 @@ from tsd_scan_pipeline.build_3h_bars import IBKR_3H_CLOSE_HOURS_ET  # noqa: E402
 ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 STATE_PATH = RESULTS_DIR / "tsd_scheduler_state.json"
+# Exclusive lock so a 5-min Task Scheduler overlap cannot start a second
+# --tick / --launch while a 1H LAUNCH is still running (2026-09-14 hour-8
+# abort: DUE 08:15 then TICK END exit=-1 at 08:23:45, no SCAN).
+SCHEDULER_LOCK_PATH = CANDIDATES_DIR / "logs" / "tsd_scheduler_tick.lock"
+_SCHEDULER_LOCK_FH = None
 LAUNCH_HOURS_ET = (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 LAUNCH_LAG_MIN = 15  # delayed Polygon settle; do not front-run forming 1H bar
 HTF_REFRESH_AT = time(4, 30)
@@ -62,6 +68,75 @@ def _load_state() -> dict[str, Any]:
 def _save_state(state: dict[str, Any]) -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+
+
+def acquire_scheduler_tick_lock() -> bool:
+    """
+    Exclusive non-blocking lock for one scheduler process.
+
+    Returns False when another tick / --launch already holds the lock so
+    this process must no-op (exit 0). OS releases the lock if the holder
+    is killed; do not treat a leftover .lock file as stale without flock.
+    """
+    global _SCHEDULER_LOCK_FH
+    if _SCHEDULER_LOCK_FH is not None:
+        return True
+    try:
+        SCHEDULER_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(SCHEDULER_LOCK_PATH, "a+b")
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                fh.close()
+                return False
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                fh.close()
+                return False
+        fh.seek(0)
+        fh.truncate()
+        fh.write(f"{os.getpid()}\n".encode("ascii"))
+        fh.flush()
+        _SCHEDULER_LOCK_FH = fh
+        return True
+    except Exception as exc:
+        print(f"scheduler tick lock warn: {exc}", flush=True)
+        # Lock-file I/O must not skip :15 launches. Contention already
+        # returned False above; only infrastructure failures land here.
+        return True
+
+
+def release_scheduler_tick_lock() -> None:
+    """Release the tick lock; safe to call when no lock is held."""
+    global _SCHEDULER_LOCK_FH
+    fh = _SCHEDULER_LOCK_FH
+    _SCHEDULER_LOCK_FH = None
+    if fh is None:
+        return
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        fh.close()
+    except Exception:
+        pass
 
 
 def _slot_key(kind: str, bar_hour: int, when: datetime) -> str:
@@ -200,9 +275,28 @@ def _trail_backup_allowed(now: datetime) -> bool:
 
 
 def tick(*, dry_run: bool = False, live: bool = True) -> int:
-    """Evaluate ET schedule and run any due passes."""
+    """Evaluate ET schedule and run any due passes.
+
+    Holds an exclusive tick lock for the whole function so a long 1H LAUNCH
+    cannot be overlapped by the next 5-min Task Scheduler instance.
+    """
+    if not acquire_scheduler_tick_lock():
+        print(
+            "SKIP: another TSD scheduler tick is in flight "
+            "(hour-8 abort guard; no second clientId 93 / no tick trail backup)",
+            flush=True,
+        )
+        return 0
+    try:
+        return _tick_body(dry_run=dry_run, live=live)
+    finally:
+        release_scheduler_tick_lock()
+
+
+def _tick_body(*, dry_run: bool = False, live: bool = True) -> int:
+    """Inner tick: due slots / HTF / trail backup. Caller holds the lock."""
     now = datetime.now(ET)
-    print(f"TSD scheduler tick ET={now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"TSD scheduler tick ET={now.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
     if now.weekday() >= 5:
         print("Weekend — tick skipped.")
@@ -213,7 +307,7 @@ def tick(*, dry_run: bool = False, live: bool = True) -> int:
 
     rc = 0
     for bar_hour, sched in _due_slots(now, kind="launch"):
-        print(f"DUE 1H launch bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}")
+        print(f"DUE 1H launch bar={bar_hour:02d}:00 scheduled={sched.isoformat()} live={live}", flush=True)
         if dry_run:
             continue
         rc = max(rc, run_launch_pass(live=live))
@@ -304,7 +398,17 @@ def main() -> int:
     if args.polygon:
         return run_polygon_pass()
     if args.launch:
-        return run_launch_pass(live=args.live)
+        if not acquire_scheduler_tick_lock():
+            print(
+                "SKIP: another TSD scheduler tick is in flight "
+                "(hour-8 abort guard; --launch refused)",
+                flush=True,
+            )
+            return 0
+        try:
+            return run_launch_pass(live=args.live)
+        finally:
+            release_scheduler_tick_lock()
     if args.htf_universe:
         return run_htf_universe_pass()
     if args.tws:

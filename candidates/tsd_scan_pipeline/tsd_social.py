@@ -242,6 +242,7 @@ def fetch_social_bundle(
     include_st: bool = True,
     include_tws: bool = True,
     ib: Any | None = None,
+    allow_tws_connect: bool = True,
 ) -> dict[str, Any]:
     """Combine Polygon + optional TWS news + StockTwits + optional X. Never raises.
 
@@ -273,7 +274,7 @@ def fetch_social_bundle(
         try:
             from tsd_scan_pipeline.tsd_tws_news import fetch_tws_headlines
 
-            tws = fetch_tws_headlines(symbol, ib=ib)
+            tws = fetch_tws_headlines(symbol, ib=ib, allow_connect=allow_tws_connect)
             out["tws_ok"] = int(tws.get("tws_ok") or 0)
             out["tws_headline_count"] = float(tws.get("tws_headline_count") or 0)
             out["tws_providers_hit"] = tws.get("tws_providers_hit") or []
@@ -355,24 +356,54 @@ def attach_social_to_rows(
     include_tws: bool = True,
     ib: Any | None = None,
 ) -> list[dict[str, Any]]:
-    """Mutate/return rows with social bundle fields (one fetch per symbol)."""
+    """Mutate/return rows with social bundle fields (one fetch per symbol).
+
+    TWS: connect once for the whole batch. If TWS is down, skip headlines for
+    every passer instead of an 8s connect timeout × N.
+    """
     cache: dict[str, dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
-    for row in rows:
-        sym = str(row.get("symbol") or "").upper()
-        if not sym:
-            out.append(row)
-            continue
-        if sym not in cache:
-            cache[sym] = fetch_social_bundle(
-                sym,
-                api_key=api_key,
-                as_of=as_of,
-                include_x=include_x,
-                include_st=include_st,
-                include_tws=include_tws,
-                ib=ib,
-            )
-        merged = {**row, **cache[sym]}
-        out.append(merged)
-    return out
+    tws_ib = ib
+    own_tws = False
+    tws_ok = bool(include_tws)
+    if tws_ok and (tws_ib is None or not getattr(tws_ib, "isConnected", lambda: False)()):
+        try:
+            from tsd_scan_pipeline.tsd_tws_news import open_tws_news_connection
+
+            tws_ib = open_tws_news_connection()
+            own_tws = tws_ib is not None
+            if tws_ib is None:
+                tws_ok = False
+                print("  TWS news: no connection (skipping per-symbol retries)", flush=True)
+        except Exception as exc:
+            tws_ok = False
+            tws_ib = None
+            print(f"  TWS news connect warn: {exc}", flush=True)
+    try:
+        for row in rows:
+            sym = str(row.get("symbol") or "").upper()
+            if not sym:
+                out.append(row)
+                continue
+            if sym not in cache:
+                cache[sym] = fetch_social_bundle(
+                    sym,
+                    api_key=api_key,
+                    as_of=as_of,
+                    include_x=include_x,
+                    include_st=include_st,
+                    include_tws=tws_ok,
+                    ib=tws_ib,
+                    allow_tws_connect=False,
+                )
+            merged = {**row, **cache[sym]}
+            out.append(merged)
+        return out
+    finally:
+        if own_tws:
+            try:
+                from tsd_scan_pipeline.tsd_tws_news import close_tws_news_connection
+
+                close_tws_news_connection(tws_ib)
+            except Exception:
+                pass

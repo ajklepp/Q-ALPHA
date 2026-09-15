@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import statistics
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ PATH_FORWARD_BARS = 20
 KILL_PCT = 0.05
 TARGET_PCT = 0.05  # +1R at 5% when kill=5%
 PRIOR_LOOKBACK_DAYS = 90
+# Overlap Polygon daily/SIC RTT for passers; 1H path-prior should be cache hits.
+DEEP_FEATURE_WORKERS = 6
 
 
 def _clip01(x: float) -> float:
@@ -143,12 +146,14 @@ def prior_from_1h_path(
     }
 
     try:
-        from tsd_scan_pipeline.tsd_1h_signal import _bars_1h_polygon, last_completed_1h_bar
+        from tsd_scan_pipeline.tsd_1h_signal import last_completed_1h_bar, load_1h_bars
         from tsd_scan_pipeline.tsd_signals import enrich_tsd
 
         key = api_key or load_polygon_key()
-        raw = _bars_1h_polygon(symbol, api_key=key, days=PRIOR_LOOKBACK_DAYS)
-        time.sleep(0.12)
+        # Reuse the launch-scan 1H cache (same lookback) — no second 90d Polygon pull.
+        raw = load_1h_bars(
+            symbol, api_key=key, days=PRIOR_LOOKBACK_DAYS, now=now,
+        )
         df = last_completed_1h_bar(raw, now=now)
         if df is None or len(df) < 80:
             _cache_set(cache_key, empty)
@@ -307,7 +312,6 @@ def room_bounce_from_daily(
     params = {"adjusted": "true", "sort": "asc", "limit": 120}
     try:
         data = polygon_get(url, params, key)
-        time.sleep(0.12)
         results = data.get("results") or []
     except Exception:
         out = dict(_empty)
@@ -343,7 +347,6 @@ def room_bounce_from_daily(
             f"{as_of_date.isoformat()}/{as_of_date.isoformat()}"
         )
         today_data = polygon_get(url_today, {"adjusted": "true", "limit": 1}, key)
-        time.sleep(0.12)
         today_bars = today_data.get("results") or []
         if today_bars:
             day_open = float(today_bars[0].get("o") or 0)
@@ -374,12 +377,12 @@ def attach_deep_features(
 ) -> list[dict[str, Any]]:
     """Attach room/bounce/prior onto each row (passers only in practice)."""
     key = api_key or load_polygon_key()
-    out: list[dict[str, Any]] = []
-    for row in rows:
+
+    def _one(row: dict[str, Any]) -> dict[str, Any]:
+        """Enrich one passer; failures stay zeros (never block rank)."""
         sym = str(row.get("symbol") or "").upper()
         if not sym:
-            out.append(row)
-            continue
+            return row
         close = float(
             row.get("htf_1h_close")
             or row.get("close")
@@ -408,5 +411,12 @@ def attach_deep_features(
             prof = _load_tsd_profile(sym)
             if prof:
                 merged["tsd_profile"] = prof
-        out.append(merged)
-    return out
+        return merged
+
+    if not rows:
+        return []
+    workers = max(1, min(DEEP_FEATURE_WORKERS, len(rows)))
+    if workers == 1:
+        return [_one(r) for r in rows]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_one, rows))
