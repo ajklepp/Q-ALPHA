@@ -30,6 +30,126 @@ KILL_ESCALATE_RETRY_SLIP = 0.93
 # Stuck if last is this far through the kill limit (relative) or by absolute cents.
 STUCK_KILL_LIMIT_FRAC = 0.995
 STUCK_KILL_LIMIT_EPS = 0.01
+# 1 cent — broker stops are 2-decimal; do not cancel/replace within this band.
+KILL_STOP_EPS = 0.01
+# IB UNSET_DOUBLE is ~1.8e308; ignore non-price sentinels when reading stops.
+_MAX_SANE_PRICE = 1.0e7
+_TERMINAL_ORDER_STATUS = frozenset(
+    {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+)
+
+
+def _sane_price(value: Any) -> float:
+    """Return a usable USD price, or 0 if missing / IB unset sentinel."""
+    try:
+        px = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if px <= 0 or px > _MAX_SANE_PRICE:
+        return 0.0
+    return px
+
+
+def order_stop_price(order: Any) -> float:
+    """
+    Stop trigger from an IBKR order.
+
+    ib_insync StopLimitOrder / StopOrder store the trigger on ``auxPrice``.
+    The Order dataclass has no ``stopPrice`` field — the constructor arg is
+    copied to auxPrice. ``getattr(order, "stopPrice", 0)`` is therefore
+    always 0.0 on live openOrders, which made ``sync_kill_quantity`` think
+    the kill was 0.0 every tick and cancel/replace (ATRC 2026-09-15 loop).
+    """
+    for attr in ("auxPrice", "stopPrice"):
+        px = _sane_price(getattr(order, attr, None))
+        if px > 0:
+            return px
+    return 0.0
+
+
+def _normalize_order_type(order_type: Any) -> str:
+    return str(order_type or "").upper().replace("_", " ").replace("-", " ")
+
+
+def is_protective_sell_stop(order: Any) -> bool:
+    """True for broker kill types (STP / STP LMT), not TRAIL or naked LMT."""
+    if str(getattr(order, "action", "") or "").upper() != "SELL":
+        return False
+    otype = _normalize_order_type(getattr(order, "orderType", ""))
+    if "TRAIL" in otype:
+        return False
+    if otype in {"STP", "STP LMT", "STPLMT", "STOP", "STOP LIMIT"}:
+        return True
+    return "STP" in otype
+
+
+def kill_stop_needs_ratchet(
+    cur_stop: float,
+    target_kill: float,
+    *,
+    eps: float = KILL_STOP_EPS,
+) -> bool:
+    """
+    True only when we can read the working stop and target is a *better*
+    (higher) long-side stop by at least ``eps``.
+
+    A 0.0 current stop is an unread/missing trigger (auxPrice not mapped),
+    not a ratchet from zero — rewriting that is what looped ATRC.
+    """
+    cur = round(_sane_price(cur_stop), 2)
+    tgt = round(_sane_price(target_kill), 2)
+    if cur <= 0 or tgt <= 0:
+        return False
+    return (tgt - cur) >= float(eps) - 1e-12
+
+
+def _working_protective_kills(ib: IB, symbol: str) -> list[Any]:
+    """Working SELL STP / STP LMT orders for *symbol* (any clientId)."""
+    sym = symbol.upper()
+    out: list[Any] = []
+    try:
+        trades = list(ib.openTrades() or [])
+    except Exception:
+        return out
+    for trade in trades:
+        try:
+            if str(getattr(trade.contract, "symbol", "") or "").upper() != sym:
+                continue
+            if not is_protective_sell_stop(trade.order):
+                continue
+            status = str(trade.orderStatus.status or "")
+            if status in _TERMINAL_ORDER_STATUS:
+                continue
+            out.append(trade)
+        except Exception:
+            continue
+    return out
+
+
+def _place_kill_stop_order(
+    ib: IB,
+    symbol: str,
+    shares: int,
+    kill_price: float,
+) -> Any:
+    """Place a GTC SELL STP LMT kill. Returns the Trade from placeOrder."""
+    contract = Stock(symbol.upper(), "SMART", "USD")
+    ib.qualifyContracts(contract)
+    session = classify_session()
+    stop_px = round(float(kill_price), 2)
+    limit_px = round(float(kill_price) * KILL_LIMIT_SLIP, 2)
+    order = StopLimitOrder(
+        action="SELL",
+        totalQuantity=int(shares),
+        stopPrice=stop_px,
+        lmtPrice=limit_px,
+        tif="GTC",
+    )
+    if session != "RTH":
+        order.outsideRth = True
+    trade = ib.placeOrder(contract, order)
+    ib.sleep(0.3)
+    return trade
 
 
 def build_exit_order(
@@ -82,19 +202,33 @@ def kill_stop_is_stuck(
 
 
 def cancel_order_safe(ib: IB, order_id: int | None) -> bool:
-    """Best-effort cancel of an open IBKR order (all client IDs)."""
+    """Best-effort cancel of an open IBKR order (all client IDs).
+
+    If the oid is already gone, skip — do not call cancelOrder on a stale
+    id (IBKR Error 10147: "OrderId that needs to be cancelled is not found").
+    """
     if order_id is None:
+        return False
+    try:
+        target = int(order_id)
+    except (TypeError, ValueError):
         return False
     try:
         ib.reqAllOpenOrders()
         ib.sleep(0.3)
         for trade in ib.openTrades():
-            if int(trade.order.orderId) == int(order_id):
+            if int(trade.order.orderId) == target:
                 ib.cancelOrder(trade.order)
                 ib.sleep(0.3)
                 return True
-    except Exception:
-        pass
+    except Exception as exc:
+        msg = str(exc)
+        if "10147" in msg or "not found" in msg.lower():
+            print(f"  cancel oid={target} stale/10147 — skip ({exc})")
+            return False
+        print(f"  cancel oid={target} warn: {exc}")
+        return False
+    print(f"  cancel oid={target} not in openTrades (stale/10147) — skip")
     return False
 
 
@@ -109,7 +243,11 @@ def _open_sell_rows(ib: IB) -> list[dict[str, Any]]:
         ib.sleep(0.35)
     except Exception:
         pass
-    for trade in list(ib.openTrades() or []):
+    try:
+        trades = list(ib.openTrades() or [])
+    except Exception:
+        trades = []
+    for trade in trades:
         try:
             action = str(trade.order.action or "").upper()
             if action != "SELL":
@@ -356,6 +494,12 @@ def sync_kill_quantity(
 
     After T1 bank, keep-profit may raise kill_price (e.g. to −2.5%); broker
     stop must move up with it.
+
+    If a working STP/STP LMT kill already exists at the same (or better)
+    price and qty, do nothing — no cancel, no new place. Only rewrite when
+    the kill is missing, qty is wrong, or the target is a *higher* stop.
+    Unreadable 0.0 stopPrice (IB stores the trigger on auxPrice) must not
+    be treated as a ratchet from zero.
     """
     trail = leg.get("trail") or {}
     remaining = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
@@ -388,82 +532,145 @@ def sync_kill_quantity(
 
     remaining = min(remaining, int(broker_qty))
 
-    if kill_oid is None:
-        return False
-
     if trail.get("kill_stop_cancelled"):
         return False
 
     try:
-        ib.reqAllOpenOrders()
-        ib.sleep(0.3)
-        for trade in ib.openTrades():
-            if int(trade.order.orderId) != int(kill_oid):
-                continue
-            cur_qty = int(trade.order.totalQuantity or 0)
-            cur_stop = float(getattr(trade.order, "stopPrice", 0) or 0)
-            need_qty = cur_qty != remaining
-            need_px = target_kill > 0 and abs(cur_stop - target_kill) >= 0.01
-            if not need_qty and not need_px:
-                return True
-            if dry_run:
-                print(
-                    f"  {symbol} DRY_RUN sync kill qty {cur_qty}->{remaining} "
-                    f"stop {cur_stop}->{target_kill} oid={kill_oid}"
-                )
-                return True
-            # Cancel+replace when stop price ratchets up (modify stop in-place is flaky)
-            if need_px:
-                cancel_order_safe(ib, kill_oid)
-                ib.sleep(0.3)
-                contract = Stock(symbol.upper(), "SMART", "USD")
-                ib.qualifyContracts(contract)
-                session = classify_session()
-                limit_px = round(target_kill * KILL_LIMIT_SLIP, 2)
-                order = StopLimitOrder(
-                    action="SELL",
-                    totalQuantity=remaining,
-                    stopPrice=round(target_kill, 2),
-                    lmtPrice=limit_px,
-                    tif="GTC",
-                )
-                if session != "RTH":
-                    order.outsideRth = True
-                new_trade = ib.placeOrder(contract, order)
-                ib.sleep(0.3)
-                leg["kill_order_id"] = new_trade.order.orderId
-                print(
-                    f"  {symbol} kill ratchet stop {cur_stop}->{target_kill} "
-                    f"qty={remaining} oid={leg['kill_order_id']}"
-                )
-                return True
-            trade.order.totalQuantity = remaining
-            ib.placeOrder(trade.contract, trade.order)
+        try:
+            ib.reqAllOpenOrders()
             ib.sleep(0.3)
-            print(f"  {symbol} kill qty synced {cur_qty} -> {remaining}")
+        except Exception:
+            pass
+
+        working = _working_protective_kills(ib, symbol)
+        preferred_oid: int | None
+        try:
+            preferred_oid = int(kill_oid) if kill_oid is not None else None
+        except (TypeError, ValueError):
+            preferred_oid = None
+
+        def _oid(trade: Any) -> int:
+            return int(trade.order.orderId or 0)
+
+        preferred = None
+        if preferred_oid is not None:
+            for trade in working:
+                if _oid(trade) == preferred_oid:
+                    preferred = trade
+                    break
+        others = [t for t in working if t is not preferred]
+        # Prefer recorded kill_order_id, then any other working STP/STP LMT.
+        ordered = ([preferred] if preferred is not None else []) + others
+
+        target_rounded = round(_sane_price(target_kill), 2)
+        good = None
+        for trade in ordered:
+            cur_qty = int(trade.order.totalQuantity or 0)
+            if cur_qty != remaining:
+                continue
+            cur_stop = order_stop_price(trade.order)
+            cur_rounded = round(cur_stop, 2) if cur_stop > 0 else 0.0
+            # Matching qty + (unread stop OR same/better price) → leave it.
+            if cur_rounded <= 0:
+                good = trade
+                break
+            if target_rounded <= 0 or cur_rounded + 1e-12 >= target_rounded:
+                good = trade
+                break
+
+        if good is not None:
+            oid = _oid(good)
+            stop_shown = order_stop_price(good.order) or target_kill
+            if preferred_oid != oid:
+                leg["kill_order_id"] = oid
+            print(
+                f"  {symbol} kill already working @{stop_shown:.2f} "
+                f"oid={oid} — skip rewrite"
+            )
             return True
 
-        # Kill missing — re-place at trail kill price
-        kill_price = float(trail.get("kill_price") or 0)
-        if kill_price <= 0 or dry_run:
+        trade = preferred or (working[0] if working else None)
+
+        # No working kill and we never recorded one — do not invent a stop.
+        if trade is None and preferred_oid is None:
             return False
-        contract = Stock(symbol.upper(), "SMART", "USD")
-        ib.qualifyContracts(contract)
-        session = classify_session()
-        limit_px = round(kill_price * KILL_LIMIT_SLIP, 2)
-        order = StopLimitOrder(
-            action="SELL",
-            totalQuantity=remaining,
-            stopPrice=round(kill_price, 2),
-            lmtPrice=limit_px,
-            tif="GTC",
-        )
-        if session != "RTH":
-            order.outsideRth = True
-        new_trade = ib.placeOrder(contract, order)
+
+        if trade is None:
+            # Recorded oid is gone and nothing else is working — re-arm.
+            kill_price = float(trail.get("kill_price") or 0)
+            if kill_price <= 0 or dry_run:
+                return False
+            new_trade = _place_kill_stop_order(ib, symbol, remaining, kill_price)
+            leg["kill_order_id"] = new_trade.order.orderId
+            print(
+                f"  {symbol} replaced missing kill "
+                f"oid={leg['kill_order_id']} qty={remaining}"
+            )
+            return True
+
+        cur_qty = int(trade.order.totalQuantity or 0)
+        cur_stop = order_stop_price(trade.order)
+        need_qty = cur_qty != remaining
+        need_px = kill_stop_needs_ratchet(cur_stop, target_kill)
+        if not need_qty and not need_px:
+            oid = _oid(trade)
+            stop_shown = cur_stop or target_kill
+            if preferred_oid != oid:
+                leg["kill_order_id"] = oid
+            print(
+                f"  {symbol} kill already working @{stop_shown:.2f} "
+                f"oid={oid} — skip rewrite"
+            )
+            return True
+        if dry_run:
+            print(
+                f"  {symbol} DRY_RUN sync kill qty {cur_qty}->{remaining} "
+                f"stop {cur_stop}->{target_kill} oid={_oid(trade)}"
+            )
+            return True
+        # Cancel+replace when stop price ratchets up (modify stop in-place is flaky)
+        if need_px:
+            # Drop every working protective kill for this symbol so we do not
+            # stack a second STP LMT next to the one we are replacing.
+            for existing in working:
+                cancel_order_safe(ib, _oid(existing))
+            ib.sleep(0.3)
+            # Re-scan: a good kill may have appeared (or never left) after a
+            # stale/10147 cancel — do not cascade another place.
+            try:
+                ib.reqAllOpenOrders()
+                ib.sleep(0.3)
+            except Exception:
+                pass
+            still = _working_protective_kills(ib, symbol)
+            for leftover in still:
+                left_qty = int(leftover.order.totalQuantity or 0)
+                left_stop = order_stop_price(leftover.order)
+                left_rounded = round(left_stop, 2) if left_stop > 0 else 0.0
+                if left_qty != remaining:
+                    continue
+                if left_rounded <= 0 or (
+                    target_rounded > 0 and left_rounded + 1e-12 >= target_rounded
+                ):
+                    oid = _oid(leftover)
+                    leg["kill_order_id"] = oid
+                    stop_shown = left_stop or target_kill
+                    print(
+                        f"  {symbol} kill already working @{stop_shown:.2f} "
+                        f"oid={oid} — skip rewrite"
+                    )
+                    return True
+            new_trade = _place_kill_stop_order(ib, symbol, remaining, target_kill)
+            leg["kill_order_id"] = new_trade.order.orderId
+            print(
+                f"  {symbol} kill ratchet stop {cur_stop}->{target_kill} "
+                f"qty={remaining} oid={leg['kill_order_id']}"
+            )
+            return True
+        trade.order.totalQuantity = remaining
+        ib.placeOrder(trade.contract, trade.order)
         ib.sleep(0.3)
-        leg["kill_order_id"] = new_trade.order.orderId
-        print(f"  {symbol} replaced missing kill oid={leg['kill_order_id']} qty={remaining}")
+        print(f"  {symbol} kill qty synced {cur_qty} -> {remaining}")
         return True
     except Exception as exc:
         print(f"  {symbol} sync_kill_quantity warn: {exc}")
@@ -566,8 +773,8 @@ def escalate_stuck_kill_stops(
             ordered.append(trade)
 
     for trade in ordered:
-        stop_px = float(getattr(trade.order, "stopPrice", 0) or 0)
-        lmt_px = float(getattr(trade.order, "lmtPrice", 0) or 0)
+        stop_px = order_stop_price(trade.order)
+        lmt_px = _sane_price(getattr(trade.order, "lmtPrice", 0))
         if kill_stop_is_stuck(last_price=last, stop_price=stop_px, limit_price=lmt_px):
             stuck_trade = trade
             break
@@ -579,13 +786,13 @@ def escalate_stuck_kill_stops(
         # Surface the preferred / first order for diagnostics.
         sample = ordered[0] if ordered else candidates[0]
         result["reason"] = "not_stuck"
-        result["stop_price"] = float(getattr(sample.order, "stopPrice", 0) or 0)
-        result["limit_price"] = float(getattr(sample.order, "lmtPrice", 0) or 0)
+        result["stop_price"] = order_stop_price(sample.order)
+        result["limit_price"] = _sane_price(getattr(sample.order, "lmtPrice", 0))
         result["last_price"] = last
         return result
 
-    stop_px = float(getattr(stuck_trade.order, "stopPrice", 0) or 0)
-    lmt_px = float(getattr(stuck_trade.order, "lmtPrice", 0) or 0)
+    stop_px = order_stop_price(stuck_trade.order)
+    lmt_px = _sane_price(getattr(stuck_trade.order, "lmtPrice", 0))
     oid = int(stuck_trade.order.orderId or 0)
 
     trail = leg.get("trail") or {}
