@@ -47,9 +47,10 @@ from tsd_scan_pipeline.tsd_capacity import (
 from tsd_scan_pipeline.tsd_htf_gates import compute_htf_rank_score
 from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe, htf_pass_symbols
 from tsd_scan_pipeline.tsd_launch_score import (
-    CONTINUATION_SCORE_VERSION,
-    EXTENSION_SCAN_AUTO,
     enrich_launch_fields,
+    equal_signal_mode_label,
+    is_hard_extension_block,
+    live_ranker_version_label,
 )
 from tsd_scan_pipeline.tsd_stage_log import StageTimer  # noqa: E402
 from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
@@ -266,7 +267,8 @@ def _write_launch_artifact(
         "version": "3.2-case-review",
         "bar_source": BAR_SOURCE,
         "hours": sorted(ALLOWED_HOURS),
-        "continuation_score_version": CONTINUATION_SCORE_VERSION,
+        "continuation_score_version": live_ranker_version_label(),
+        "equal_signal": equal_signal_mode_label(),
         "slots_per_scan": MAX_NEW_ENTRIES_PER_SCAN,
         "ranked_count": len(ranked),
         "attention_count": len(attention) if attention is not None else None,
@@ -446,9 +448,8 @@ def evaluate_1h_symbol(
             base["dollar_vol_20d"] = htf_row.get("dollar_vol_20d_avg")
     ok, launch_row = evaluate_1h_buy_signal(base, polygon_key=polygon_key, now=now)
     out = {**base, **launch_row, "symbol": symbol.upper()}
-    scan = float(out.get("scan_score") or out.get("htf_1h_scan_score") or 0)
-    # Hard-block only auto-extended; softer EXTENSION demoted in continuation_score_v1.1
-    if scan >= EXTENSION_SCAN_AUTO or str(out.get("bar_state") or "") == "extended":
+    # Hard-block auto-extended. Equal-signal ON: scan>=75 only (no phase leak).
+    if is_hard_extension_block(out):
         out["pass"] = False
         out["reject_reason"] = "extension_hard"
         return out
@@ -514,7 +515,8 @@ def run_1h_launch_scan(
     print("1H LAUNCH v3.1 continuation-ranker", flush=True)
     print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}", flush=True)
     print(
-        f"Bar source: {BAR_SOURCE}  score={CONTINUATION_SCORE_VERSION}  "
+        f"Bar source: {BAR_SOURCE}  score={live_ranker_version_label()}  "
+        f"equal_signal={equal_signal_mode_label()}  "
         f"slots={MAX_NEW_ENTRIES_PER_SCAN}",
         flush=True,
     )

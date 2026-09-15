@@ -36,6 +36,7 @@ def test_formatters() -> None:
     assert "entered=" not in early
     assert "take->entered" not in early
     assert "take: AAA, BBB" in early
+    assert "equal_signal=" in early
     late = format_scan_summary(
         hour=10, htf_pass=147, launches_n=3, take_n=2, entered_n=1,
     )

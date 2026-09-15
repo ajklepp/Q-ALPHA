@@ -2,7 +2,8 @@
 Q-ALPHA UTS v2.6 — 1H LAUNCH entry gates.
 
 Trigger is last completed 1H bar (buy/early_bull + continuation list), not 3H buy_signal.
-Color does NOT veto. Soft EXTENSION demoted by score; hard-block scan>=75 only.
+Color does NOT veto. Equal-signal (default): soft EXTENSION is not a veto.
+Hard-block scan>=75 only. PHP_EQUAL_SIGNAL=0 restores phase→extended leak.
 Hours {5–15} ET. Peak {7,11,12,13} = score bonus. Premarket 05/06/08/09 from hitch study.
 SPY regime is dashboard context only — never vetoes entry.
 """
@@ -31,9 +32,9 @@ from tsd_scan_pipeline.tsd_1h_signal import (
     is_launch_hour_window,
 )
 from tsd_scan_pipeline.tsd_launch_score import (
-    EXTENSION_SCAN_AUTO,
     enrich_launch_fields,
     is_continuation_list_candidate,
+    is_hard_extension_block,
     is_launch_candidate,
 )
 
@@ -178,8 +179,7 @@ def evaluate_launch_gates(
     trigger_ok = bool(row.get("buy_signal")) or bool(row.get("early_bull"))
     red_ok = bool(row.get("signal_bar_red"))  # soft / telemetry only
     structure_ok = str(launch_row.get("reject_reason") or "") != "structure_too_wide"
-    scan = float(row.get("scan_score") or 0)
-    not_hard_ext = scan < EXTENSION_SCAN_AUTO and str(row.get("bar_state") or "") != "extended"
+    not_hard_ext = not is_hard_extension_block(row)
 
     gates: dict[str, bool] = {
         "htf_1h_buy": htf_1h_ok,
@@ -187,7 +187,7 @@ def evaluate_launch_gates(
         "legacy_peak_launch": legacy_launch,
         "trigger": trigger_ok,
         "signal_bar_red": red_ok,  # informational — not in core
-        "not_extension": not_hard_ext,  # hard only scan>=75 / extended bar
+        "not_extension": not_hard_ext,  # hard only scan>=75 (flag ON) / extended leak (flag OFF)
         "structure_ok": structure_ok,
         "htf_daily": htf_pass,
         "hour_allowed": hour_ok,
