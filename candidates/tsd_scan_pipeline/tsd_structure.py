@@ -2,11 +2,17 @@
 Q-ALPHA TSD — structure stop (Layer 2) — UTS v2 Phase 2.5 kill-until-1R.
 
 Layer 1: broker kill stop (MAE p75) — never cancelled while shares remain.
-Layer 2: BE lock only after +1R (entry * (1 + kill_pct)) touched; no ORB arm.
+Layer 2: BE lock after +1R — LIVE default OFF (all-trailing). See
+         live_structure_stop_enabled() / REVERT.md.
 Layer 3: strategy_a 4-tranche trail (T1–T4).
+
+LIVE Peak Hour: trail + emergency kill ratchet only. Hard software sells at
+structure_stop / be_lock_1r are gated off so they cannot dump runners.
+Paper 3R shadow is unchanged (not this module).
 """
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, time
 from typing import Any, TYPE_CHECKING
 
@@ -36,6 +42,22 @@ RTH_BOOTSTRAP_AFTER = time(9, 35)
 ORB_END = time(9, 44)
 RTH_CLOSE = time(16, 0)
 RTH_MINUTES = 390
+
+# LIVE hard structure/BE dumps. Default OFF (all-trailing). Set to 1 to restore
+# Phase 2.5 be_lock_1r / structure_stop full-position sells. See REVERT.md.
+LIVE_STRUCTURE_STOP_ENV = "TSD_LIVE_STRUCTURE_STOP"
+_LIVE_STRUCTURE_STOP_TRUE = frozenset({"1", "true", "yes", "on"})
+STRUCTURE_DISARM_REASON = "live_all_trailing"
+
+
+def live_structure_stop_enabled() -> bool:
+    """
+    True when LIVE trail monitor may arm/fire structure_stop / be_lock_1r.
+
+    Default OFF. Restore dumps with TSD_LIVE_STRUCTURE_STOP=1 (see REVERT.md).
+    """
+    raw = os.environ.get(LIVE_STRUCTURE_STOP_ENV, "0").strip().lower()
+    return raw in _LIVE_STRUCTURE_STOP_TRUE
 
 
 def one_r_price(entry: float, kill_pct: float) -> float:
@@ -211,6 +233,128 @@ def maybe_arm_be_lock_on_1r(
     trail_doc["breakeven_locked"] = True
     leg["trail"] = trail_doc
     return True
+
+
+def mark_one_r_if_touched(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    quote_high: float,
+) -> bool:
+    """
+    Record +1R for idle_no_1r without arming a hard structure sell.
+
+    LIVE all-trailing replacement for maybe_arm_be_lock_on_1r: winners still
+    skip day-6 idle flatten, but structure_stop stays unset.
+    """
+    if leg.get("one_r_locked") or trail_doc.get("one_r_locked"):
+        if not leg.get("one_r_locked"):
+            leg["one_r_locked"] = True
+        if not trail_doc.get("one_r_locked"):
+            trail_doc["one_r_locked"] = True
+        return False
+
+    entry = float(leg.get("price") or trail_doc.get("entry_price") or 0)
+    kill_pct = float(trail_doc.get("kill_pct") or leg.get("kill_pct") or 0)
+    if entry <= 0 or kill_pct <= 0:
+        return False
+
+    if float(quote_high) < one_r_price(entry, kill_pct):
+        return False
+
+    leg["one_r_locked"] = True
+    trail_doc["one_r_locked"] = True
+    leg["trail"] = trail_doc
+    return True
+
+
+def disarm_live_structure_stop(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    reason: str = STRUCTURE_DISARM_REASON,
+) -> bool:
+    """
+    Clear leftover structure_stop on an open LIVE leg so BE lock cannot dump.
+
+    Safe to call every tick: no-op when already unset. Does not cancel the
+    broker kill (that remains the single protective SELL).
+    """
+    raw = leg.get("structure_stop")
+    if raw is None:
+        raw = trail_doc.get("structure_stop")
+    try:
+        px = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        px = 0.0
+
+    prev_reason = str(leg.get("structure_stop_reason") or "")
+    had_stop = px > 0
+    hard_reason = prev_reason in {
+        "be_lock_1r",
+        "breakeven_ratchet",
+        "orb_structure",
+        "day2_tighten",
+    }
+    if not had_stop and not hard_reason:
+        return False
+
+    leg["structure_stop"] = None
+    trail_doc["structure_stop"] = None
+    if had_stop or hard_reason:
+        leg["structure_disarmed_from"] = prev_reason or "structure_stop"
+        leg["structure_disarmed_price"] = px if had_stop else None
+        leg["structure_stop_reason"] = reason
+    leg["breakeven_locked"] = False
+    trail_doc["breakeven_locked"] = False
+    trail_doc["structure_stop_reason"] = reason
+    leg["trail"] = trail_doc
+    return True
+
+
+def should_fire_live_structure_stop(
+    quote_low: float,
+    structure_stop: float | None,
+    *,
+    live_path: bool = True,
+) -> bool:
+    """
+    True when LIVE trail monitor may dump remaining shares on structure_stop.
+
+    live_path=True (default) respects TSD_LIVE_STRUCTURE_STOP (OFF). Tests of
+    the breach math itself should call structure_stop_breached() directly.
+    """
+    if live_path and not live_structure_stop_enabled():
+        return False
+    return structure_stop_breached(quote_low, structure_stop)
+
+
+def apply_live_structure_policy(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    quote_high: float,
+) -> dict[str, Any]:
+    """
+    LIVE tick: either arm Phase 2.5 BE lock (flag ON) or all-trailing (flag OFF).
+
+    Returns {enabled, armed_be_lock, marked_one_r, disarmed}.
+    """
+    enabled = live_structure_stop_enabled()
+    armed = False
+    marked = False
+    disarmed = False
+    if enabled:
+        armed = maybe_arm_be_lock_on_1r(leg, trail_doc, quote_high=quote_high)
+    else:
+        marked = mark_one_r_if_touched(leg, trail_doc, quote_high=quote_high)
+        disarmed = disarm_live_structure_stop(leg, trail_doc)
+    return {
+        "enabled": enabled,
+        "armed_be_lock": armed,
+        "marked_one_r": marked,
+        "disarmed": disarmed,
+    }
 
 
 def maybe_ratchet_breakeven(

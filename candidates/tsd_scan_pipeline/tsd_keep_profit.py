@@ -10,8 +10,9 @@ Autopsy (2026-08-31..09-10):
 
 Rules (Peak Hour only):
   1) T1 hard-banks at its trigger (default +2%) — no trail on T1
-  2) After T1 banks green, raise shared kill to breakeven (−0.3% buffer)
+  2) After T1 banks green, raise shared kill to −2.5% (ratchet UP only)
   3) T2–T4 trail as before, with earlier triggers + tighter trail
+     (lock-profit ≈ trail after ~+3–4% MFE — not a hard BE / structure dump)
   4) Hybrid kill at entry: if structure risk in [1%, 2.5%], use structure+0.5%
      (floor 2%); else MAE/fallback 5%. Wide structure keeps 5% (Chat A lesson).
 """

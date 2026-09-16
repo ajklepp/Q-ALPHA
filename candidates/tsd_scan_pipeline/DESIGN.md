@@ -70,11 +70,12 @@ Pacing: **~2.5s/symbol** for historical pulls.
 `tsd_trail_monitor.py` (clientId **95**): Peak Hour **keep-profit v1** (autopsy 2026-09-10).
 
 - **T1** hard-banks at **+2%** (not a 4% trail that only frees after ~+7%).
-- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet via `sync_kill_quantity`).
-- **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%`.
+- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet **UP only** via `sync_kill_quantity`).
+- **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%` — lock-profit is the tighter trail after ~+3–4% MFE, not a hard BE dump.
+- **LIVE structure_stop / be_lock_1r dumps are OFF** (`TSD_LIVE_STRUCTURE_STOP` default `0`). Emergency kill remains the single protective SELL. Restore dumps: see `REVERT.md`.
 - **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).
 - Entry soft-skip when structure risk **> 3.5%**; ENTER requires tradable popularity.
-- **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same **Peak Hour** fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper** (not Track 100). Mirror on `record_entry`; idempotent backfill from `tsd_book_state.json` (or Supabase if the local book is missing). No second broker exits.
+- **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same **Peak Hour** fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper** (not Track 100). Mirror on `record_entry`; idempotent backfill from `tsd_book_state.json` (or Supabase if the local book is missing). No second broker exits. Unchanged by the LIVE all-trailing gate.
 
 ## Phase 5 — Scheduler + scorecard
 
