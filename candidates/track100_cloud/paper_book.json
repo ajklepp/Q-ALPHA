@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "strategy": "Track100_v12",
+  "updated_et": "2026-09-15T20:34:20.383078-04:00",
+  "last_scan": {
+    "date_et": "2026-09-15",
+    "ended": "2026-09-15T20:34:20.383078-04:00",
+    "exit_code": 0
+  },
+  "waiting_retest": [
+    {
+      "symbol": "ADBE",
+      "signal_low": 237.5,
+      "notes": "waiting retest of signal-low 237.5000",
+      "signal_ts": "2026-09-11T08:00:00-04:00",
+      "wt_min": -77.43145387479575
+    },
+    {
+      "symbol": "MU",
+      "signal_low": 906.1,
+      "notes": "waiting retest of signal-low 906.1000",
+      "signal_ts": "2026-09-14T10:00:00-04:00",
+      "wt_min": -74.97356040527848
+    },
+    {
+      "symbol": "SNPS",
+      "signal_low": 366.0,
+      "notes": "waiting retest of signal-low 366.0000",
+      "signal_ts": "2026-09-15T15:00:00-04:00",
+      "wt_min": -74.14972848765905
+    }
+  ],
+  "armed": [],
+  "open": [
+    {
+      "symbol": "AVGO",
+      "entry": 350.53,
+      "qty": 1,
+      "stop_pct": 5.0,
+      "target_pct": 15.0,
+      "opened_et": "2026-09-14T05:00:00-04:00",
+      "stop_px": 333.0035,
+      "target_px": 403.1095,
+      "signal_ts": "2026-09-03T12:00:00-04:00",
+      "signal_low": 351.52,
+      "retest_ts": "2026-09-14T04:00:00-04:00",
+      "notes": "retest confirmed \u2192 next 1H open"
+    }
+  ],
+  "closed": [
+    {
+      "symbol": "FANG",
+      "entry": 199.89,
+      "exit": 198.7,
+      "pnl_pct": -0.5953,
+      "reason": "time",
+      "closed_et": "2026-08-31T14:00:00-04:00",
+      "opened_et": "2026-08-25T16:00:00-04:00",
+      "signal_ts": "2026-08-25T14:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "INTU",
+      "entry": 315.6,
+      "exit": 358.06,
+      "pnl_pct": 13.4537,
+      "reason": "time",
+      "closed_et": "2026-08-28T15:00:00-04:00",
+      "opened_et": "2026-08-26T07:00:00-04:00",
+      "signal_ts": "2026-08-26T05:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "PDD",
+      "entry": 83.88,
+      "exit": 82.4837,
+      "pnl_pct": -1.6646,
+      "reason": "time",
+      "closed_et": "2026-09-02T17:00:00-04:00",
+      "opened_et": "2026-08-31T10:00:00-04:00",
+      "signal_ts": "2026-08-27T15:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "PYPL",
+      "entry": 52.225,
+      "exit": 54.64,
+      "pnl_pct": 4.6242,
+      "reason": "time",
+      "closed_et": "2026-09-02T17:00:00-04:00",
+      "opened_et": "2026-08-31T10:00:00-04:00",
+      "signal_ts": "2026-08-28T09:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "MAR",
+      "entry": 341.41,
+      "exit": 336.19,
+      "pnl_pct": -1.529,
+      "reason": "time",
+      "closed_et": "2026-09-04T13:00:00-04:00",
+      "opened_et": "2026-09-01T06:00:00-04:00",
+      "signal_ts": "2026-08-31T14:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "CSX",
+      "entry": 47.955,
+      "exit": 49.225,
+      "pnl_pct": 2.6483,
+      "reason": "time",
+      "closed_et": "2026-09-08T14:00:00-04:00",
+      "opened_et": "2026-09-02T10:00:00-04:00",
+      "signal_ts": "2026-09-01T15:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "PLTR",
+      "entry": 168.18,
+      "exit": 173.31,
+      "pnl_pct": 3.0503,
+      "reason": "time",
+      "closed_et": "2026-09-14T15:00:00-04:00",
+      "opened_et": "2026-09-10T08:00:00-04:00",
+      "signal_ts": "2026-09-02T14:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "ADSK",
+      "entry": 217.9,
+      "exit": 207.005,
+      "pnl_pct": -5.0,
+      "reason": "stop",
+      "closed_et": "2026-09-09T09:00:00-04:00",
+      "opened_et": "2026-09-04T16:00:00-04:00",
+      "signal_ts": "2026-09-04T14:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "BKNG",
+      "entry": 180.3,
+      "exit": 171.285,
+      "pnl_pct": -5.0,
+      "reason": "stop",
+      "closed_et": "2026-09-09T09:00:00-04:00",
+      "opened_et": "2026-09-08T16:00:00-04:00",
+      "signal_ts": "2026-09-08T14:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "CMCSA",
+      "entry": 24.625,
+      "exit": 25.06,
+      "pnl_pct": 1.7665,
+      "reason": "time",
+      "closed_et": "2026-09-14T10:00:00-04:00",
+      "opened_et": "2026-09-09T18:00:00-04:00",
+      "signal_ts": "2026-09-09T16:00:00-04:00",
+      "qty": 1
+    },
+    {
+      "symbol": "NVDA",
+      "entry": 218.23,
+      "exit": 212.36,
+      "pnl_pct": -2.6898,
+      "reason": "time",
+      "closed_et": "2026-09-15T06:00:00-04:00",
+      "opened_et": "2026-09-10T15:00:00-04:00",
+      "signal_ts": "2026-09-10T13:00:00-04:00",
+      "qty": 1
+    }
+  ],
+  "totals": {
+    "realized_pnl_pct": 9.0643,
+    "n_closed": 11,
+    "n_open": 1
+  }
+}

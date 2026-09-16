@@ -2218,27 +2218,27 @@ def main() -> None:
     render_header()
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "📊 Live Status",
-        "🎯 3R Paper",
-        "📘 Track 100",
-        "📋 Trade Log",
-        "📈 Performance",
-        "🔧 System Health",
-        "📓 Daily Reviews",
-        "📚 Weekly Review",
-        "📖 Glossary",
+        "Live Status",
+        "Track 100",
+        "3R Paper",
+        "Trade Log",
+        "Performance",
+        "System Health",
+        "Daily Reviews",
+        "Weekly Review",
+        "Glossary",
     ])
 
     with tab1:
         tab_live_status(trades, pool_history)
     with tab2:
-        from dashboard_3r_paper import render_3r_paper_tab
-
-        render_3r_paper_tab(get_sync)
-    with tab3:
         from dashboard_track100 import render_track100_tab
 
         render_track100_tab()
+    with tab3:
+        from dashboard_3r_paper import render_3r_paper_tab
+
+        render_3r_paper_tab(get_sync)
     with tab4:
         tab_trade_log(trades)
     with tab5:

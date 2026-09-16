@@ -72,6 +72,8 @@ def paper_book_candidates() -> list[Path]:
     env_file = (os.environ.get("TRACK100_PAPER_BOOK") or "").strip()
     if env_file:
         out.append(Path(env_file).expanduser())
+    # Streamlit Cloud: committed snapshot (laptop refreshes this file + pushes)
+    out.append(ROOT / "candidates" / "track100_cloud" / "paper_book.json")
     for root in track100_root_candidates():
         out.append(root / _PAPER_REL)
     seen: set[str] = set()
