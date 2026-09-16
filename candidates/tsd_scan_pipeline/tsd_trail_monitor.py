@@ -900,9 +900,14 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         save_state(state)
 
         # Advance 3R shadow paper book on the same quotes (software exits only).
+        # Sync first so historical Peak Hour fills (missed on-fill hook) exist.
         try:
-            from tsd_scan_pipeline.tsd_shadow_multi_target import tick_open_shadows
+            from tsd_scan_pipeline.tsd_shadow_multi_target import (
+                sync_shadow_from_live_book,
+                tick_open_shadows,
+            )
 
+            sync_shadow_from_live_book(state)
             def _shadow_quote(symbol: str) -> dict[str, Any] | None:
                 return _fetch_quote(ib, symbol)
 

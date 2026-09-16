@@ -2,13 +2,14 @@
 Dashboard tab — Peak Hour 3R multi-target shadow paper book.
 
 Live Status remains the IBKR 4T keep-profit book.
-This tab shows the parallel software 3-target ladder on the same fills.
+This tab shows the parallel software 3-target ladder on the same
+Peak Hour fills — it is **not** Track 100.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
@@ -21,11 +22,9 @@ if str(CANDIDATES) not in sys.path:
 from dashboard_theme import MUTED, section_header  # noqa: E402
 
 
-def _load_scoreboard() -> dict[str, Any]:
-    from tsd_scan_pipeline.tsd_shadow_multi_target import scoreboard
-
+def _live_marks_from_book() -> dict[str, float]:
+    """Open Peak Hour marks for 3R MTM (local book only)."""
     marks: dict[str, float] = {}
-    # Prefer open TSD marks from Live Status path when available
     try:
         from state_paths import state_path
         import json
@@ -58,22 +57,54 @@ def _load_scoreboard() -> dict[str, Any]:
                             pass
     except Exception:
         pass
-    return scoreboard(mark_by_symbol=marks)
+    return marks
 
 
-def render_3r_paper_tab() -> None:
-    """Streamlit tab: 3R shadow paper vs live 4T."""
-    section_header("3R Paper (shadow)", "Same fills as Live 4T · software multi-target only")
+def _sync_shadow(get_sync: Callable[..., Any] | None) -> dict[str, Any]:
+    """
+    Ensure the 3R book has every Peak Hour fill.
+
+    Local tsd_book_state.json first; Supabase open/closed if still empty
+    (Streamlit Cloud has no gitignored live book).
+    """
+    from tsd_scan_pipeline.tsd_shadow_multi_target import ensure_shadow_synced
+
+    open_rows: list[dict[str, Any]] = []
+    closed_rows: list[dict[str, Any]] = []
+    if get_sync is not None:
+        try:
+            sync = get_sync()
+            open_rows = list(sync.get_tsd_positions(status="OPEN") or [])
+            closed_rows = list(sync.get_tsd_closed_legs() or [])
+        except Exception:
+            open_rows, closed_rows = [], []
+    return ensure_shadow_synced(open_rows=open_rows, closed_rows=closed_rows)
+
+
+def _load_scoreboard(get_sync: Callable[..., Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    from tsd_scan_pipeline.tsd_shadow_multi_target import scoreboard
+
+    sync_info = _sync_shadow(get_sync)
+    return scoreboard(mark_by_symbol=_live_marks_from_book()), sync_info
+
+
+def render_3r_paper_tab(get_sync: Callable[..., Any] | None = None) -> None:
+    """Streamlit tab: Peak Hour 3R shadow paper vs live 4T. Not Track 100."""
+    section_header(
+        "3R Paper — Peak Hour shadow",
+        "Same Peak Hour fills · software multi-target only · not Track 100",
+    )
 
     st.caption(
+        "This is **Peak Hour's parallel paper ledger**, not Track 100. "
         "Live broker book stays on **4-tranche keep-profit**. "
-        "This tab is a **parallel paper ledger**: identical entry fills, "
-        "exits banked at **0.35R / 0.50R / 0.90R** (1.75% / 2.5% / 4.5%) "
+        "Identical Peak Hour entry fills; exits banked at "
+        "**0.35R / 0.50R / 0.90R** (1.75% / 2.5% / 4.5%) "
         "weights **50/25/25**, residual kill **5%**. No second IBKR orders."
     )
 
     try:
-        score = _load_scoreboard()
+        score, sync_info = _load_scoreboard(get_sync)
     except Exception as exc:
         st.error(f"Could not load 3R shadow book: {exc}")
         return
@@ -92,12 +123,14 @@ def render_3r_paper_tab() -> None:
         None if wr is None else f"win {100 * wr:.0f}%",
     )
 
+    src = sync_info.get("source") or score.get("sync_source") or "—"
     st.markdown(
         f"<p style='color:{MUTED};font-size:0.85rem'>"
         f"Ladder <code>{ladder.get('id', 'mt3')}</code> · "
         f"targets R={list(ladder.get('targets_r') or [])} · "
         f"w={list(ladder.get('weights') or [])} · "
         f"open={int(score.get('n_open') or 0)} · "
+        f"sync={src} mirrored={sync_info.get('n_mirrored', 0)} · "
         f"updated {score.get('updated_at') or '—'}"
         f"</p>",
         unsafe_allow_html=True,
@@ -120,7 +153,24 @@ def render_3r_paper_tab() -> None:
     if open_rows:
         st.dataframe(pd.DataFrame(open_rows), use_container_width=True, hide_index=True)
     else:
-        st.info("No open 3R shadow legs. New live fills will mirror here automatically.")
+        n_closed = int(score.get("n_closed") or 0)
+        if n_closed:
+            st.info("No open 3R shadow legs (closed history is below).")
+        elif sync_info.get("reason") == "no_live_book" and not (
+            sync_info.get("n_mirrored") or sync_info.get("n_closed")
+        ):
+            st.warning(
+                "No Peak Hour live book on this machine and no Supabase fills "
+                "to reconstruct. If Trade Log shows IRD-style takes, run "
+                "`py -3 candidates\\tsd_scan_pipeline\\repair_3r_shadow.py` "
+                "on the laptop that has `tsd_book_state.json`, or confirm "
+                "Supabase `tsd_closed_legs` is reachable."
+            )
+        else:
+            st.info(
+                "No Peak Hour fills to mirror yet. New live Peak Hour BUYs "
+                "open a 3R shadow leg automatically (record_entry)."
+            )
 
     st.subheader("Recent closed")
     closed = list(reversed(score.get("closed_legs") or []))
@@ -144,10 +194,14 @@ def render_3r_paper_tab() -> None:
 
     with st.expander("How to read this bakeoff"):
         st.markdown(
-            """
+            f"""
 - **Live Status** = real paper IBKR + 4T ratchet (what the trail monitor sells).
-- **3R Paper** = same fill price/size; slice banks at 1.75% / 2.5% / 4.5%; leftover stops at −5%.
+- **3R Paper** = Peak Hour shadow only: same fill price/size; slice banks at
+  1.75% / 2.5% / 4.5%; leftover stops at −5%. **Not Track 100**
+  (that study has its own tab).
 - Compare week P&L here vs Live Status to decide which exit to promote.
-- Shadow state file: `candidates/tsd_shadow_mt3_book.json` (local; not capacity).
+- Shadow state file: `{score.get('book_path') or 'candidates/tsd_shadow_mt3_book.json'}`
+  (local; not capacity). One-shot repair:
+  `py -3 candidates\\tsd_scan_pipeline\\repair_3r_shadow.py`
 """
         )

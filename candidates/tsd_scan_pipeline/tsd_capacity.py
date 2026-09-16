@@ -352,6 +352,26 @@ def record_entry(
         pos.setdefault("legs", []).append(leg)
 
     state["entries_this_scan"] = int(state.get("entries_this_scan") or 0) + 1
+    # Parallel paper: same fill into 3R shadow book (no broker / no capacity).
+    try:
+        from tsd_scan_pipeline.tsd_shadow_multi_target import mirror_live_fill
+
+        mirror_live_fill(
+            symbol=sym,
+            fill_price=float(entry_price),
+            shares=int(shares),
+            opened_at=now,
+            order_id=order_id,
+            meta={
+                "kind": "ADDON" if is_addon else "NEW",
+                "bar_state": bar_state,
+                "source": "record_entry",
+                "live_exit": "4t_keep_profit",
+                "shadow_exit": "mt3_035_050_090",
+            },
+        )
+    except Exception as exc:
+        print(f"  shadow MT3 mirror warn: {exc}")
     return state
 
 
