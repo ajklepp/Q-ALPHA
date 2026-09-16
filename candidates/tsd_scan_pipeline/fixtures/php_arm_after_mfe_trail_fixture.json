@@ -1,0 +1,1270 @@
+{
+  "paper_only": true,
+  "note": "Synthetic Peak Hour paths for arm-after-MFE vs live T1 bank vs PR #16 trail-from-entry. Not a live Sharpe claim.",
+  "profiles": {
+    "RIPPER": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    },
+    "FADE4": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    },
+    "GRINDER": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    },
+    "GTL": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    },
+    "LOCKDEMO": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    },
+    "CHOPKILL": {
+      "mae": {
+        "p50": 0.022,
+        "p75": 0.026
+      },
+      "mfe": {
+        "p50": 0.04
+      },
+      "confidence": "OK"
+    }
+  },
+  "analogs": {
+    "RIPPER": [
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "RIPPER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ],
+    "FADE4": [
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "FADE4",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ],
+    "GRINDER": [
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GRINDER",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ],
+    "GTL": [
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "GTL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ],
+    "LOCKDEMO": [
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "LOCKDEMO",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ],
+    "CHOPKILL": [
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-01",
+        "mfe_pct": 0.015,
+        "mae_pct": 0.018,
+        "bars": [
+          {
+            "high": 10.15,
+            "low": 10.0,
+            "close": 10.15,
+            "when": "mfe"
+          },
+          {
+            "high": 10.15,
+            "low": 9.82,
+            "close": 9.82,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-02",
+        "mfe_pct": 0.025,
+        "mae_pct": 0.019,
+        "bars": [
+          {
+            "high": 10.25,
+            "low": 10.0,
+            "close": 10.25,
+            "when": "mfe"
+          },
+          {
+            "high": 10.25,
+            "low": 9.81,
+            "close": 9.81,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-03",
+        "mfe_pct": 0.035,
+        "mae_pct": 0.02,
+        "bars": [
+          {
+            "high": 10.35,
+            "low": 10.0,
+            "close": 10.35,
+            "when": "mfe"
+          },
+          {
+            "high": 10.35,
+            "low": 9.8,
+            "close": 9.8,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-04",
+        "mfe_pct": 0.045,
+        "mae_pct": 0.021,
+        "bars": [
+          {
+            "high": 10.45,
+            "low": 10.0,
+            "close": 10.45,
+            "when": "mfe"
+          },
+          {
+            "high": 10.45,
+            "low": 9.79,
+            "close": 9.79,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-05",
+        "mfe_pct": 0.055,
+        "mae_pct": 0.022,
+        "bars": [
+          {
+            "high": 10.55,
+            "low": 10.0,
+            "close": 10.55,
+            "when": "mfe"
+          },
+          {
+            "high": 10.55,
+            "low": 9.78,
+            "close": 9.78,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-06",
+        "mfe_pct": 0.07,
+        "mae_pct": 0.024,
+        "bars": [
+          {
+            "high": 10.7,
+            "low": 10.0,
+            "close": 10.7,
+            "when": "mfe"
+          },
+          {
+            "high": 10.7,
+            "low": 9.76,
+            "close": 9.76,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-07",
+        "mfe_pct": 0.09,
+        "mae_pct": 0.026,
+        "bars": [
+          {
+            "high": 10.9,
+            "low": 10.0,
+            "close": 10.9,
+            "when": "mfe"
+          },
+          {
+            "high": 10.9,
+            "low": 9.74,
+            "close": 9.74,
+            "when": "mae"
+          }
+        ]
+      },
+      {
+        "symbol": "CHOPKILL",
+        "entry_price": 10.0,
+        "entry_date": "2026-08-08",
+        "mfe_pct": 0.04,
+        "mae_pct": 0.028,
+        "bars": [
+          {
+            "high": 10.4,
+            "low": 10.0,
+            "close": 10.4,
+            "when": "mfe"
+          },
+          {
+            "high": 10.4,
+            "low": 9.72,
+            "close": 9.72,
+            "when": "mae"
+          }
+        ]
+      }
+    ]
+  },
+  "entries": [
+    {
+      "symbol": "RIPPER",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 11,
+      "role": "early chop then +10.5% ride \u2014 from-entry dies, arm rides",
+      "bars": [
+        {
+          "high": 10.16,
+          "low": 9.88,
+          "close": 10.02,
+          "when": "2026-09-08T12:00:00"
+        },
+        {
+          "high": 10.22,
+          "low": 10.0,
+          "close": 10.12,
+          "when": "2026-09-08T13:00:00"
+        },
+        {
+          "high": 10.48,
+          "low": 10.25,
+          "close": 10.4,
+          "when": "2026-09-08T14:00:00"
+        },
+        {
+          "high": 11.05,
+          "low": 10.9,
+          "close": 10.98,
+          "when": "2026-09-09T10:00:00"
+        },
+        {
+          "high": 11.0,
+          "low": 10.88,
+          "close": 10.92,
+          "when": "2026-09-09T11:00:00"
+        }
+      ]
+    },
+    {
+      "symbol": "FADE4",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 12,
+      "role": "+4.2% then fade through entry \u2014 lock/trail should keep +~2%",
+      "bars": [
+        {
+          "high": 10.25,
+          "low": 10.0,
+          "close": 10.18,
+          "when": "2026-09-08T13:00:00"
+        },
+        {
+          "high": 10.42,
+          "low": 10.18,
+          "close": 10.35,
+          "when": "2026-09-08T14:00:00"
+        },
+        {
+          "high": 10.28,
+          "low": 9.6,
+          "close": 9.65,
+          "when": "2026-09-09T10:00:00"
+        }
+      ]
+    },
+    {
+      "symbol": "GRINDER",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 10,
+      "role": "MFE +2.6% never arms 3/4; live T1 still banks",
+      "bars": [
+        {
+          "high": 10.18,
+          "low": 9.96,
+          "close": 10.08,
+          "when": "2026-09-08T11:00:00"
+        },
+        {
+          "high": 10.26,
+          "low": 10.08,
+          "close": 10.16,
+          "when": "2026-09-08T12:00:00"
+        },
+        {
+          "high": 10.2,
+          "low": 9.94,
+          "close": 9.98,
+          "when": "2026-09-08T13:00:00"
+        }
+      ]
+    },
+    {
+      "symbol": "GTL",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 11,
+      "role": "+3.2% then \u22125% \u2014 arm3 locks, arm4 still on emergency kill",
+      "bars": [
+        {
+          "high": 10.08,
+          "low": 10.0,
+          "close": 10.04,
+          "when": "2026-09-08T11:00:00"
+        },
+        {
+          "high": 10.32,
+          "low": 10.08,
+          "close": 10.22,
+          "when": "2026-09-08T12:00:00"
+        },
+        {
+          "high": 10.2,
+          "low": 9.5,
+          "close": 9.55,
+          "when": "2026-09-09T10:00:00"
+        }
+      ]
+    },
+    {
+      "symbol": "LOCKDEMO",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 12,
+      "role": "+4.5% then 1.8% giveback \u2014 lock hits, MAE-p50 trail holds",
+      "bars": [
+        {
+          "high": 10.45,
+          "low": 10.2,
+          "close": 10.4,
+          "when": "2026-09-08T13:00:00"
+        },
+        {
+          "high": 10.45,
+          "low": 10.26,
+          "close": 10.3,
+          "when": "2026-09-08T14:00:00"
+        },
+        {
+          "high": 10.4,
+          "low": 10.22,
+          "close": 10.28,
+          "when": "2026-09-09T10:00:00"
+        }
+      ]
+    },
+    {
+      "symbol": "CHOPKILL",
+      "entry_price": 10.0,
+      "shares": 8,
+      "entry_date": "2026-09-08",
+      "entry_hour": 10,
+      "role": "never +3%; emergency kill \u22125%",
+      "bars": [
+        {
+          "high": 10.02,
+          "low": 9.9,
+          "close": 9.95,
+          "when": "2026-09-08T10:00:00"
+        },
+        {
+          "high": 10.04,
+          "low": 9.7,
+          "close": 9.8,
+          "when": "2026-09-08T11:00:00"
+        },
+        {
+          "high": 9.85,
+          "low": 9.48,
+          "close": 9.5,
+          "when": "2026-09-08T12:00:00"
+        }
+      ]
+    }
+  ]
+}
