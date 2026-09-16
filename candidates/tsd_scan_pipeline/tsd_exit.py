@@ -30,6 +30,31 @@ KILL_ESCALATE_RETRY_SLIP = 0.93
 # Stuck if last is this far through the kill limit (relative) or by absolute cents.
 STUCK_KILL_LIMIT_FRAC = 0.995
 STUCK_KILL_LIMIT_EPS = 0.01
+# Broker kill may only move up (never loosen). Matches LIVE all-trailing lock.
+KILL_RATCHET_MIN_TICK = 0.01
+
+
+def kill_should_ratchet_up(
+    cur_stop: float,
+    target_kill: float,
+    *,
+    min_tick: float = KILL_RATCHET_MIN_TICK,
+) -> bool:
+    """
+    True when the working emergency kill must be replaced at a HIGHER stop.
+
+    Never loosens. Missing/zero cur_stop still replaces (re-arm, not loosen).
+    """
+    try:
+        target = float(target_kill or 0)
+        current = float(cur_stop or 0)
+    except (TypeError, ValueError):
+        return False
+    if target <= 0:
+        return False
+    if current <= 0:
+        return True
+    return (target - current) >= float(min_tick)
 
 
 def build_exit_order(
@@ -403,7 +428,7 @@ def sync_kill_quantity(
             cur_qty = int(trade.order.totalQuantity or 0)
             cur_stop = float(getattr(trade.order, "stopPrice", 0) or 0)
             need_qty = cur_qty != remaining
-            need_px = target_kill > 0 and abs(cur_stop - target_kill) >= 0.01
+            need_px = kill_should_ratchet_up(cur_stop, target_kill)
             if not need_qty and not need_px:
                 return True
             if dry_run:
@@ -412,7 +437,7 @@ def sync_kill_quantity(
                     f"stop {cur_stop}->{target_kill} oid={kill_oid}"
                 )
                 return True
-            # Cancel+replace when stop price ratchets up (modify stop in-place is flaky)
+            # Cancel+replace when stop price ratchets UP (never loosen).
             if need_px:
                 cancel_order_safe(ib, kill_oid)
                 ib.sleep(0.3)

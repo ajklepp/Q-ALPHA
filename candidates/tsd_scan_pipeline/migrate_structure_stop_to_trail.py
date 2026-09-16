@@ -42,7 +42,7 @@ from tsd_scan_pipeline.tsd_capacity import (  # noqa: E402
     save_state,
 )
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
-    clear_structure_stop_fields,
+    disarm_live_structure_stop,
     maybe_lock_profit_via_trail,
 )
 from tsd_scan_pipeline.tsd_trail import load_tsd_profile  # noqa: E402
@@ -80,7 +80,9 @@ def plan_leg_migration(
             "after": after,
         }
 
-    trail = clear_structure_stop_fields(after, trail)
+    trail = dict(after.get("trail") or {})
+    disarm_live_structure_stop(after, trail)
+    trail = dict(after.get("trail") or trail)
     peak = quote_high
     if peak is None or peak <= 0:
         peak = max(

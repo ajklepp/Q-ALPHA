@@ -1,14 +1,13 @@
 """
 Q-ALPHA TSD pipeline — Phase 4 software trail monitor.
 
-3-layer stop pyramid (Peak Hour live, 2026-09):
+LIVE exits (default): trail + emergency kill ratchet only.
   L1 broker kill (always on, ratchets UP only)
-  L2 hard BE structure_stop dumps — OFF by default (PHP_STRUCTURE_STOP_EXITS=0)
-     lock-profit = tighter software trail after ~+3–4% MFE
-  L3 T1–T4 software trail (keep-profit T1 bank unchanged)
+  L2 structure_stop / be_lock_1r — OFF unless TSD_LIVE_STRUCTURE_STOP=1
+  L3 T1–T4 software trail (keep-profit; lock-profit = tighter trail after ~+3–4% MFE)
 
-  PHP_STRUCTURE_STOP_EXITS=1 restores Phase 2.5 BE lock after +1R dumps.
-  3R / MT3 multi-target banks stay paper/shadow only.
+Paper 3R shadow ticks alongside LIVE fills and is unchanged.
+See candidates/tsd_scan_pipeline/REVERT.md to restore BE dumps.
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --once
@@ -132,14 +131,14 @@ def _release_trail_lock() -> None:
 
 from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
+    apply_live_structure_policy,
     ensure_rth_monitoring,
-    maybe_arm_be_lock_on_1r,
+    live_structure_stop_enabled,
     maybe_lock_profit_via_trail,
     maybe_ratchet_breakeven,
     poll_interval_sec,
-    should_exit_on_structure_stop,
+    should_fire_live_structure_stop,
     should_idle_no_1r,
-    structure_stop_exits_enabled,
 )
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
     at_time_cap,
@@ -359,8 +358,21 @@ def _process_leg(
             })
             return results
 
-    maybe_arm_be_lock_on_1r(leg, trail, quote_high=quote["high"])
+    policy = apply_live_structure_policy(leg, trail, quote_high=quote["high"])
     trail = leg.get("trail") or trail
+    if policy.get("disarmed"):
+        print(
+            f"  {sym} live all-trailing: disarmed structure_stop "
+            f"from={leg.get('structure_disarmed_from')} "
+            f"px={leg.get('structure_disarmed_price')}"
+        )
+    elif policy.get("marked_one_r"):
+        print(f"  {sym} +1R marked — no be_lock_1r dump (all-trailing)")
+    elif policy.get("armed_be_lock"):
+        print(
+            f"  {sym} be_lock_1r ARMED at {leg.get('structure_stop')} "
+            "(TSD_LIVE_STRUCTURE_STOP=1)"
+        )
 
     if should_idle_no_1r(trail, leg):
         results.extend(
@@ -416,9 +428,8 @@ def _process_leg(
     except Exception as exc:
         print(f"  {sym} base_break check skipped: {exc}")
 
-    # Hard structure BE dumps are flag-gated (default OFF). Leftover
-    # structure_stop on an open long must not flatten when the flag is off.
-    if should_exit_on_structure_stop(leg, trail, quote["low"]):
+    structure_stop = leg.get("structure_stop") or trail.get("structure_stop")
+    if should_fire_live_structure_stop(quote["low"], structure_stop):
         results.extend(
             _exit_all_remaining(
                 ib, pos, leg_index, leg, sym,
@@ -429,8 +440,9 @@ def _process_leg(
         )
         return results
 
-    if structure_stop_exits_enabled():
+    if live_structure_stop_enabled():
         maybe_ratchet_breakeven(leg, trail, quote_high=quote["high"])
+        trail = leg.get("trail") or trail
     else:
         profile = load_tsd_profile(sym)
         prior_kill = float(trail.get("kill_price") or 0)
@@ -447,7 +459,7 @@ def _process_leg(
                 f"  {sym} lock-profit (MFE trail): kill {prior_kill}->{new_kill} "
                 f"(structure BE dumps off)"
             )
-    trail = leg.get("trail") or trail
+        trail = leg.get("trail") or trail
 
     force_cap = at_time_cap(trail)
     trail, exits = evaluate_trail_tick(
@@ -794,7 +806,16 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
 
     print("=" * 64)
     print(f"Q-ALPHA TSD TRAIL MONITOR - {mode}")
-    print("Structure: KILL ONLY until +1R")
+    if live_structure_stop_enabled():
+        print(
+            "LIVE structure_stop/be_lock_1r ON "
+            "(TSD_LIVE_STRUCTURE_STOP=1 — REVERT path, dumps runners)"
+        )
+    else:
+        print(
+            "LIVE exits: all-trailing "
+            "(structure_stop/be_lock_1r OFF; kill ratchet UP + trail only)"
+        )
     print(
         f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} "
         f"clientIds={list(TWS_CLIENT_ID_FALLBACKS)}"

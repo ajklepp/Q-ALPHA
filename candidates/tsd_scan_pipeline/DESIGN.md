@@ -70,23 +70,14 @@ Pacing: **~2.5s/symbol** for historical pulls.
 `tsd_trail_monitor.py` (clientId **95**): Peak Hour **keep-profit v1** (autopsy 2026-09-10).
 
 - **T1** hard-banks at **+2%** (not a 4% trail that only frees after ~+7%).
-- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet via `sync_kill_quantity`).
-- **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%`.
-- **Live hard structure BE sells are OFF by default** (`PHP_STRUCTURE_STOP_EXITS=0`): `structure_stop` / `be_lock_1r` / `breakeven_ratchet` dumps do not flatten. Protective path = **one** broker kill/trail stop that ratchets **UP only**, plus a tighter software trail after ~+3–4% MFE (ticker MAE/MFE priors when present). Set `PHP_STRUCTURE_STOP_EXITS=1` to restore Phase 2.5 BE dumps — see `REVERT.md`.
+- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet **UP only** via `sync_kill_quantity`).
+- **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%` — lock-profit is the tighter trail after ~+3–4% MFE, not a hard BE dump.
+- **LIVE structure_stop / be_lock_1r dumps are OFF** (`TSD_LIVE_STRUCTURE_STOP` default `0`; `PHP_STRUCTURE_STOP_EXITS` is the same gate). Emergency kill remains the single protective SELL. Restore dumps: see `REVERT.md`.
+- After ~+3–4% MFE, `maybe_lock_profit_via_trail` tightens remaining tranche trail widths and may ratchet kill **UP** (capped under last). Not a second broker BE sell.
+- Offline book helper: `migrate_structure_stop_to_trail.py` (dry-run default). ATRC already cleared on the laptop; helper remains for other opens.
 - **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).
 - Entry soft-skip when structure risk **> 3.5%**; ENTER requires tradable popularity.
-- **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same **Peak Hour** fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper** (not Track 100). Mirror on `record_entry`; idempotent backfill from `tsd_book_state.json` (or Supabase if the local book is missing). No second broker exits. **Not live.** Do not flip live Peak Hour onto MT3 / 3R hard banks.
-
-### Open-long migration (structure BE → trail/kill)
-
-Existing opens (e.g. ATRC) may still have `structure_stop` / `be_lock_1r` in the laptop book. Dry-run by default:
-
-```powershell
-py -3 candidates\tsd_scan_pipeline\migrate_structure_stop_to_trail.py --symbol ATRC
-py -3 candidates\tsd_scan_pipeline\migrate_structure_stop_to_trail.py --symbol ATRC --apply
-```
-
-`--apply` writes `tsd_book_state.json` only (clears structure BE fields, never removes kill, may raise kill / tighten trail after MFE ≥ ~3–4%). Then run trail `--once` so `sync_kill_quantity` cancel+replaces the broker kill at the new (higher) price. `--sync-broker` is optional and only places a replacement kill before cancelling.
+- **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same **Peak Hour** fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper** (not Track 100). Mirror on `record_entry`; idempotent backfill from `tsd_book_state.json` (or Supabase if the local book is missing). No second broker exits. Unchanged by the LIVE all-trailing gate.
 
 ## Phase 5 — Scheduler + scorecard
 

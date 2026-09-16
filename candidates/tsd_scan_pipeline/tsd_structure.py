@@ -2,15 +2,13 @@
 Q-ALPHA TSD — structure stop (Layer 2) — UTS v2 Phase 2.5 kill-until-1R.
 
 Layer 1: broker kill stop (MAE p75) — never cancelled while shares remain.
-Layer 2: BE lock after +1R — **gated**. Live Peak Hour default is OFF
-         (`PHP_STRUCTURE_STOP_EXITS=0`): no hard structure_stop /
-         be_lock_1r / breakeven_ratchet dumps. Protective path is the
-         single broker kill/trail stop, ratcheting UP only, plus a tighter
-         software trail after ~+3–4% MFE. Set PHP_STRUCTURE_STOP_EXITS=1
-         to restore Phase 2.5 hard BE sells (see REVERT.md).
-Layer 3: strategy_a 4-tranche trail (T1–T4). T1 keep-profit bank is unchanged.
+Layer 2: BE lock after +1R — LIVE default OFF (all-trailing). See
+         live_structure_stop_enabled() / REVERT.md.
+Layer 3: strategy_a 4-tranche trail (T1–T4).
 
-MT3 / 3R multi-target banks stay paper/shadow only (tsd_shadow_multi_target).
+LIVE Peak Hour: trail + emergency kill ratchet only. Hard software sells at
+structure_stop / be_lock_1r are gated off so they cannot dump runners.
+Paper 3R shadow is unchanged (not this module).
 """
 from __future__ import annotations
 
@@ -45,31 +43,36 @@ ORB_END = time(9, 44)
 RTH_CLOSE = time(16, 0)
 RTH_MINUTES = 390
 
-# Live Peak Hour: hard structure BE sells default OFF. Set env=1 to restore.
-PHP_STRUCTURE_STOP_EXITS_ENV = "PHP_STRUCTURE_STOP_EXITS"
-_ENV_TRUE = {"1", "true", "yes", "on"}
+# LIVE hard structure/BE dumps. Default OFF (all-trailing). Set to 1 to restore
+# Phase 2.5 be_lock_1r / structure_stop full-position sells. See REVERT.md.
+# Canonical laptop env: TSD_LIVE_STRUCTURE_STOP. Start script also pins
+# PHP_STRUCTURE_STOP_EXITS=0; either=1 restores dumps (alias, not a second gate).
+LIVE_STRUCTURE_STOP_ENV = "TSD_LIVE_STRUCTURE_STOP"
+LIVE_STRUCTURE_STOP_ALIAS_ENV = "PHP_STRUCTURE_STOP_EXITS"
+_LIVE_STRUCTURE_STOP_TRUE = frozenset({"1", "true", "yes", "on"})
+STRUCTURE_DISARM_REASON = "live_all_trailing"
 
-# "Lock profit" replacement when structure BE dumps are off: tighter trail
-# after ~+3–4% MFE, using ticker MAE/MFE priors when present.
-LOCK_PROFIT_MFE_PCT = 0.035  # default MFE to arm tighter trail (~3.5%)
+# Lock-profit replacement when structure BE dumps are off: tighter software
+# trail after ~+3–4% MFE, using ticker MAE/MFE priors when present.
+LOCK_PROFIT_MFE_PCT = 0.035
 LOCK_PROFIT_MFE_MIN = 0.03
 LOCK_PROFIT_MFE_MAX = 0.04
-LOCK_PROFIT_TRAIL_PCT = 0.02  # default tighter software-trail width
+LOCK_PROFIT_TRAIL_PCT = 0.02
 LOCK_PROFIT_TRAIL_MIN = 0.01
 LOCK_PROFIT_TRAIL_MAX = 0.03
-# Never raise kill into last (would dump the long). 50 bp buffer under last.
 LOCK_PROFIT_LAST_BUFFER_PCT = 0.005
 
 
-def structure_stop_exits_enabled() -> bool:
+def live_structure_stop_enabled() -> bool:
     """
-    True when live hard structure BE sells (structure_stop dumps) are allowed.
+    True when LIVE trail monitor may arm/fire structure_stop / be_lock_1r.
 
-    Default OFF. Set PHP_STRUCTURE_STOP_EXITS=1 to restore Phase 2.5
-    be_lock_1r / breakeven_ratchet exits. Unset, empty, 0, false, off → disabled.
+    Default OFF. Restore dumps with TSD_LIVE_STRUCTURE_STOP=1 (canonical)
+    or PHP_STRUCTURE_STOP_EXITS=1 (laptop alias). Either=1 turns dumps ON.
     """
-    raw = (os.environ.get(PHP_STRUCTURE_STOP_EXITS_ENV) or "0").strip().lower()
-    return raw in _ENV_TRUE
+    primary = (os.environ.get(LIVE_STRUCTURE_STOP_ENV) or "0").strip().lower()
+    alias = (os.environ.get(LIVE_STRUCTURE_STOP_ALIAS_ENV) or "0").strip().lower()
+    return primary in _LIVE_STRUCTURE_STOP_TRUE or alias in _LIVE_STRUCTURE_STOP_TRUE
 
 
 def lock_profit_mfe_threshold(profile: dict[str, Any] | None = None) -> float:
@@ -245,14 +248,11 @@ def maybe_arm_be_lock_on_1r(
     quote_high: float,
 ) -> bool:
     """
-    Record +1R and optionally arm a hard BE structure stop.
+    Arm BE structure stop once price touches +1R.
 
     Until +1R: structure_stop stays None (kill is the only stop).
-    After +1R: always sets one_r_locked (idle_no_1r / day-1 base-break).
-    Hard BE dump (structure_stop = entry * 0.997) only when
-    PHP_STRUCTURE_STOP_EXITS=1. Default OFF — kill remains the sole
-    broker protective; lock-profit uses maybe_lock_profit_via_trail.
-    """
+    After +1R: structure_stop = entry * 0.997 (BE lock).
+  """
     if leg.get("one_r_locked"):
         return False
 
@@ -264,23 +264,138 @@ def maybe_arm_be_lock_on_1r(
     if float(quote_high) < one_r_price(entry, kill_pct):
         return False
 
-    # Always mark +1R — used by idle_no_1r and day-1 base-break deferral.
-    leg["one_r_locked"] = True
-    trail_doc["one_r_locked"] = True
-
-    if not structure_stop_exits_enabled():
-        # Do not arm a second hard BE sell. Kill stays the broker protective.
-        leg["trail"] = trail_doc
-        return True
-
     be_stop = be_lock_price(entry)
     leg["structure_stop"] = be_stop
     leg["structure_stop_reason"] = "be_lock_1r"
+    leg["one_r_locked"] = True
     leg["breakeven_locked"] = True
     trail_doc["structure_stop"] = be_stop
+    trail_doc["one_r_locked"] = True
     trail_doc["breakeven_locked"] = True
     leg["trail"] = trail_doc
     return True
+
+
+def mark_one_r_if_touched(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    quote_high: float,
+) -> bool:
+    """
+    Record +1R for idle_no_1r without arming a hard structure sell.
+
+    LIVE all-trailing replacement for maybe_arm_be_lock_on_1r: winners still
+    skip day-6 idle flatten, but structure_stop stays unset.
+    """
+    if leg.get("one_r_locked") or trail_doc.get("one_r_locked"):
+        if not leg.get("one_r_locked"):
+            leg["one_r_locked"] = True
+        if not trail_doc.get("one_r_locked"):
+            trail_doc["one_r_locked"] = True
+        return False
+
+    entry = float(leg.get("price") or trail_doc.get("entry_price") or 0)
+    kill_pct = float(trail_doc.get("kill_pct") or leg.get("kill_pct") or 0)
+    if entry <= 0 or kill_pct <= 0:
+        return False
+
+    if float(quote_high) < one_r_price(entry, kill_pct):
+        return False
+
+    leg["one_r_locked"] = True
+    trail_doc["one_r_locked"] = True
+    leg["trail"] = trail_doc
+    return True
+
+
+def disarm_live_structure_stop(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    reason: str = STRUCTURE_DISARM_REASON,
+) -> bool:
+    """
+    Clear leftover structure_stop on an open LIVE leg so BE lock cannot dump.
+
+    Safe to call every tick: no-op when already unset. Does not cancel the
+    broker kill (that remains the single protective SELL).
+    """
+    raw = leg.get("structure_stop")
+    if raw is None:
+        raw = trail_doc.get("structure_stop")
+    try:
+        px = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        px = 0.0
+
+    prev_reason = str(leg.get("structure_stop_reason") or "")
+    had_stop = px > 0
+    hard_reason = prev_reason in {
+        "be_lock_1r",
+        "breakeven_ratchet",
+        "orb_structure",
+        "day2_tighten",
+    }
+    if not had_stop and not hard_reason:
+        return False
+
+    leg["structure_stop"] = None
+    trail_doc["structure_stop"] = None
+    if had_stop or hard_reason:
+        leg["structure_disarmed_from"] = prev_reason or "structure_stop"
+        leg["structure_disarmed_price"] = px if had_stop else None
+        leg["structure_stop_reason"] = reason
+    leg["breakeven_locked"] = False
+    trail_doc["breakeven_locked"] = False
+    trail_doc["structure_stop_reason"] = reason
+    leg["trail"] = trail_doc
+    return True
+
+
+def should_fire_live_structure_stop(
+    quote_low: float,
+    structure_stop: float | None,
+    *,
+    live_path: bool = True,
+) -> bool:
+    """
+    True when LIVE trail monitor may dump remaining shares on structure_stop.
+
+    live_path=True (default) respects TSD_LIVE_STRUCTURE_STOP (OFF). Tests of
+    the breach math itself should call structure_stop_breached() directly.
+    """
+    if live_path and not live_structure_stop_enabled():
+        return False
+    return structure_stop_breached(quote_low, structure_stop)
+
+
+def apply_live_structure_policy(
+    leg: dict[str, Any],
+    trail_doc: dict[str, Any],
+    *,
+    quote_high: float,
+) -> dict[str, Any]:
+    """
+    LIVE tick: either arm Phase 2.5 BE lock (flag ON) or all-trailing (flag OFF).
+
+    Returns {enabled, armed_be_lock, marked_one_r, disarmed}.
+    """
+    enabled = live_structure_stop_enabled()
+    armed = False
+    marked = False
+    disarmed = False
+    if enabled:
+        armed = maybe_arm_be_lock_on_1r(leg, trail_doc, quote_high=quote_high)
+    else:
+        marked = mark_one_r_if_touched(leg, trail_doc, quote_high=quote_high)
+        disarmed = disarm_live_structure_stop(leg, trail_doc)
+    return {
+        "enabled": enabled,
+        "armed_be_lock": armed,
+        "marked_one_r": marked,
+        "disarmed": disarmed,
+    }
 
 
 def maybe_ratchet_breakeven(
@@ -292,11 +407,8 @@ def maybe_ratchet_breakeven(
     """
     Ratchet structure stop higher after BE lock (+1R already touched).
 
-    No-op when PHP_STRUCTURE_STOP_EXITS is off (default). Only runs once
-    one_r_locked; uses +0.5R / T1 triggers for further ratchet.
+    Only runs once one_r_locked; uses +0.5R / T1 triggers for further ratchet.
     """
-    if not structure_stop_exits_enabled():
-        return False
     if not leg.get("one_r_locked"):
         return False
     if leg.get("breakeven_locked") and leg.get("structure_stop_reason") != "be_lock_1r":
@@ -381,28 +493,9 @@ def should_day3_force_exit(trail_doc: dict[str, Any]) -> bool:
 
 
 def structure_stop_breached(quote_low: float, structure_stop: float | None) -> bool:
-    """Pure price check — does not consult PHP_STRUCTURE_STOP_EXITS."""
     if structure_stop is None or structure_stop <= 0:
         return False
     return float(quote_low) <= float(structure_stop)
-
-
-def should_exit_on_structure_stop(
-    leg: dict[str, Any],
-    trail_doc: dict[str, Any] | None,
-    quote_low: float,
-) -> bool:
-    """
-    True only when live structure BE dumps are enabled AND price breached.
-
-    Flag off (default): leftover structure_stop on an open long does NOT close.
-    Kill / trail remain the protective path.
-    """
-    if not structure_stop_exits_enabled():
-        return False
-    trail = trail_doc or {}
-    stop = leg.get("structure_stop") or trail.get("structure_stop")
-    return structure_stop_breached(quote_low, stop)
 
 
 def _finite_price(value: Any) -> float:
@@ -425,13 +518,13 @@ def maybe_lock_profit_via_trail(
     """
     After ~+3–4% MFE, tighten software trail and ratchet kill UP only.
 
-    Replacement for hard structure BE sells when PHP_STRUCTURE_STOP_EXITS is off.
-    Never lowers kill. Never removes kill. Never arms a second broker stop.
-    Kill raise is capped under last (when known) so we do not dump into the tape.
+    LIVE replacement for hard structure BE sells when TSD_LIVE_STRUCTURE_STOP
+    is off. Never lowers kill. Never removes kill. Never arms a second broker
+    stop. Kill raise is capped under last (when known).
 
-    force=True: used by the offline migration helper even if the flag is on.
+    force=True: offline migration helper even if the flag is on.
     """
-    if structure_stop_exits_enabled() and not force:
+    if live_structure_stop_enabled() and not force:
         return False
 
     entry = _finite_price(leg.get("price") or trail_doc.get("entry_price"))
@@ -464,7 +557,6 @@ def maybe_lock_profit_via_trail(
         trail_doc["trail_pct"] = trail_pct
         changed = True
 
-    # Move the old BE lock onto the single kill stop (UP only).
     be_px = be_lock_price(entry)
     candidate = max(kill, be_px)
     last = _finite_price(quote_last)
@@ -487,26 +579,6 @@ def maybe_lock_profit_via_trail(
     return changed
 
 
-def clear_structure_stop_fields(
-    leg: dict[str, Any],
-    trail_doc: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """
-    Drop hard structure BE fields so the monitor cannot dump on them.
-
-    Kill price / kill_order_id are left untouched (never naked). Caller may
-    then run maybe_lock_profit_via_trail to ratchet kill UP.
-    """
-    trail = dict(trail_doc if trail_doc is not None else (leg.get("trail") or {}))
-    leg["structure_stop"] = None
-    leg["structure_stop_reason"] = None
-    leg["breakeven_locked"] = False
-    trail["structure_stop"] = None
-    trail["breakeven_locked"] = False
-    leg["trail"] = trail
-    return trail
-
-
 def ensure_rth_monitoring(
     leg: dict[str, Any],
     *,
@@ -515,8 +587,7 @@ def ensure_rth_monitoring(
     """
     Mark leg as RTH-monitored without arming ORB structure.
 
-    Phase 2.5: kill-only until +1R. Hard BE structure_stop is armed only when
-    PHP_STRUCTURE_STOP_EXITS=1; default live path leaves it None.
+    Phase 2.5: kill-only until +1R; structure_stop remains None until BE lock.
     """
     if leg.get("rth_armed"):
         return {"armed": True, "leg": leg, "reason": "already_armed"}

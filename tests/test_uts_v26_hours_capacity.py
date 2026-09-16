@@ -157,14 +157,10 @@ class TestKillUntil1R(unittest.TestCase):
         self.assertIsNone(leg.get("structure_stop"))
 
     def test_post_1r_be_lock(self):
-        import os
-        from unittest.mock import patch
-
-        with patch.dict(os.environ, {"PHP_STRUCTURE_STOP_EXITS": "1"}):
-            leg, trail = self._leg_and_trail()
-            maybe_arm_be_lock_on_1r(leg, trail, quote_high=11.0)
-            self.assertEqual(leg["structure_stop"], be_lock_price(10.0))
-            self.assertTrue(leg["one_r_locked"])
+        leg, trail = self._leg_and_trail()
+        maybe_arm_be_lock_on_1r(leg, trail, quote_high=11.0)
+        self.assertEqual(leg["structure_stop"], be_lock_price(10.0))
+        self.assertTrue(leg["one_r_locked"])
 
     def test_day2_tighten_noop(self):
         leg, trail = self._leg_and_trail()

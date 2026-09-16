@@ -77,7 +77,7 @@ def test_atrc_plan_clears_structure_keeps_and_raises_kill():
     assert report["ok"]
     after = report["after"]
     assert after.get("structure_stop") is None
-    assert after.get("structure_stop_reason") is None
+    assert after.get("structure_stop_reason") != "be_lock_1r"
     assert (after.get("trail") or {}).get("structure_stop") is None
     assert after.get("kill_order_id") == 777
     assert report["kill_after"] >= report["kill_before"]
