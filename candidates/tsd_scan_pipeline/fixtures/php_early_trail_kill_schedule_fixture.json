@@ -1,0 +1,298 @@
+{
+  "paper_only": true,
+  "note": "Synthetic Peak Hour paths for --dry-run. Not live fills.",
+  "profiles": {
+    "FADE": {
+      "status": "OK",
+      "analog_count": 10,
+      "mae": {"p50": 0.028, "p75": 0.048, "p90": 0.062},
+      "mfe": {"p50": 0.036, "p75": 0.045, "p90": 0.055},
+      "kill_pct": 0.048,
+      "target_pct": 0.036
+    },
+    "RUNR": {
+      "status": "OK",
+      "analog_count": 10,
+      "mae": {"p50": 0.018, "p75": 0.032, "p90": 0.040},
+      "mfe": {"p50": 0.070, "p75": 0.090, "p90": 0.120},
+      "kill_pct": 0.032,
+      "target_pct": 0.070
+    },
+    "CHOP": {
+      "status": "OK",
+      "analog_count": 10,
+      "mae": {"p50": 0.035, "p75": 0.050, "p90": 0.060},
+      "mfe": {"p50": 0.012, "p75": 0.018, "p90": 0.022},
+      "kill_pct": 0.050,
+      "target_pct": 0.012
+    },
+    "BANK": {
+      "status": "OK",
+      "analog_count": 10,
+      "mae": {"p50": 0.016, "p75": 0.028, "p90": 0.038},
+      "mfe": {"p50": 0.055, "p75": 0.070, "p90": 0.085},
+      "kill_pct": 0.028,
+      "target_pct": 0.055
+    }
+  },
+  "analogs": {
+    "FADE": [
+      {"entry_date": "2026-08-03", "entry_price": 10.0, "bars": [
+        {"high": 10.22, "low": 9.98, "close": 10.18, "when": "a1"},
+        {"high": 10.41, "low": 10.15, "close": 10.36, "when": "a2"},
+        {"high": 10.20, "low": 9.55, "close": 9.60, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-04", "entry_price": 10.0, "bars": [
+        {"high": 10.18, "low": 9.96, "close": 10.12, "when": "a1"},
+        {"high": 10.38, "low": 10.10, "close": 10.30, "when": "a2"},
+        {"high": 10.12, "low": 9.48, "close": 9.52, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-05", "entry_price": 10.0, "bars": [
+        {"high": 10.25, "low": 9.99, "close": 10.20, "when": "a1"},
+        {"high": 10.45, "low": 10.18, "close": 10.40, "when": "a2"},
+        {"high": 10.08, "low": 9.50, "close": 9.55, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-06", "entry_price": 10.0, "bars": [
+        {"high": 10.16, "low": 9.94, "close": 10.10, "when": "a1"},
+        {"high": 10.34, "low": 10.08, "close": 10.28, "when": "a2"},
+        {"high": 10.05, "low": 9.42, "close": 9.48, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-07", "entry_price": 10.0, "bars": [
+        {"high": 10.20, "low": 9.97, "close": 10.15, "when": "a1"},
+        {"high": 10.42, "low": 10.12, "close": 10.35, "when": "a2"},
+        {"high": 10.15, "low": 9.58, "close": 9.62, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-10", "entry_price": 10.0, "bars": [
+        {"high": 10.12, "low": 9.90, "close": 10.05, "when": "a1"},
+        {"high": 10.31, "low": 10.04, "close": 10.22, "when": "a2"},
+        {"high": 10.00, "low": 9.46, "close": 9.50, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-11", "entry_price": 10.0, "bars": [
+        {"high": 10.28, "low": 10.00, "close": 10.22, "when": "a1"},
+        {"high": 10.48, "low": 10.20, "close": 10.42, "when": "a2"},
+        {"high": 10.18, "low": 9.52, "close": 9.58, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-12", "entry_price": 10.0, "bars": [
+        {"high": 10.19, "low": 9.95, "close": 10.12, "when": "a1"},
+        {"high": 10.36, "low": 10.10, "close": 10.30, "when": "a2"},
+        {"high": 10.10, "low": 9.44, "close": 9.50, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-13", "entry_price": 10.0, "bars": [
+        {"high": 10.21, "low": 9.98, "close": 10.16, "when": "a1"},
+        {"high": 10.40, "low": 10.14, "close": 10.33, "when": "a2"},
+        {"high": 10.06, "low": 9.49, "close": 9.54, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-14", "entry_price": 10.0, "bars": [
+        {"high": 10.24, "low": 9.99, "close": 10.18, "when": "a1"},
+        {"high": 10.44, "low": 10.16, "close": 10.38, "when": "a2"},
+        {"high": 10.12, "low": 9.51, "close": 9.56, "when": "a3"}
+      ]}
+    ],
+    "RUNR": [
+      {"entry_date": "2026-08-03", "entry_price": 20.0, "bars": [
+        {"high": 20.30, "low": 19.90, "close": 20.22, "when": "a1"},
+        {"high": 20.80, "low": 20.40, "close": 20.70, "when": "a2"},
+        {"high": 21.40, "low": 20.90, "close": 21.20, "when": "a3"},
+        {"high": 22.00, "low": 21.40, "close": 21.80, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-04", "entry_price": 20.0, "bars": [
+        {"high": 20.25, "low": 19.92, "close": 20.18, "when": "a1"},
+        {"high": 20.70, "low": 20.35, "close": 20.60, "when": "a2"},
+        {"high": 21.20, "low": 20.80, "close": 21.10, "when": "a3"},
+        {"high": 21.70, "low": 21.20, "close": 21.55, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-05", "entry_price": 20.0, "bars": [
+        {"high": 20.40, "low": 19.95, "close": 20.30, "when": "a1"},
+        {"high": 20.90, "low": 20.50, "close": 20.80, "when": "a2"},
+        {"high": 21.50, "low": 21.00, "close": 21.35, "when": "a3"},
+        {"high": 22.20, "low": 21.60, "close": 22.00, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-06", "entry_price": 20.0, "bars": [
+        {"high": 20.22, "low": 19.88, "close": 20.15, "when": "a1"},
+        {"high": 20.65, "low": 20.28, "close": 20.55, "when": "a2"},
+        {"high": 21.10, "low": 20.70, "close": 21.00, "when": "a3"},
+        {"high": 21.60, "low": 21.10, "close": 21.45, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-07", "entry_price": 20.0, "bars": [
+        {"high": 20.35, "low": 19.96, "close": 20.28, "when": "a1"},
+        {"high": 20.85, "low": 20.45, "close": 20.75, "when": "a2"},
+        {"high": 21.45, "low": 20.95, "close": 21.30, "when": "a3"},
+        {"high": 22.10, "low": 21.50, "close": 21.90, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-10", "entry_price": 20.0, "bars": [
+        {"high": 20.18, "low": 19.85, "close": 20.10, "when": "a1"},
+        {"high": 20.60, "low": 20.25, "close": 20.50, "when": "a2"},
+        {"high": 21.05, "low": 20.65, "close": 20.95, "when": "a3"},
+        {"high": 21.50, "low": 21.05, "close": 21.40, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-11", "entry_price": 20.0, "bars": [
+        {"high": 20.32, "low": 19.94, "close": 20.24, "when": "a1"},
+        {"high": 20.78, "low": 20.38, "close": 20.68, "when": "a2"},
+        {"high": 21.30, "low": 20.88, "close": 21.18, "when": "a3"},
+        {"high": 21.90, "low": 21.35, "close": 21.75, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-12", "entry_price": 20.0, "bars": [
+        {"high": 20.28, "low": 19.91, "close": 20.20, "when": "a1"},
+        {"high": 20.72, "low": 20.32, "close": 20.62, "when": "a2"},
+        {"high": 21.25, "low": 20.82, "close": 21.12, "when": "a3"},
+        {"high": 21.80, "low": 21.28, "close": 21.65, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-13", "entry_price": 20.0, "bars": [
+        {"high": 20.38, "low": 19.97, "close": 20.30, "when": "a1"},
+        {"high": 20.88, "low": 20.48, "close": 20.78, "when": "a2"},
+        {"high": 21.48, "low": 21.00, "close": 21.32, "when": "a3"},
+        {"high": 22.05, "low": 21.48, "close": 21.88, "when": "a4"}
+      ]},
+      {"entry_date": "2026-08-14", "entry_price": 20.0, "bars": [
+        {"high": 20.20, "low": 19.86, "close": 20.12, "when": "a1"},
+        {"high": 20.62, "low": 20.26, "close": 20.52, "when": "a2"},
+        {"high": 21.08, "low": 20.68, "close": 20.98, "when": "a3"},
+        {"high": 21.55, "low": 21.08, "close": 21.42, "when": "a4"}
+      ]}
+    ],
+    "CHOP": [
+      {"entry_date": "2026-08-03", "entry_price": 8.0, "bars": [
+        {"high": 8.10, "low": 7.88, "close": 7.95, "when": "a1"},
+        {"high": 8.06, "low": 7.58, "close": 7.60, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-04", "entry_price": 8.0, "bars": [
+        {"high": 8.08, "low": 7.90, "close": 7.96, "when": "a1"},
+        {"high": 8.04, "low": 7.55, "close": 7.58, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-05", "entry_price": 8.0, "bars": [
+        {"high": 8.12, "low": 7.86, "close": 7.92, "when": "a1"},
+        {"high": 8.02, "low": 7.52, "close": 7.55, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-06", "entry_price": 8.0, "bars": [
+        {"high": 8.09, "low": 7.84, "close": 7.90, "when": "a1"},
+        {"high": 8.00, "low": 7.50, "close": 7.52, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-07", "entry_price": 8.0, "bars": [
+        {"high": 8.14, "low": 7.89, "close": 7.97, "when": "a1"},
+        {"high": 8.07, "low": 7.60, "close": 7.62, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-10", "entry_price": 8.0, "bars": [
+        {"high": 8.07, "low": 7.82, "close": 7.88, "when": "a1"},
+        {"high": 7.98, "low": 7.48, "close": 7.50, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-11", "entry_price": 8.0, "bars": [
+        {"high": 8.11, "low": 7.87, "close": 7.94, "when": "a1"},
+        {"high": 8.05, "low": 7.56, "close": 7.58, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-12", "entry_price": 8.0, "bars": [
+        {"high": 8.06, "low": 7.80, "close": 7.86, "when": "a1"},
+        {"high": 7.96, "low": 7.46, "close": 7.48, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-13", "entry_price": 8.0, "bars": [
+        {"high": 8.13, "low": 7.91, "close": 7.98, "when": "a1"},
+        {"high": 8.08, "low": 7.62, "close": 7.64, "when": "a2"}
+      ]},
+      {"entry_date": "2026-08-14", "entry_price": 8.0, "bars": [
+        {"high": 8.05, "low": 7.85, "close": 7.90, "when": "a1"},
+        {"high": 7.99, "low": 7.54, "close": 7.56, "when": "a2"}
+      ]}
+    ],
+    "BANK": [
+      {"entry_date": "2026-08-03", "entry_price": 12.0, "bars": [
+        {"high": 12.28, "low": 11.96, "close": 12.22, "when": "a1"},
+        {"high": 12.18, "low": 11.95, "close": 12.02, "when": "a2"},
+        {"high": 12.70, "low": 12.10, "close": 12.60, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-04", "entry_price": 12.0, "bars": [
+        {"high": 12.26, "low": 11.94, "close": 12.20, "when": "a1"},
+        {"high": 12.16, "low": 11.92, "close": 12.00, "when": "a2"},
+        {"high": 12.65, "low": 12.08, "close": 12.55, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-05", "entry_price": 12.0, "bars": [
+        {"high": 12.32, "low": 11.98, "close": 12.26, "when": "a1"},
+        {"high": 12.20, "low": 11.96, "close": 12.04, "when": "a2"},
+        {"high": 12.80, "low": 12.15, "close": 12.70, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-06", "entry_price": 12.0, "bars": [
+        {"high": 12.24, "low": 11.93, "close": 12.18, "when": "a1"},
+        {"high": 12.14, "low": 11.90, "close": 11.98, "when": "a2"},
+        {"high": 12.60, "low": 12.05, "close": 12.50, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-07", "entry_price": 12.0, "bars": [
+        {"high": 12.30, "low": 11.97, "close": 12.24, "when": "a1"},
+        {"high": 12.19, "low": 11.94, "close": 12.03, "when": "a2"},
+        {"high": 12.75, "low": 12.12, "close": 12.66, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-10", "entry_price": 12.0, "bars": [
+        {"high": 12.22, "low": 11.92, "close": 12.16, "when": "a1"},
+        {"high": 12.12, "low": 11.88, "close": 11.96, "when": "a2"},
+        {"high": 12.55, "low": 12.02, "close": 12.45, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-11", "entry_price": 12.0, "bars": [
+        {"high": 12.29, "low": 11.95, "close": 12.23, "when": "a1"},
+        {"high": 12.17, "low": 11.93, "close": 12.01, "when": "a2"},
+        {"high": 12.72, "low": 12.10, "close": 12.62, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-12", "entry_price": 12.0, "bars": [
+        {"high": 12.27, "low": 11.94, "close": 12.21, "when": "a1"},
+        {"high": 12.15, "low": 11.91, "close": 11.99, "when": "a2"},
+        {"high": 12.68, "low": 12.08, "close": 12.58, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-13", "entry_price": 12.0, "bars": [
+        {"high": 12.33, "low": 11.99, "close": 12.27, "when": "a1"},
+        {"high": 12.21, "low": 11.97, "close": 12.05, "when": "a2"},
+        {"high": 12.82, "low": 12.16, "close": 12.72, "when": "a3"}
+      ]},
+      {"entry_date": "2026-08-14", "entry_price": 12.0, "bars": [
+        {"high": 12.25, "low": 11.93, "close": 12.19, "when": "a1"},
+        {"high": 12.13, "low": 11.89, "close": 11.97, "when": "a2"},
+        {"high": 12.58, "low": 12.04, "close": 12.48, "when": "a3"}
+      ]}
+    ]
+  },
+  "entries": [
+    {
+      "symbol": "FADE",
+      "entry_date": "2026-09-08",
+      "entry_hour": 11,
+      "entry_price": 10.0,
+      "shares": 8,
+      "bars": [
+        {"high": 10.21, "low": 9.97, "close": 10.16, "when": "2026-09-08T12:00:00"},
+        {"high": 10.43, "low": 10.14, "close": 10.38, "when": "2026-09-08T13:00:00"},
+        {"high": 10.10, "low": 9.50, "close": 9.55, "when": "2026-09-09T10:00:00"}
+      ]
+    },
+    {
+      "symbol": "RUNR",
+      "entry_date": "2026-09-08",
+      "entry_hour": 12,
+      "entry_price": 20.0,
+      "shares": 8,
+      "bars": [
+        {"high": 20.32, "low": 19.94, "close": 20.24, "when": "2026-09-08T13:00:00"},
+        {"high": 20.82, "low": 20.42, "close": 20.72, "when": "2026-09-08T14:00:00"},
+        {"high": 21.40, "low": 20.92, "close": 21.28, "when": "2026-09-09T10:00:00"},
+        {"high": 22.00, "low": 21.42, "close": 21.85, "when": "2026-09-09T11:00:00"}
+      ]
+    },
+    {
+      "symbol": "CHOP",
+      "entry_date": "2026-09-08",
+      "entry_hour": 10,
+      "entry_price": 8.0,
+      "shares": 8,
+      "bars": [
+        {"high": 8.09, "low": 7.86, "close": 7.94, "when": "2026-09-08T11:00:00"},
+        {"high": 8.04, "low": 7.52, "close": 7.56, "when": "2026-09-08T12:00:00"}
+      ]
+    },
+    {
+      "symbol": "BANK",
+      "entry_date": "2026-09-09",
+      "entry_hour": 11,
+      "entry_price": 12.0,
+      "shares": 8,
+      "bars": [
+        {"high": 12.28, "low": 11.96, "close": 12.22, "when": "2026-09-09T12:00:00"},
+        {"high": 12.18, "low": 11.94, "close": 12.02, "when": "2026-09-09T13:00:00"},
+        {"high": 12.74, "low": 12.12, "close": 12.64, "when": "2026-09-10T10:00:00"}
+      ]
+    }
+  ]
+}
