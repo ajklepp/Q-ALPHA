@@ -26,11 +26,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import pytz
-import streamlit as st
 
-from dashboard_theme import MUTED, section_header
+# streamlit / pandas are only required to render the tab, not to load the book.
 
 ROOT = Path(__file__).resolve().parent
 ET = pytz.timezone("America/New_York")
@@ -237,6 +235,11 @@ def _fmt_pct(val: Any) -> str:
 
 def render_track100_tab() -> None:
     """Streamlit tab: Track 100 paper log. No IBKR."""
+    import pandas as pd
+    import streamlit as st
+
+    from dashboard_theme import MUTED, section_header
+
     section_header(
         "Track 100 (paper log)",
         "Sibling study · paper fills only · no IBKR",
