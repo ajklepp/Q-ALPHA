@@ -75,6 +75,7 @@ Pacing: **~2.5s/symbol** for historical pulls.
 - **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).
 - Entry soft-skip when structure risk **> 3.5%**; ENTER requires tradable popularity.
 - **Shadow 3R paper** (`tsd_shadow_multi_target.py`): same fills, software banks at **0.35/0.50/0.90R** (50/25/25); Dashboard tab **3R Paper**. No second broker exits.
+- **Shadow B_arm4_lock paper** (`php_arm_after_mfe_shadow.py`): same open book, software-only arm-after-MFE (+4% of entry, lock width 70% of MAE-p50). Live A (T1 bank ~+2%) is unchanged. See `SHADOW.md`. Disable with `PHP_ARM_AFTER_MFE_SHADOW=0`.
 
 ## Phase 5 — Scheduler + scorecard
 

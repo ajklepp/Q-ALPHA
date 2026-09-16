@@ -312,6 +312,14 @@ def _tick_body(*, dry_run: bool = False, live: bool = True) -> int:
             continue
         rc = max(rc, run_launch_pass(live=live))
         _mark_ran("launch", bar_hour, sched)
+        # PAPER ONLY: B_arm4_lock shadow after :15 scan. Does not change
+        # ranking, entries, or live exits (try/except — launch already done).
+        try:
+            from tsd_scan_pipeline.php_arm_after_mfe_shadow import maybe_run_after_scan
+
+            maybe_run_after_scan()
+        except Exception as exc:
+            print(f"  shadow B_arm4_lock after-scan warn: {exc}", flush=True)
 
     htf_0430 = htf_refresh_at(now.date())
     htf_noon = ET.localize(datetime.combine(now.date(), time(12, 0)))
