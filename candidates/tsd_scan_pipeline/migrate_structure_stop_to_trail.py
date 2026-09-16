@@ -89,6 +89,10 @@ def plan_leg_migration(
             _finite(after.get("price") or trail.get("entry_price")),
         )
     last = quote_last if quote_last and quote_last > 0 else None
+    if last is None:
+        last = _finite(trail.get("last_close")) or None
+        if last is None:
+            last = _finite(after.get("last_close")) or None
     maybe_lock_profit_via_trail(
         after,
         trail,

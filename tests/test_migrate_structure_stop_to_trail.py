@@ -87,6 +87,18 @@ def test_atrc_plan_clears_structure_keeps_and_raises_kill():
     assert report["kill_after"] < 55.00
 
 
+def test_plan_uses_trail_last_close_as_kill_cap():
+    leg = _atrc_leg()
+    # Last above current kill but below BE (~53.13) so cap bites.
+    leg["trail"]["last_close"] = 52.50
+    report = plan_leg_migration(leg, quote_high=56.78)
+    assert report["ok"]
+    assert report["kill_after"] >= report["kill_before"]
+    cap = 52.50 * (1.0 - 0.005)
+    assert report["kill_after"] <= cap + 0.01
+    assert report["kill_after"] < be_lock_price(53.29)
+
+
 def test_plan_never_removes_kill_even_without_mfe():
     leg = _atrc_leg()
     leg["trail"]["peak_high"] = 53.29
