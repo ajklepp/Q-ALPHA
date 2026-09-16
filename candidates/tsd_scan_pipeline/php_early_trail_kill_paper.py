@@ -487,6 +487,7 @@ def score_grid_result(
             "n": 0,
             "mean_pnl_pct_of_entry": None,
             "mean_capture_frac_of_mfe": None,
+            "mean_capture_frac_when_mfe_ge_1pct": None,
             "green_then_lost_rate": None,
             "score": None,
         }
@@ -495,11 +496,19 @@ def score_grid_result(
     gtl = sum(1 for r in rows if r.get("green_then_lost")) / n
     mean_pnl = sum(pnls) / n
     mean_cap = sum(caps) / n
+    green_caps = [
+        float(r["capture_frac_of_mfe"])
+        for r in rows
+        if float(r.get("mfe_peak_pct") or 0.0) >= GREEN_MFE_FLOOR
+    ]
     score = mean_pnl - green_then_lost_penalty * gtl
     return {
         "n": n,
         "mean_pnl_pct_of_entry": round(mean_pnl, 6),
         "mean_capture_frac_of_mfe": round(mean_cap, 6),
+        "mean_capture_frac_when_mfe_ge_1pct": (
+            round(sum(green_caps) / len(green_caps), 6) if green_caps else None
+        ),
         "green_then_lost_rate": round(gtl, 6),
         "score": round(score, 6),
     }

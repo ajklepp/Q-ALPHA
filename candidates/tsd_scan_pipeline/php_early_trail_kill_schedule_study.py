@@ -82,7 +82,7 @@ try:
     import asyncio
 
     try:
-        asyncio.get_event_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 except Exception:
@@ -1001,6 +1001,9 @@ def replay_paper(
         "book_pnl": book_pnl,
         "book_pnl_pct_of_entry_mean": scored.get("mean_pnl_pct_of_entry"),
         "capture_frac_of_mfe_mean": scored.get("mean_capture_frac_of_mfe"),
+        "capture_frac_when_mfe_ge_1pct_mean": scored.get(
+            "mean_capture_frac_when_mfe_ge_1pct"
+        ),
         "green_then_lost_rate": scored.get("green_then_lost_rate"),
         "score": scored.get("score"),
         "n": scored.get("n"),
@@ -1039,8 +1042,8 @@ def write_markdown(doc: dict[str, Any], path: Path) -> None:
         "",
         "## Mode book (same entries)",
         "",
-        "| Mode | Book $ | Mean % of entry | Capture of MFE | Green-then-lost | Score |",
-        "|------|-------:|----------------:|---------------:|----------------:|------:|",
+        "| Mode | Book $ | Mean % of entry | Capture (MFE≥1%) | Green-then-lost | Score |",
+        "|------|-------:|----------------:|-----------------:|----------------:|------:|",
     ]
     for key in ("A", "B", "C", "D"):
         m = modes.get(key)
@@ -1049,7 +1052,7 @@ def write_markdown(doc: dict[str, Any], path: Path) -> None:
         lines.append(
             f"| {key} {m.get('label', '')} | {m.get('book_pnl'):+.2f} | "
             f"{_pct(m.get('book_pnl_pct_of_entry_mean'))} | "
-            f"{_pct(m.get('capture_frac_of_mfe_mean'))} | "
+            f"{_pct(m.get('capture_frac_when_mfe_ge_1pct_mean') if m.get('capture_frac_when_mfe_ge_1pct_mean') is not None else m.get('capture_frac_of_mfe_mean'))} | "
             f"{_pct(m.get('green_then_lost_rate'))} | "
             f"{m.get('score')} |"
         )
@@ -1086,6 +1089,8 @@ def write_markdown(doc: dict[str, Any], path: Path) -> None:
         "/ EXP-0021 path facts (MFE+MAE reconstruction).",
         "",
         f"Degrade notes: {doc.get('degrade_notes') or 'none'}",
+        "",
+        "Fixture / dry-run numbers are sanity dumps, not a live Sharpe claim.",
         "",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1233,7 +1238,7 @@ def run_study(args: argparse.Namespace) -> dict[str, Any]:
         print(
             f"  {mode}  book=${m['book_pnl']:+.2f}  "
             f"mean%={_pct(m['book_pnl_pct_of_entry_mean'])}  "
-            f"capture={_pct(m['capture_frac_of_mfe_mean'])}  "
+            f"capture={_pct(m.get('capture_frac_when_mfe_ge_1pct_mean'))}  "
             f"GTL={_pct(m['green_then_lost_rate'])}"
         )
 
