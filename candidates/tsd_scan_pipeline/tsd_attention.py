@@ -131,6 +131,12 @@ def annotate_momentum_context(
     out["buzz_accel"] = buzz
     out["momentum_context"] = momentum
     out["attention_reasons"] = list(out.get("attention_reasons") or [])
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import annotate_momentum_rank
+
+        out = annotate_momentum_rank(out)
+    except Exception:
+        pass
     return out
 
 
@@ -233,9 +239,32 @@ def build_attention_pool(
     pool = list(by_sym.values())
     pool.sort(key=lambda r: (-_cont(r), _scan(r)))
     if len(pool) > pool_max:
-        hot = [r for r in pool if r.get("momentum_context") or r.get("tradable_popular")]
-        cold = [r for r in pool if r not in hot]
-        pool = (hot + cold)[:pool_max]
+        try:
+            from tsd_scan_pipeline.php_momentum_rank import (
+                is_tape_hot,
+                momentum_rank_enabled,
+            )
+
+            if momentum_rank_enabled():
+                ripping = [
+                    r for r in pool
+                    if r.get("momentum_context") and is_tape_hot(r)
+                ]
+                popular_slow = [
+                    r for r in pool
+                    if r not in ripping
+                    and (r.get("momentum_context") or r.get("tradable_popular"))
+                ]
+                cold = [r for r in pool if r not in ripping and r not in popular_slow]
+                pool = (ripping + popular_slow + cold)[:pool_max]
+            else:
+                hot = [r for r in pool if r.get("momentum_context") or r.get("tradable_popular")]
+                cold = [r for r in pool if r not in hot]
+                pool = (hot + cold)[:pool_max]
+        except Exception:
+            hot = [r for r in pool if r.get("momentum_context") or r.get("tradable_popular")]
+            cold = [r for r in pool if r not in hot]
+            pool = (hot + cold)[:pool_max]
 
     pop_n = len((ctx or {}).get("popular_symbols") or [])
     print(

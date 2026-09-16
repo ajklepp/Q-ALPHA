@@ -63,6 +63,16 @@ from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
 )
 from tsd_scan_pipeline.universe_tsd import load_polygon_key
 
+
+def _momentum_rank_label() -> str:
+    """ON/OFF for the live momentum-rank overlay (fail-open to ON default)."""
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import momentum_rank_mode_label
+
+        return momentum_rank_mode_label()
+    except Exception:
+        return "ON"
+
 ET = pytz.timezone("America/New_York")
 
 QUEUE_ADMIT_STATUSES = {"ADDED", "UPDATED", "WATCHING"}
@@ -373,6 +383,7 @@ def _write_launch_artifact(
         "hours": sorted(ALLOWED_HOURS),
         "continuation_score_version": live_ranker_version_label(),
         "equal_signal": equal_signal_mode_label(),
+        "momentum_rank": _momentum_rank_label(),
         "slots_per_scan": MAX_NEW_ENTRIES_PER_SCAN,
         "ranked_count": len(ranked),
         "attention_count": len(attention) if attention is not None else None,

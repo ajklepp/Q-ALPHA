@@ -1,49 +1,75 @@
 # Peak Hour revert notes
 
-Two independent live gates. Revert only the section you need.
+Independent live gates. Revert only the section you need.
 
 ---
 
-# Peak Hour equal-signal — revert note
+# Peak Hour live overlays — equal-signal + momentum-rank
 
-**Date:** 2026-09-15  
 **Owner:** Peak Hour / Aaron  
-**Flag:** `PHP_EQUAL_SIGNAL` (default **ON**)
+**Flags:** `PHP_EQUAL_SIGNAL` (default **ON**, 2026-09-15) · `PHP_MOMENTUM_RANK` (default **ON**, 2026-09-16)
 
-## What changed
+This file is the one-step revert path. Do **not** restart trail monitor for
+either flag. Trails / keep-profit / 2 NEW per hour did not change.
 
-Live Peak Hour take path (attention / continuation / list admission) treats
-every valid 1H signal candle as equal. After admission, picks still use
-popularity, momentum, room, tape, and case — no new ranking philosophy.
+---
 
-- **Soft stage equalized.** Phase −15, scan-band beauty (`scan_term` /
-  scan>55 extra −10), and launch-score “sweet-spot” beauty no longer grade
-  LAUNCH vs EXTENSION vs NEUTRAL.
-- **Phase → `bar_state=extended` leak fixed.** `classify_bar_state()` no
-  longer maps `phase == EXTENSION` to `extended`. Soft EXTENSION (scan ~65–74)
+## PHP_MOMENTUM_RANK (2026-09-16)
+
+After equal-signal admission, scarce slots prefer same-day rippers
+(momentum + room + tape) over slow multi-day popular names.
+
+- **Score tilt.** Same-session RS, session return, volume, live-gainer+hot
+  tape, and constructive room are boosted (ripper boost capped so we do not
+  grab every runner). Slow popular (board membership without tape heat) and
+  high hist-prior without tape are penalized.
+- **Take sort.** Momentum-adjusted continuation first; case confidence is
+  tiebreak only. A high-confidence slow popular name cannot beat a ripper.
+- **Popularity is a lane, not the only filter.** Case ENTER + (popular **or**
+  momentum_context + hot tape). First-day rippers can take without the
+  10-day board.
+- **Hard-extension stays ON.** `scan >= 75` is still excluded.
+- **Case stays a veto.** Wreckage / toxic / no-ENTER still cannot buy.
+- **Trails / take cap:** unchanged.
+
+### One-step revert (ranking only)
+
+Set **`PHP_MOMENTUM_RANK=0`** (also `false` / `off` / `no`) in repo `.env`
+(same file as `POLYGON_API_KEY`) or as a Windows User env var. Next `:15`
+tick picks it up. Do **not** restart trail monitor.
+
+Confirm on the next SCAN:
+
+- Log banner: `momentum_rank=OFF`
+- Telegram: `momentum_rank=OFF`
+- Score label drops `+momentum_rank` (e.g. `score=v1.6+equal_signal`)
+
+Flag OFF restores: continuation score as computed by equal-signal / v1.6,
+popularity-only take filter, and case-confidence-first sort.
+
+To turn it back on: delete the line / unset (default ON), or set
+`PHP_MOMENTUM_RANK=1`. Expect `momentum_rank=ON` and
+`score=v1.6+equal_signal+momentum_rank` when equal-signal is also ON.
+
+---
+
+## PHP_EQUAL_SIGNAL (2026-09-15)
+
+Live Peak Hour take path treats every valid 1H signal candle as equal.
+Soft stage is not graded; hard `scan>=75` still excluded.
+
+- **Soft stage equalized.** Phase −15, scan-band beauty, launch-score
+  sweet-spot no longer grade LAUNCH vs EXTENSION vs NEUTRAL.
+- **Phase → `bar_state=extended` leak fixed.** Soft EXTENSION (scan ~65–74)
   is no longer `extension_hard`. That leak is why OKTA / WIX / COIN-class
   names never reached attention on 2026-09-14.
 - **Hard-extension stays ON.** `scan >= 75` is still excluded.
-- **Trails / keep-profit / structure stops:** unchanged.
-- **Take cap:** unchanged (2 NEW / hour).
-- **Popularity:** unchanged (hard veto vs boost not flipped).
 - **LLM case:** still live. Rules ENTER no longer refuses `scan > 55` when
-  the flag is ON — constructive room + momentum + tradable popularity can
-  ENTER at any scan `< 75`. Soft stage is not a veto. LLM ENTER is not
-  removed.
+  the flag is ON.
 
-## One-step revert (no commit hunting)
+### One-step revert (admission / stage grading)
 
-Set **`PHP_EQUAL_SIGNAL=0`** (also accepts `false` / `off` / `no`) and
-restart the Peak Hour scheduler so the next `:15` tick inherits it.
-
-1. Preferred: add `PHP_EQUAL_SIGNAL=0` to the repo **`.env`** (same file as
-   `POLYGON_API_KEY`). The flag reads env first, then `.env`.
-2. Or set a Windows **User** environment variable `PHP_EQUAL_SIGNAL=0`
-   (Task Scheduler inherits the user env on the laptop).
-3. Restart **QAlpha TSD Scheduler** (or wait for the next 5-min tick after
-   the env is visible). Do **not** restart trail monitor — trails did not
-   change.
+Set **`PHP_EQUAL_SIGNAL=0`**. Next `:15` tick inherits it.
 
 Every live 1H path (`scheduler.py --tick --live`, `--launch --live`, and
 direct `tsd_1h_launch_scan.py`) calls `apply_php_equal_signal_env()` at
@@ -53,23 +79,46 @@ as unset (default ON).
 
 Confirm the mode on the next SCAN:
 
-- Scheduler + 1H log: `score=v1.6+equal_signal  equal_signal=ON` (or OFF)
-- Telegram: `equal_signal=OFF score=v1.6` when reverted
+- Scheduler + 1H log: `score=v1.6+equal_signal…  equal_signal=ON|OFF`
+  (plus `momentum_rank=…` when that overlay is present)
+- Telegram: `equal_signal=OFF` when reverted (score may still show
+  `+momentum_rank` if that flag stays ON)
 
-To turn it back on: delete the line / unset the var (default is ON), or set
-`PHP_EQUAL_SIGNAL=1`. Telegram / log should show
-`equal_signal=ON score=v1.6+equal_signal`.
+Flag OFF restores pre-2026-09-15 list admission, continuation grading, the
+phase→extended hard-block leak, and the rules ENTER `scan <= 55` refuse band.
 
-Flag OFF restores pre-change list admission, continuation grading, the
-phase→extended hard-block leak, and the rules ENTER `scan <= 55` refuse
-band.
+To turn it back on: delete the line / unset (default ON), or set
+`PHP_EQUAL_SIGNAL=1`.
+
+---
+
+## Laptop verify before next RTH
+
+From the laptop (next to live `.env` + scan JSON):
+
+```text
+git pull
+# confirm flags default ON (or unset)
+py -3 -m unittest tests.test_php_momentum_rank tests.test_php_equal_signal -v
+py -3 candidates/tsd_scan_pipeline/php_momentum_rank_counterfactual.py --date 2026-09-14
+```
+
+Next live `:15` log / Telegram must show:
+
+```text
+equal_signal=ON  momentum_rank=ON  score=v1.6+equal_signal+momentum_rank
+```
+
+If you see bare `score=v1.6` with no `momentum_rank=`, the tick is not on
+this code.
 
 ## Git fallback
 
-- Parent of this change (main at branch): `0cc11c2cfd5beffbae6c0abbabf67c5f3bd286eb`
-- After merge: revert the equal-signal live PR (do not revert trails).
+- Parent of equal-signal on main: `0cc11c2cfd5beffbae6c0abbabf67c5f3bd286eb`
+- After merge: revert the momentum-rank PR to drop ranking only; revert
+  the equal-signal PR to restore stage grading. Do not revert trails.
 
-Research-only counterfactual (not this product): PR
+Research-only equal-signal counterfactual (not this product):
 https://github.com/ajklepp/Q-ALPHA/pull/10
 
 ---
