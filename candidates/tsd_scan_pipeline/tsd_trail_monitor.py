@@ -910,6 +910,18 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
         except Exception as exc:
             print(f"  shadow MT3 tick warn: {exc}")
 
+        # PAPER ONLY: B_arm4_lock arm-after-MFE path on the same open book.
+        # Does NOT change live keep-profit / trail / kill / entries.
+        try:
+            from tsd_scan_pipeline.php_arm_after_mfe_shadow import tick_open_arm_shadows
+
+            def _arm_shadow_quote(symbol: str) -> dict[str, Any] | None:
+                return _fetch_quote(ib, symbol)
+
+            tick_open_arm_shadows(_arm_shadow_quote, book=state)
+        except Exception as exc:
+            print(f"  shadow B_arm4_lock tick warn: {exc}")
+
         def _trail_mark_fn(ib_conn, symbol: str, *, timeout_sec: float = 8.0) -> float | None:
             """Mark from live quote; fall back to trail last_close on the book leg."""
             q = _fetch_quote(ib_conn, symbol)
