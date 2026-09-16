@@ -1,8 +1,14 @@
 """
 Q-ALPHA TSD pipeline — Phase 4 software trail monitor.
 
-3-layer stop pyramid (Phase 2.5 kill-until-1R):
-  L1 broker kill (always on) | L2 BE lock after +1R | L3 T1–T4 software trail
+3-layer stop pyramid (Peak Hour live, 2026-09):
+  L1 broker kill (always on, ratchets UP only)
+  L2 hard BE structure_stop dumps — OFF by default (PHP_STRUCTURE_STOP_EXITS=0)
+     lock-profit = tighter software trail after ~+3–4% MFE
+  L3 T1–T4 software trail (keep-profit T1 bank unchanged)
+
+  PHP_STRUCTURE_STOP_EXITS=1 restores Phase 2.5 BE lock after +1R dumps.
+  3R / MT3 multi-target banks stay paper/shadow only.
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --once
@@ -128,10 +134,12 @@ from tsd_scan_pipeline.build_3h_bars import bars_from_ibkr
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
     ensure_rth_monitoring,
     maybe_arm_be_lock_on_1r,
+    maybe_lock_profit_via_trail,
     maybe_ratchet_breakeven,
     poll_interval_sec,
+    should_exit_on_structure_stop,
     should_idle_no_1r,
-    structure_stop_breached,
+    structure_stop_exits_enabled,
 )
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
     at_time_cap,
@@ -408,8 +416,9 @@ def _process_leg(
     except Exception as exc:
         print(f"  {sym} base_break check skipped: {exc}")
 
-    structure_stop = leg.get("structure_stop") or trail.get("structure_stop")
-    if structure_stop_breached(quote["low"], structure_stop):
+    # Hard structure BE dumps are flag-gated (default OFF). Leftover
+    # structure_stop on an open long must not flatten when the flag is off.
+    if should_exit_on_structure_stop(leg, trail, quote["low"]):
         results.extend(
             _exit_all_remaining(
                 ib, pos, leg_index, leg, sym,
@@ -420,7 +429,24 @@ def _process_leg(
         )
         return results
 
-    maybe_ratchet_breakeven(leg, trail, quote_high=quote["high"])
+    if structure_stop_exits_enabled():
+        maybe_ratchet_breakeven(leg, trail, quote_high=quote["high"])
+    else:
+        profile = load_tsd_profile(sym)
+        prior_kill = float(trail.get("kill_price") or 0)
+        locked = maybe_lock_profit_via_trail(
+            leg,
+            trail,
+            quote_high=quote["high"],
+            quote_last=quote.get("last") or quote.get("close"),
+            profile=profile,
+        )
+        if locked:
+            new_kill = (leg.get("trail") or trail).get("kill_price")
+            print(
+                f"  {sym} lock-profit (MFE trail): kill {prior_kill}->{new_kill} "
+                f"(structure BE dumps off)"
+            )
     trail = leg.get("trail") or trail
 
     force_cap = at_time_cap(trail)
