@@ -376,6 +376,14 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Definition:** Sacred multi-slice kill-and-trailing implementation retained by the legacy gap agent and experiment baseline. Peak Hour TSD uses its own corresponding broker-kill, structure, and four-tranche software-trail state.  
 **Plain English:** The established four-piece exit machinery is not casually rewritten, but the current Peak Hour book and the older gap-agent book store that machinery differently.
 
+### 3R Paper (Peak Hour shadow)
+**Definition:** Parallel software ledger on the **same Peak Hour IBKR paper fills** as Live Status. It banks slices at 0.35R / 0.50R / 0.90R (1.75% / 2.5% / 4.5% of entry, weights 50/25/25) and kills residual at −5%. No second broker orders. State: `candidates/tsd_shadow_mt3_book.json`.  
+**Plain English:** A paper bakeoff of “take profits at three fixed rungs” versus the live 4-tranche trail. **Not Track 100.**
+
+### Track 100 (paper log)
+**Definition:** Sibling study (`Documents\\Track 100`, GitHub `ajklepp/track-100`) with its own playbook (v12: deepest OS → retest signal-low → next 1H open; 5% stop / 15% target). Q-ALPHA’s Track 100 tab **displays** `results/paper_book.json` only. It does not place IBKR orders.  
+**Plain English:** A separate paper journal. If the 3R tab is empty, that is Peak Hour’s shadow book — look at Track 100’s own tab for this study.
+
 ---
 
 *Informational only. Peak Hour Performers currently runs in IBKR paper; Strategy Lab is archived SIM; neither uses real money.*
