@@ -47,14 +47,18 @@ from tsd_scan_pipeline.tsd_capacity import (
 from tsd_scan_pipeline.tsd_htf_gates import compute_htf_rank_score
 from tsd_scan_pipeline.tsd_htf_universe import build_htf_universe, htf_pass_symbols
 from tsd_scan_pipeline.tsd_launch_score import (
-    CONTINUATION_SCORE_VERSION,
-    EXTENSION_SCAN_AUTO,
+    apply_php_equal_signal_env,
     enrich_launch_fields,
+    equal_signal_mode_label,
+    is_hard_extension_block,
+    launch_score_banner,
+    live_ranker_version_label,
 )
 from tsd_scan_pipeline.tsd_stage_log import StageTimer  # noqa: E402
 from tsd_scan_pipeline.tsd_watch_queue import (  # noqa: E402
     add_to_watch_queue,
-    confirmed_symbols,
+    expire_stale_confirmed,
+    in_flight_confirmed_symbols,
     process_micro_confirm_queue,
 )
 from tsd_scan_pipeline.universe_tsd import load_polygon_key
@@ -71,16 +75,116 @@ LAUNCH_CACHE_PATH = PIPELINE_DIR / "results" / "last_1h_launch.json"
 EVAL_WORKERS = 8
 
 
-def _non_new_risk_symbols(book: dict[str, Any] | None = None) -> set[str]:
-    """OPEN book + already CONFIRMED queue — exclude from take-slot accounting."""
+def _open_symbol_set(book: dict[str, Any] | None = None) -> set[str]:
+    """OPEN book symbols for NEW-take exclusion; empty on load failure."""
     from tsd_scan_pipeline.tsd_capacity import open_symbols
 
-    skip = set(confirmed_symbols())
     try:
-        skip |= {str(s).upper() for s in open_symbols(book if book is not None else load_state())}
+        return {
+            str(s).upper()
+            for s in open_symbols(book if book is not None else load_state())
+            if str(s).upper()
+        }
+    except Exception:
+        return set()
+
+
+def _non_new_risk_symbols(
+    book: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> set[str]:
+    """OPEN book + in-flight CONFIRMED — exclude from take-slot accounting.
+
+    Historical (prior-session) CONFIRMED that is now flat is a ghost confirm
+    and is NOT excluded — those names are eligible for NEW risk again.
+    """
+    skip = set(_open_symbol_set(book))
+    try:
+        skip |= in_flight_confirmed_symbols(book, now=now)
     except Exception:
         pass
     return {s for s in skip if s}
+
+
+def _is_case_enter(row: dict[str, Any]) -> bool:
+    """True when case review verdict is ENTER."""
+    return str(
+        row.get("case_verdict") or (row.get("case_review") or {}).get("verdict") or ""
+    ).upper() == "ENTER"
+
+
+def _has_tradable_popularity(row: dict[str, Any]) -> bool:
+    """Same popularity gate as select_enter_rows — do not weaken."""
+    return bool(
+        row.get("tradable_popular")
+        or row.get("recent_leaderboard")
+        or row.get("on_gainers")
+    )
+
+
+def _enter_exclude_reason(
+    row: dict[str, Any],
+    *,
+    open_syms: set[str],
+    confirmed_inflight: set[str],
+) -> str | None:
+    """
+    Why a CASE ENTER row is not a NEW take, or None if it is eligible.
+
+    Reasons: popularity | open | confirmed_inflight. Cap trimming happens
+    after this (eligible names beyond max_n are not excluded here).
+    """
+    if not _is_case_enter(row):
+        return None
+    if not _has_tradable_popularity(row):
+        return "popularity"
+    sym = str(row.get("symbol") or "").upper()
+    if not sym:
+        return None
+    if sym in open_syms:
+        return "open"
+    if sym in confirmed_inflight:
+        return "confirmed_inflight"
+    return None
+
+
+def _log_case_enter_exclusions(
+    attention: list[dict[str, Any]],
+    take: list[dict[str, Any]],
+    *,
+    open_syms: set[str],
+    confirmed_inflight: set[str],
+) -> None:
+    """Print why CASE ENTER names were not taken so take_n=0 is not opaque."""
+    take_syms = {str(r.get("symbol") or "").upper() for r in take if r.get("symbol")}
+    enter_rows = [r for r in attention if _is_case_enter(r)]
+    if not enter_rows:
+        return
+    by_reason: dict[str, list[str]] = {}
+    eligible_not_taken: list[str] = []
+    for row in enter_rows:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym or sym in take_syms:
+            continue
+        reason = _enter_exclude_reason(
+            row, open_syms=open_syms, confirmed_inflight=confirmed_inflight,
+        )
+        if reason is None:
+            eligible_not_taken.append(sym)
+            continue
+        by_reason.setdefault(reason, []).append(sym)
+        print(f"  CASE ENTER {sym} excluded: {reason}", flush=True)
+    for reason in ("open", "confirmed_inflight", "popularity"):
+        names = by_reason.get(reason) or []
+        if names:
+            print(f"  ENTER skip {reason}: {sorted(names)}", flush=True)
+    if eligible_not_taken:
+        print(
+            f"  ENTER skip cap: {sorted(eligible_not_taken)} "
+            f"(eligible but over {MAX_NEW_ENTRIES_PER_SCAN}/hour NEW cap)",
+            flush=True,
+        )
 
 
 def _queue_consumed_new_slot(qr: dict[str, Any]) -> bool:
@@ -176,13 +280,14 @@ def _promote_next_enter_takes(
     already_tried: set[str],
     need: int,
     book: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Pick next CASE ENTER names not yet tried (fill-fail / already_confirmed refill)."""
     from tsd_scan_pipeline.tsd_case_review import select_enter_rows
 
     if need <= 0:
         return []
-    exclude = _non_new_risk_symbols(book) | {str(s).upper() for s in already_tried}
+    exclude = _non_new_risk_symbols(book, now=now) | {str(s).upper() for s in already_tried}
     return select_enter_rows(attention, max_n=need, exclude_symbols=exclude)
 
 
@@ -266,7 +371,8 @@ def _write_launch_artifact(
         "version": "3.2-case-review",
         "bar_source": BAR_SOURCE,
         "hours": sorted(ALLOWED_HOURS),
-        "continuation_score_version": CONTINUATION_SCORE_VERSION,
+        "continuation_score_version": live_ranker_version_label(),
+        "equal_signal": equal_signal_mode_label(),
         "slots_per_scan": MAX_NEW_ENTRIES_PER_SCAN,
         "ranked_count": len(ranked),
         "attention_count": len(attention) if attention is not None else None,
@@ -446,9 +552,8 @@ def evaluate_1h_symbol(
             base["dollar_vol_20d"] = htf_row.get("dollar_vol_20d_avg")
     ok, launch_row = evaluate_1h_buy_signal(base, polygon_key=polygon_key, now=now)
     out = {**base, **launch_row, "symbol": symbol.upper()}
-    scan = float(out.get("scan_score") or out.get("htf_1h_scan_score") or 0)
-    # Hard-block only auto-extended; softer EXTENSION demoted in continuation_score_v1.1
-    if scan >= EXTENSION_SCAN_AUTO or str(out.get("bar_state") or "") == "extended":
+    # Hard-block auto-extended. Equal-signal ON: scan>=75 only (no phase leak).
+    if is_hard_extension_block(out):
         out["pass"] = False
         out["reject_reason"] = "extension_hard"
         return out
@@ -510,11 +615,17 @@ def run_1h_launch_scan(
     else:
         now_et = now_et.astimezone(ET)
 
+    # Every live tick (scheduler --tick, --launch, or direct scan) must resolve
+    # PHP_EQUAL_SIGNAL before the banner and before ranking. Do not print the
+    # bare CONTINUATION_SCORE_VERSION — that dropped equal_signal=ON mid-day
+    # when a later patch based on main replaced this file.
+    apply_php_equal_signal_env()
+
     print("=" * 64, flush=True)
     print("1H LAUNCH v3.1 continuation-ranker", flush=True)
     print(f"ET={now_et.strftime('%Y-%m-%d %H:%M:%S')} hours={sorted(ALLOWED_HOURS)}", flush=True)
     print(
-        f"Bar source: {BAR_SOURCE}  score={CONTINUATION_SCORE_VERSION}  "
+        f"Bar source: {BAR_SOURCE}  {launch_score_banner()}  "
         f"slots={MAX_NEW_ENTRIES_PER_SCAN}",
         flush=True,
     )
@@ -538,6 +649,15 @@ def run_1h_launch_scan(
     book = load_state()
     reset_scan_counter(book)
     save_state(book)
+    try:
+        expired = expire_stale_confirmed(book, now=now_et)
+        if expired:
+            print(
+                f"  Queue expire stale CONFIRMED -> CLEARED_STALE: {expired}",
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"  Queue expire warn: {exc}", flush=True)
 
     rows = _evaluate_universe(
         symbols, htf_rows=htf_rows, polygon_key=key, now_et=now_et,
@@ -568,18 +688,37 @@ def run_1h_launch_scan(
     alert_case_rank_disagreement(attention, notify=bool(live))
     timer.stage("case_review")
 
-    # Autopsy P0: only NEW risk consumes the 2/hour take cap (skip already_confirmed / OPEN).
-    exclude_take = _non_new_risk_symbols(book)
-    if exclude_take:
-        print(f"  Cap exclude (OPEN/CONFIRMED): {sorted(exclude_take)}", flush=True)
+    # Autopsy P0: only NEW risk consumes the 2/hour take cap (skip in-flight
+    # CONFIRMED / OPEN). Ghost historical CONFIRMEDs are not excluded.
+    open_syms = _open_symbol_set(book)
+    confirmed_inflight: set[str] = set()
+    try:
+        confirmed_inflight = in_flight_confirmed_symbols(book, now=now_et)
+    except Exception:
+        confirmed_inflight = set()
+    exclude_take = _non_new_risk_symbols(book, now=now_et)
+    if open_syms:
+        print(f"  Cap exclude OPEN: {sorted(open_syms)}", flush=True)
+    if confirmed_inflight - open_syms:
+        print(
+            f"  Cap exclude CONFIRMED in-flight: {sorted(confirmed_inflight - open_syms)}",
+            flush=True,
+        )
     take = select_enter_rows(
         attention, max_n=MAX_NEW_ENTRIES_PER_SCAN, exclude_symbols=exclude_take,
     )
+    enter_n = sum(1 for r in attention if _is_case_enter(r))
     print(
         f"\nCase review: attention={len(attention)} "
-        f"ENTER={sum(1 for r in attention if str(r.get('case_verdict') or '').upper()=='ENTER')} "
+        f"ENTER={enter_n} "
         f"taking {len(take)} NEW (cap {MAX_NEW_ENTRIES_PER_SCAN}/hour)",
         flush=True,
+    )
+    _log_case_enter_exclusions(
+        attention,
+        take,
+        open_syms=open_syms,
+        confirmed_inflight=confirmed_inflight,
     )
     for r in take:
         case = r.get("case_review") or {}
@@ -593,7 +732,14 @@ def run_1h_launch_scan(
             flush=True,
         )
     if not take and attention:
-        print("  No case-ENTER names this scan (score alone cannot buy)", flush=True)
+        if enter_n:
+            print(
+                "  No NEW takes this scan: CASE ENTER names were excluded "
+                "(open / confirmed_inflight / popularity / cap)",
+                flush=True,
+            )
+        else:
+            print("  No case-ENTER names this scan (score alone cannot buy)", flush=True)
 
     queue_results: list[dict[str, Any]] = []
     entry_results: list[dict[str, Any]] = []
@@ -730,6 +876,7 @@ def run_1h_launch_scan(
                         already_tried=tried_syms,
                         need=need,
                         book=book,
+                        now=now_et,
                     )
                     if promote:
                         print(

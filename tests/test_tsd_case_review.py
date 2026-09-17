@@ -148,13 +148,38 @@ class TestCaseReview(unittest.TestCase):
 
     def test_select_enter_only(self):
         rows = [
-            {**_row(symbol="A"), "case_verdict": "ENTER", "case_confidence": 0.9},
-            {**_row(symbol="B"), "case_verdict": "WAIT", "case_confidence": 0.9},
-            {**_row(symbol="C"), "case_verdict": "ENTER", "case_confidence": 0.7},
-            {**_row(symbol="D"), "case_verdict": "REJECT", "case_confidence": 0.99},
+            {**_row(symbol="A"), "case_verdict": "ENTER", "case_confidence": 0.9,
+             "tradable_popular": True},
+            {**_row(symbol="B"), "case_verdict": "WAIT", "case_confidence": 0.9,
+             "tradable_popular": True},
+            {**_row(symbol="C"), "case_verdict": "ENTER", "case_confidence": 0.7,
+             "tradable_popular": True},
+            {**_row(symbol="D"), "case_verdict": "REJECT", "case_confidence": 0.99,
+             "tradable_popular": True},
         ]
         take = select_enter_rows(rows, max_n=2)
         self.assertEqual([r["symbol"] for r in take], ["A", "C"])
+
+    def test_select_enter_skips_non_popular(self):
+        """Tradable-popularity gate stays hard — ELMT-style pop=0 must not take."""
+        rows = [
+            {
+                **_row(symbol="ELMT"),
+                "case_verdict": "ENTER",
+                "case_confidence": 0.9,
+                "tradable_popular": False,
+                "recent_leaderboard": False,
+                "on_gainers": False,
+            },
+            {
+                **_row(symbol="NUAI"),
+                "case_verdict": "ENTER",
+                "case_confidence": 0.8,
+                "tradable_popular": True,
+            },
+        ]
+        take = select_enter_rows(rows, max_n=2)
+        self.assertEqual([r["symbol"] for r in take], ["NUAI"])
 
     def test_dossier_includes_room_class(self):
         d = build_case_dossier(_row(htf_range_20d_pct=3.0, dist_20d_high_pct=1.0))

@@ -1,10 +1,13 @@
 """Hour-8 abort guard: overlapping 5-min ticks must not start a second launch."""
 from __future__ import annotations
 
+import io
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -102,6 +105,33 @@ class TestSchedulerTickLock(unittest.TestCase):
             launch.assert_called_once_with(live=True)
             marked.assert_called_once_with("launch", 8, sched)
             self.assertIsNone(scheduler._SCHEDULER_LOCK_FH)
+
+
+class TestLaunchPassEqualSignalBanner(unittest.TestCase):
+    def test_run_launch_pass_reports_equal_signal_on(self):
+        """Scheduler --tick/--launch must print equal_signal=ON before 1H ranking."""
+        prev = os.environ.pop("PHP_EQUAL_SIGNAL", None)
+        buf = io.StringIO()
+        try:
+            with tempfile.TemporaryDirectory() as td, \
+                 patch("tsd_scan_pipeline.tsd_launch_score._REPO_ROOT", Path(td)), \
+                 patch(
+                     "tsd_scan_pipeline.tsd_1h_launch_scan.run_1h_launch_scan",
+                     return_value=0,
+                 ) as launch, \
+                 redirect_stdout(buf):
+                rc = scheduler.run_launch_pass(live=True)
+        finally:
+            if prev is None:
+                os.environ.pop("PHP_EQUAL_SIGNAL", None)
+            else:
+                os.environ["PHP_EQUAL_SIGNAL"] = prev
+        self.assertEqual(rc, 0)
+        launch.assert_called_once_with(live=True)
+        text = buf.getvalue()
+        self.assertIn("1H LAUNCH tick", text)
+        self.assertIn("score=v1.6+equal_signal", text)
+        self.assertIn("equal_signal=ON", text)
 
 
 class TestTaskSchedulerInstancePolicy(unittest.TestCase):

@@ -46,9 +46,9 @@ def _continuation_score_version() -> str:
         cand = root / "candidates"
         if str(cand) not in sys.path:
             sys.path.insert(0, str(cand))
-        from tsd_scan_pipeline.tsd_launch_score import CONTINUATION_SCORE_VERSION
+        from tsd_scan_pipeline.tsd_launch_score import live_ranker_version_label
 
-        return f"v{CONTINUATION_SCORE_VERSION.lstrip('v')}"
+        return live_ranker_version_label()
     except Exception:
         return "v1.4"
 

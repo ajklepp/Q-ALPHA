@@ -13,6 +13,7 @@ from tsd_scan_pipeline.tsd_popularity import (
     annotate_popularity,
     build_popularity_context,
 )
+from tsd_scan_pipeline.tsd_launch_score import is_hard_extension_block
 
 # Attention pool sizing (AI cost cap)
 ATTENTION_TOP_K = 6
@@ -138,9 +139,7 @@ def _soft_extension_eligible(row: dict[str, Any]) -> bool:
     scan = _scan(row)
     if scan < SOFT_EXT_SCAN_MIN or scan > SOFT_EXT_SCAN_MAX:
         return False
-    if scan >= HARD_EXT_SCAN:
-        return False
-    if str(row.get("bar_state") or "") == "extended":
+    if is_hard_extension_block(row):
         return False
     return bool(
         _room(row) >= ROOM_TO_HIGH_MIN
@@ -197,7 +196,7 @@ def build_attention_pool(
     ]
     annotated = [
         r for r in annotated
-        if _scan(r) < HARD_EXT_SCAN and str(r.get("bar_state") or "") != "extended"
+        if not is_hard_extension_block(r)
     ]
 
     by_sym: dict[str, dict[str, Any]] = {}

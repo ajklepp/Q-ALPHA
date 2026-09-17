@@ -8,10 +8,14 @@ Chat A bar-state bakeoff: drop hard red veto; yellow best, red ok, green ok,
 orange admit-but-deprioritize.
 
 Live slot pick: continuation_score (v1.6 same-day extension objective).
+When PHP_EQUAL_SIGNAL is ON (default), stage terms and the phase→extended
+leak are neutralized — see php_equal_signal.py and REVERT.md.
 """
 from __future__ import annotations
 
 import math
+import os
+from pathlib import Path
 from typing import Any, Literal
 
 LaunchPhase = Literal["LAUNCH", "EXTENSION", "NEUTRAL"]
@@ -97,6 +101,111 @@ BOUNCE_WEIGHT = 8.0
 LAUNCH_TERM_WEIGHT = 0.28  # ablation: launch_score best positive legacy predictor
 HTF_TERM_WEIGHT = 0.08
 
+# Live Peak Hour equal-signal (2026-09-15). Default ON.
+# PHP_EQUAL_SIGNAL=0 restores pre-change stage grading bit-for-bit.
+PHP_EQUAL_SIGNAL_ENV = "PHP_EQUAL_SIGNAL"
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _read_php_equal_signal_dotenv() -> str | None:
+    """Read PHP_EQUAL_SIGNAL from repo .env; None if missing/unreadable/empty."""
+    env_path = _REPO_ROOT / ".env"
+    try:
+        if not env_path.exists():
+            return None
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            key, _, val = s.partition("=")
+            if key.strip() != PHP_EQUAL_SIGNAL_ENV:
+                continue
+            cleaned = val.strip().strip('"').strip("'")
+            return cleaned or None
+    except Exception:
+        return None
+    return None
+
+
+def _php_equal_signal_raw() -> str:
+    """Process env (non-empty) first, then repo .env, then default ON ('1').
+
+    Empty ``PHP_EQUAL_SIGNAL=`` is treated as unset so a blank Task Scheduler
+    variable cannot silently disable the overlay.
+    """
+    raw = os.environ.get(PHP_EQUAL_SIGNAL_ENV)
+    if raw is not None and str(raw).strip():
+        return str(raw).strip()
+    from_dotenv = _read_php_equal_signal_dotenv()
+    if from_dotenv:
+        return from_dotenv
+    return "1"
+
+
+def apply_php_equal_signal_env() -> str:
+    """
+    Resolve PHP_EQUAL_SIGNAL into os.environ for this 1H launch process.
+
+    Scheduler ``--tick`` / ``--launch`` do not go through autonomous_agent
+    load_dotenv. Call this at the start of every live 1H tick so ranking,
+    the log banner, and Telegram see the same flag (default ON).
+    """
+    resolved = _php_equal_signal_raw().strip() or "1"
+    os.environ[PHP_EQUAL_SIGNAL_ENV] = resolved
+    return resolved
+
+
+def equal_signal_enabled() -> bool:
+    """
+    Live Peak Hour equal-signal overlay. Default ON.
+
+    PHP_EQUAL_SIGNAL=0 / false / off / no restores pre-2026-09-15
+    LAUNCH vs EXTENSION stage grading (including the phase→extended leak).
+    See candidates/tsd_scan_pipeline/REVERT.md.
+    """
+    return _php_equal_signal_raw().strip().lower() not in ("0", "false", "off", "no")
+
+
+def equal_signal_mode_label() -> str:
+    """ON or OFF — for scan logs and Telegram."""
+    return "ON" if equal_signal_enabled() else "OFF"
+
+
+def live_ranker_version_label() -> str:
+    """v1.6 or v1.6+equal_signal depending on the live flag."""
+    if equal_signal_enabled():
+        return f"{CONTINUATION_SCORE_VERSION}+equal_signal"
+    return CONTINUATION_SCORE_VERSION
+
+
+def launch_score_banner() -> str:
+    """Log fragment every 1H launch tick must print (report + apply stay paired)."""
+    return (
+        f"score={live_ranker_version_label()}  "
+        f"equal_signal={equal_signal_mode_label()}"
+    )
+
+
+def _scan_of(row: dict[str, Any]) -> float:
+    try:
+        return float(row.get("scan_score") or row.get("htf_1h_scan_score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def is_hard_extension_block(row: dict[str, Any]) -> bool:
+    """
+    Hard-block ceiling used by evaluate_1h_symbol / gates / attention.
+
+    Equal-signal ON: scan >= 75 only (ignore phase→bar_state=extended leak).
+    Flag OFF: scan >= 75 OR bar_state == extended (pre-2026-09-15).
+    """
+    if _scan_of(row) >= EXTENSION_SCAN_AUTO:
+        return True
+    if equal_signal_enabled():
+        return False
+    return str(row.get("bar_state") or "") == "extended"
+
 
 def signal_bar_red(row: dict[str, Any]) -> bool:
     """True when signal bar closed red (close < open). Soft signal only."""
@@ -107,7 +216,7 @@ def signal_bar_red(row: dict[str, Any]) -> bool:
     return float(c) < float(o)
 
 
-def classify_bar_state(row: dict[str, Any]) -> BarState:
+def classify_bar_state(row: dict[str, Any], *, equal_signal: bool | None = None) -> BarState:
     """
     Classify signal 1H bar OHLC into bar_state.
 
@@ -115,9 +224,17 @@ def classify_bar_state(row: dict[str, Any]) -> BarState:
     red = close < open
     yellow = weak green (body < 50%)
     green = strong non-extended green
-    extended = already gated via phase; marked when phase says so
+    extended = hard-extended (scan >= 75). Flag OFF also maps phase=EXTENSION
+    to extended (the soft-stage leak that blocked OKTA/WIX/COIN-class names).
     """
-    if str(row.get("phase") or "") == "EXTENSION" or float(row.get("scan_score") or 0) >= EXTENSION_SCAN_AUTO:
+    use_eq = equal_signal_enabled() if equal_signal is None else bool(equal_signal)
+    try:
+        scan = float(row.get("scan_score") or 0)
+    except (TypeError, ValueError):
+        scan = 0.0
+    if scan >= EXTENSION_SCAN_AUTO:
+        return "extended"
+    if (not use_eq) and str(row.get("phase") or "") == "EXTENSION":
         return "extended"
 
     o = row.get("open")
@@ -481,7 +598,13 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
 
 
 def compute_continuation_score(row: dict[str, Any]) -> float:
-    """Live ranker entrypoint — currently v1.6 (same-day extension objective)."""
+    """Live ranker entrypoint. Equal-signal overlay when PHP_EQUAL_SIGNAL is ON."""
+    if equal_signal_enabled():
+        from tsd_scan_pipeline.php_equal_signal import (
+            compute_continuation_score_equal_signal,
+        )
+
+        return compute_continuation_score_equal_signal(row)
     return compute_continuation_score_v1_1(row)
 
 
@@ -489,15 +612,19 @@ def is_continuation_list_candidate(row: dict[str, Any]) -> bool:
     """
     EXP-0021 list gate: buy/early_bull + quality floors; peak hour NOT required.
 
-    Hard-block only auto-extended (scan>=75 / bar_state extended).
-    Soft EXTENSION (scan 55–75) may enter the list and be demoted by score.
+    Equal-signal ON: any 1H trigger that is not hard-extended (scan>=75).
+    Flag OFF: hard-block auto-extended (scan>=75 / bar_state extended) and
+    the launch-floor ∧ scan>55 gate. Soft EXTENSION may still list but is
+    demoted by v1.6 score (and leaked to hard-block via phase→extended).
     """
     enriched = enrich_launch_fields(row) if "launch_score" not in row else row
     if not (bool(enriched.get("buy_signal")) or bool(enriched.get("early_bull"))):
         return False
-    scan = float(enriched.get("scan_score") or 99.0)
-    if scan >= EXTENSION_SCAN_AUTO:
+    if is_hard_extension_block(enriched):
         return False
+    if equal_signal_enabled():
+        return True
+    scan = float(enriched.get("scan_score") or 99.0)
     if str(enriched.get("bar_state") or "") == "extended":
         return False
     launch = float(enriched.get("launch_score") or 0.0)
@@ -519,8 +646,9 @@ def enrich_launch_fields(row: dict[str, Any]) -> dict[str, Any]:
     out["htf_score"] = htf
     out["continuation_score_v0"] = compute_continuation_score_v0(out)
     out["continuation_score_v1"] = compute_continuation_score_v1(out)
-    out["continuation_score"] = compute_continuation_score_v1_1(out)
-    out["continuation_score_version"] = CONTINUATION_SCORE_VERSION
+    out["continuation_score"] = compute_continuation_score(out)
+    out["continuation_score_version"] = live_ranker_version_label()
+    out["equal_signal"] = equal_signal_enabled()
     out["combined_rank_score"] = out["continuation_score"]
     out["entry_score"] = out["combined_rank_score"]
     return out

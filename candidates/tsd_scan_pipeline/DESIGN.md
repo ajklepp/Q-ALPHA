@@ -2,6 +2,7 @@
 
 **Status:** Live Paper primary = **1H LAUNCH @ :15** (hours **05–15** ET).  
 **Product:** Peak Hour Performers v3.2 · continuation_score nominates · **case review decides** · 2 slots/scan · LONG-ONLY.  
+**Equal-signal (2026-09-15):** default **ON** (`PHP_EQUAL_SIGNAL=1`). Soft stage is not graded; hard `scan>=75` still excluded. **Revert:** `candidates/tsd_scan_pipeline/REVERT.md`.  
 **Workspace:** Q-ALPHA only.
 
 ### Live Paper stack (KEEP)
@@ -24,14 +25,16 @@
 | `tws_intraday_sync` (clientId 96) | Marks / closed / pool / Peak Hour launch board |
 | Telegram + on-fill Supabase | Immediate Aaron + dashboard awareness |
 
-### Authority (v3.2)
+### Authority (v3.2 + equal-signal)
 
-1. **1H deep-swing / early scan scores stay preferential** (do not equalize all bars).  
-2. **Continuation score nominates** into Attention Pool.  
-3. **Momentum / popularity** — ask “is this a popular stock to trade?” via recent multi-day leaderboard history (not first 1H print alone), TWS scanners, live gainers; StockTwits is optional only.  
-4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT.  
-5. **BUY only case-ENTER**, still capped at 2/scan + capacity.  
+1. **Every valid 1H signal candle is equal** when `PHP_EQUAL_SIGNAL` is ON (default). Do not grade/rank/demote by LAUNCH vs EXTENSION vs NEUTRAL / soft-EXTENSION. Hard-extension (`scan >= 75`) still excluded.
+2. **Continuation score nominates** into Attention Pool (stage terms off when equal-signal ON).
+3. **Momentum / popularity** — ask “is this a popular stock to trade?” via recent multi-day leaderboard history (not first 1H print alone), TWS scanners, live gainers; StockTwits is optional only. Popularity veto-vs-boost unchanged.
+4. **Case review decides** ENTER / WAIT / REJECT. Wreckage room, toxic flags, and thin↔deep contradictions hard-REJECT. LLM ENTER remains. Rules ENTER: constructive room + momentum + tradable popularity; scan band is not a veto when equal-signal is ON (`scan < 75`).
+5. **BUY only case-ENTER**, still capped at 2/scan + capacity.
 6. **Micro-confirm before BUY** — after case ENTER, watch 1-min tape from the 1H bar close; ABORT if dumping through −1.5%/structure; wait for pullback if extended >+1.5%; skip dead tape (micro RVOL / vol_ratio_20); CONFIRM only if holding. EH wait extends to ~20m; sparse bars may use TWS last to hold-confirm (dump abort never loosened). Confirmed buys use **pullback LimitOrder** near signal. Trail loop continues polling WATCHING names.
+
+`PHP_EQUAL_SIGNAL=0` restores pre-2026-09-15 stage grading (including the phase→`extended` leak) without reverting trails. See `REVERT.md`.
 
 ### Not Live Paper (research / disabled)
 
@@ -140,7 +143,7 @@ First trading day after Labor Day weekend = **Tue 2026-09-08** (Mon 9/7 holiday 
 1. TWS paper API on **7497** before **05:15 ET** (trail loop needs it from **04:00**).
 2. Confirm Task Scheduler: **QAlpha TSD Scheduler**, **Trail Monitor**, **Live TWS Sync** Enabled; Setup Watch absent/disabled.
    **QAlpha TSD Scheduler** Settings must be **Do not start a new instance** and **Stop if longer than 2 hours** (hour-8 abort: a 5-min overlap must not kill an in-flight 1H LAUNCH). Re-run `.\candidates\register_tsd_tasks.ps1` or set it in the GUI.
-3. First `:15` log line shows `score=v1.1` and `slots=2`.
+3. First `:15` log line shows `score=v1.6+equal_signal` (or `score=v1.6` if `PHP_EQUAL_SIGNAL=0`) and `slots=2`. Telegram SCAN includes `equal_signal=ON|OFF`.
 4. HTF refresh at **04:30** (or first launch rebuilds if cache miss).
 5. Keep laptop awake / plugged if possible — tasks now allow battery, but sleep still kills ticks.
 6. Do **not** re-enable Setup Watch / gap agent / Approval Runner.

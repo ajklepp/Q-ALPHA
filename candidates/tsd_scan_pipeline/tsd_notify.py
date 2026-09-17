@@ -99,6 +99,18 @@ def format_scan_summary(
         f"Peak Hour SCAN hour={hour}",
         ht_line,
     ]
+    try:
+        from tsd_scan_pipeline.tsd_launch_score import (
+            equal_signal_mode_label,
+            live_ranker_version_label,
+        )
+
+        lines.append(
+            f"equal_signal={equal_signal_mode_label()} "
+            f"score={live_ranker_version_label()}"
+        )
+    except Exception:
+        pass
     if take_n and entered_n is not None:
         rate = (100.0 * float(entered_n) / float(take_n)) if take_n else 0.0
         lines.append(f"take->entered={rate:.0f}%")

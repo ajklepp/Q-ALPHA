@@ -15,6 +15,10 @@ from typing import Any
 import requests
 
 from tsd_scan_pipeline.tsd_attention import ROOM_TO_HIGH_MIN
+from tsd_scan_pipeline.tsd_launch_score import (
+    EXTENSION_SCAN_AUTO,
+    equal_signal_enabled,
+)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
@@ -237,7 +241,9 @@ def deterministic_case_verdict(dossier: dict[str, Any]) -> dict[str, Any] | None
             source="rules",
         )
 
-    # Strong momentum + constructive room + early/deep-swing scan → ENTER without LLM
+    # Strong momentum + constructive room + popularity → ENTER without LLM.
+    # Equal-signal ON: scan band is not a veto (soft stage admitted; hard >=75
+    # already dropped before case). Flag OFF: keep the legacy scan<=55 refuse.
     scan = float(dossier.get("scan_score") or 99.0)
     popular = bool(
         dossier.get("tradable_popular")
@@ -246,19 +252,34 @@ def deterministic_case_verdict(dossier: dict[str, Any]) -> dict[str, Any] | None
         or dossier.get("on_gainers")
         or dossier.get("buzz_accel")
     )
+    scan_ok = (
+        scan < EXTENSION_SCAN_AUTO
+        if equal_signal_enabled()
+        else scan <= 55.0
+    )
     if (
         dossier.get("room_class") == "CONSTRUCTIVE_ROOM"
         and dossier.get("momentum_context")
-        and scan <= 55.0
+        and scan_ok
         and popular
     ):
-        evidence.append("constructive_room+momentum+popular+early_scan")
+        evidence.append(
+            "constructive_room+momentum+popular+equal_signal"
+            if equal_signal_enabled()
+            else "constructive_room+momentum+popular+early_scan"
+        )
+        enter_note = (
+            "Constructive room with tradable-popularity confirmation "
+            "(equal-signal: scan band not a veto)"
+            if equal_signal_enabled()
+            else "Constructive room with tradable-popularity confirmation on early swing"
+        )
         return _case(
             sym,
             "ENTER",
             0.72,
             dossier,
-            structure_note="Constructive room with tradable-popularity confirmation on early swing",
+            structure_note=enter_note,
             sentiment_note=(
                 f"popular={dossier.get('tradable_popular')} "
                 f"recent_lb={dossier.get('recent_leaderboard')} "
@@ -688,8 +709,9 @@ def select_enter_rows(
     Autopsy: popular+structure filter kept the green keep-profit book;
     obscure non-popular ENTERs were a drag.
 
-    exclude_symbols: already OPEN / already_confirmed — do not consume take
-    slots (autopsy P0 cap accounting).
+    exclude_symbols: already OPEN / in-flight CONFIRMED — do not consume take
+    slots (autopsy P0 cap accounting). Ghost historical CONFIRMEDs should not
+    be passed here.
     """
     skip = {str(s).upper() for s in (exclude_symbols or set())}
     enters = [

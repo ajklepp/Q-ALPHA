@@ -2,7 +2,7 @@
 Q-ALPHA UTS v2 Phase 2 — quality + history gate (NOT a news veto).
 
 Hard blocks: instrument safety, liquidity (mcap / dollar vol — mcap required),
-price floor, auto-extension only (scan>=75 / bar_state extended).
+price floor, auto-extension only (scan>=75; flag OFF also bar_state extended).
 Soft EXTENSION (phase label / scan 65–74) is score-demoted upstream — never veto.
 Analogs (count / win rate) are soft context only — never veto entry.
 Optional for kill sizing via tsd_profile.kill_pct when present.
@@ -24,7 +24,7 @@ CANDIDATES_DIR = PIPELINE_DIR.parent
 if str(CANDIDATES_DIR) not in sys.path:
     sys.path.insert(0, str(CANDIDATES_DIR))
 
-from tsd_scan_pipeline.tsd_launch_score import EXTENSION_SCAN_AUTO, enrich_launch_fields
+from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields, is_hard_extension_block
 from tsd_scan_pipeline.universe_tsd import (
     MCAP_MIN,
     MIN_DOLLAR_VOL_20D,
@@ -145,12 +145,9 @@ def evaluate_quality_history_gate(
     dollar_vol = row.get("dollar_vol_20d") or row.get("dollar_volume")
     price = float(row.get("close") or row.get("price") or 0)
     distress = detect_fundamental_distress(row)
-    scan = float(row.get("scan_score") or 0)
     # Align with tsd_entry_gates / launch scan: hard-block auto-ext only
-    not_hard_ext = (
-        scan < EXTENSION_SCAN_AUTO
-        and str(row.get("bar_state") or "") != "extended"
-    )
+    # (equal-signal ON ignores phase→extended leak).
+    not_hard_ext = not is_hard_extension_block(row)
 
     gates: dict[str, bool] = {
         "instrument_safety": passes_instrument_safety(sym, require_cs_cache=False) if sym else False,
