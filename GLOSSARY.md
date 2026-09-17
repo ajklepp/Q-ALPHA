@@ -189,12 +189,12 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 ## Exit strategies
 
 ### Three-layer protection (Kill / BE / Trail)
-**Definition:** Peak Hour keeps a broker kill stop active while shares remain, arms a near-breakeven structure lock only after +1R, and manages T1–T4 with software trailing logic.  
-**Plain English:** First survive with a hard emergency stop; after the trade proves itself, protect near breakeven; then let profit-taking trails manage the run.
+**Definition:** Peak Hour LIVE keeps a broker kill stop active while shares remain and manages T1–T4 with software trailing logic. Hard software sells at `structure_stop` / `be_lock_1r` are **off** unless `TSD_LIVE_STRUCTURE_STOP=1` (alias `PHP_STRUCTURE_STOP_EXITS=1`; see `candidates/tsd_scan_pipeline/REVERT.md`). Paper 3R shadow still banks at fixed R-multiples and is not this live path.  
+**Plain English:** First survive with a hard emergency stop that only ratchets up; then let profit-taking trails manage the run. Live no longer dumps the runner at a fixed breakeven/structure print.
 
 ### Breakeven (BE) lock
-**Definition:** After price first touches +1R, the structure layer can ratchet near entry (currently about 0.3% below entry). It does not arm merely because the opening range formed.  
-**Plain English:** Once the stock has moved enough in your favor, the system stops giving it the full original risk.
+**Definition:** Historical Layer-2: after price first touches +1R, the structure layer could ratchet near entry (about 0.3% below entry) and dump remaining shares. LIVE default is **off** — “lock profit” is a tighter early trail after ~+3–4% MFE, not a hard BE sell.  
+**Plain English:** Once the stock has moved enough in your favor, the trail tightens. It does not automatically sell the leftover runner at breakeven.
 
 ### Idle no-1R / day-6 flatten
 **Definition:** A Peak Hour position that has never reached +1R and is not actively trailing is flattened on or after trading day 6.  
@@ -213,8 +213,8 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Plain English:** Don’t exit all at once. Sell chunks as the trade works so early profit is banked while a runner can continue.
 
 ### Kill-all / hard stop
-**Definition:** Peak Hour broker-side GTC stop-limit SELL covering all remaining shares. It uses profile MAE p75 only when the distance is between 2% and 6%; otherwise it uses the 5% fallback. Its quantity shrinks after partial exits, and the deeper broker kill remains active after the +1R breakeven lock arms.  
-**Plain English:** The “thesis is dead” emergency exit. It always protects the shares still open, even after closer software protection becomes active.
+**Definition:** Peak Hour broker-side GTC stop-limit SELL covering all remaining shares. It uses profile MAE p75 only when the distance is between 2% and 6%; otherwise it uses the 5% fallback. Its quantity shrinks after partial exits, and the stop **only ratchets up** (never loosens). It is the single working protective SELL on an open long.  
+**Plain English:** The “thesis is dead” emergency exit. It always protects the shares still open.
 
 ### Trailing stop (ratchet) vs price target
 **Definition:** A *trail* moves the stop up as price makes new highs (ratchet = never loosens); a *target* is a fixed sell price for a tranche.  
