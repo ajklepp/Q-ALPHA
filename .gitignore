@@ -38,6 +38,7 @@ candidates/entry_study/rollup.csv
 
 *.log
 candidates/*.log
+candidates/logs/*.pid
 candidates/dashboard_stdout.log
 candidates/dashboard_stderr.log
 
@@ -51,3 +52,7 @@ candidates/session_tracker_*.json
 
 # EXP-0021 news enrich disk cache (regenerable)
 experiments/EXP-0021/social_day_cache.json
+
+# Research microstructure logger (runtime JSONL + starter PID)
+logs/microstructure/
+candidates/logs/*.pid

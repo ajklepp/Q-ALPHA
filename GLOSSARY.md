@@ -189,12 +189,12 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 ## Exit strategies
 
 ### Three-layer protection (Kill / BE / Trail)
-**Definition:** Peak Hour keeps a broker kill stop active while shares remain, arms a near-breakeven structure lock only after +1R, and manages T1–T4 with software trailing logic.  
-**Plain English:** First survive with a hard emergency stop; after the trade proves itself, protect near breakeven; then let profit-taking trails manage the run.
+**Definition:** Peak Hour LIVE keeps a broker kill stop active while shares remain and manages T1–T4 with software trailing logic. Hard software sells at `structure_stop` / `be_lock_1r` are **off** unless `TSD_LIVE_STRUCTURE_STOP=1` (alias `PHP_STRUCTURE_STOP_EXITS=1`; see `candidates/tsd_scan_pipeline/REVERT.md`). Paper 3R shadow still banks at fixed R-multiples and is not this live path.  
+**Plain English:** First survive with a hard emergency stop that only ratchets up; then let profit-taking trails manage the run. Live no longer dumps the runner at a fixed breakeven/structure print.
 
 ### Breakeven (BE) lock
-**Definition:** After price first touches +1R, the structure layer can ratchet near entry (currently about 0.3% below entry). It does not arm merely because the opening range formed.  
-**Plain English:** Once the stock has moved enough in your favor, the system stops giving it the full original risk.
+**Definition:** Historical Layer-2: after price first touches +1R, the structure layer could ratchet near entry (about 0.3% below entry) and dump remaining shares. LIVE default is **off** — “lock profit” is a tighter early trail after ~+3–4% MFE, not a hard BE sell.  
+**Plain English:** Once the stock has moved enough in your favor, the trail tightens. It does not automatically sell the leftover runner at breakeven.
 
 ### Idle no-1R / day-6 flatten
 **Definition:** A Peak Hour position that has never reached +1R and is not actively trailing is flattened on or after trading day 6.  
@@ -213,8 +213,8 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Plain English:** Don’t exit all at once. Sell chunks as the trade works so early profit is banked while a runner can continue.
 
 ### Kill-all / hard stop
-**Definition:** Peak Hour broker-side GTC stop-limit SELL covering all remaining shares. It uses profile MAE p75 only when the distance is between 2% and 6%; otherwise it uses the 5% fallback. Its quantity shrinks after partial exits, and the deeper broker kill remains active after the +1R breakeven lock arms.  
-**Plain English:** The “thesis is dead” emergency exit. It always protects the shares still open, even after closer software protection becomes active.
+**Definition:** Peak Hour broker-side GTC stop-limit SELL covering all remaining shares. It uses profile MAE p75 only when the distance is between 2% and 6%; otherwise it uses the 5% fallback. Its quantity shrinks after partial exits, and the stop **only ratchets up** (never loosens). It is the single working protective SELL on an open long.  
+**Plain English:** The “thesis is dead” emergency exit. It always protects the shares still open.
 
 ### Trailing stop (ratchet) vs price target
 **Definition:** A *trail* moves the stop up as price makes new highs (ratchet = never loosens); a *target* is a fixed sell price for a tranche.  
@@ -375,6 +375,14 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 ### Bracket / BracketPosition
 **Definition:** Sacred multi-slice kill-and-trailing implementation retained by the legacy gap agent and experiment baseline. Peak Hour TSD uses its own corresponding broker-kill, structure, and four-tranche software-trail state.  
 **Plain English:** The established four-piece exit machinery is not casually rewritten, but the current Peak Hour book and the older gap-agent book store that machinery differently.
+
+### 3R Paper (Peak Hour shadow)
+**Definition:** Parallel software ledger on the **same Peak Hour IBKR paper fills** as Live Status. It banks slices at 0.35R / 0.50R / 0.90R (1.75% / 2.5% / 4.5% of entry, weights 50/25/25) and kills residual at −5%. No second broker orders. State: `candidates/tsd_shadow_mt3_book.json`.  
+**Plain English:** A paper bakeoff of “take profits at three fixed rungs” versus the live 4-tranche trail. **Not Track 100.**
+
+### Track 100 (paper log)
+**Definition:** Sibling study (`Documents\\Track 100`, GitHub `ajklepp/track-100`) with its own playbook (v12: deepest OS → retest signal-low → next 1H open; 5% stop / 15% target). Q-ALPHA’s Track 100 tab **displays** `results/paper_book.json` only. It does not place IBKR orders.  
+**Plain English:** A separate paper journal. If the 3R tab is empty, that is Peak Hour’s shadow book — look at Track 100’s own tab for this study.
 
 ---
 
