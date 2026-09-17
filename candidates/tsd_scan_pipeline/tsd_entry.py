@@ -29,6 +29,8 @@ SessionKind = Literal["RTH", "EXTENDED", "OVERNIGHT"]
 
 FILL_WAIT_SEC = 45
 POLL_SEC = 0.5
+# Extra rest time for pullback / prefer_limit Day buys before requote.
+LIMIT_FILL_EXTRA_SEC = 30
 # One requote attempt after no_fill on resting limits (autopsy P0 fill policy).
 REQUOTE_WAIT_SEC = 30
 REQUOTE_CHASE_BPS = 0.001  # +10 bps vs prior limit on requote
@@ -36,6 +38,9 @@ REQUOTE_CHASE_BPS = 0.001  # +10 bps vs prior limit on requote
 # (Error 202) — e.g. ATRC kill 51.96 / limit 50.40 (0.97 slip) is cancelled.
 # Keep ~0.5% for acceptance; escalate_stuck_kill_stops is still the crash net.
 KILL_LIMIT_SLIP = 0.995
+_TERMINAL_BUY_STATUS = frozenset(
+    {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+)
 
 
 def kill_limit_price(stop_px: float, *, slip: float | None = None) -> float:
@@ -45,6 +50,63 @@ def kill_limit_price(stop_px: float, *, slip: float | None = None) -> float:
         return 0.0
     s = float(KILL_LIMIT_SLIP if slip is None else slip)
     return round(stop * s, 2)
+
+
+def _working_buy_trades(ib: IB, symbol: str) -> list[Any]:
+    """Working BUY orders for *symbol* (any clientId) — not terminal."""
+    sym = symbol.upper()
+    out: list[Any] = []
+    try:
+        trades = list(ib.openTrades() or [])
+    except Exception:
+        return out
+    for trade in trades:
+        try:
+            if str(getattr(trade.contract, "symbol", "") or "").upper() != sym:
+                continue
+            if str(getattr(trade.order, "action", "") or "").upper() != "BUY":
+                continue
+            status = str(getattr(trade.orderStatus, "status", "") or "")
+            if status in _TERMINAL_BUY_STATUS:
+                continue
+            out.append(trade)
+        except Exception:
+            continue
+    return out
+
+
+def cancel_working_buys_for_symbol(ib: IB, symbol: str) -> list[int]:
+    """
+    Cancel every working BUY for *symbol* before place / requote / timeout.
+
+    Prevents stacked Day limits (MLYS 2026-09: multiple 0/8 BUY LMT after
+    failed cancel-on-replace and re-entry without clearing the prior rest).
+    """
+    sym = symbol.upper()
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.3)
+    except Exception:
+        pass
+    cancelled: list[int] = []
+    for trade in _working_buy_trades(ib, sym):
+        try:
+            oid = int(trade.order.orderId or 0)
+        except (TypeError, ValueError):
+            oid = 0
+        try:
+            ib.cancelOrder(trade.order)
+            if oid > 0:
+                cancelled.append(oid)
+        except Exception as exc:
+            print(f"  {sym} cancel working BUY oid={oid} warn: {exc}")
+    if cancelled:
+        try:
+            ib.sleep(0.5)
+        except Exception:
+            pass
+        print(f"  {sym} cancelled working BUY(s) {cancelled}")
+    return cancelled
 
 # IBKR overnight session for many US equities (~04:00–20:00 ET).
 # Outside that window (OVERNIGHT classifier) exits generally cannot print.
@@ -227,7 +289,11 @@ def place_tsd_entry(
 
     session = classify_session()
     # Pullback limits need a bit longer to rest on the book
-    fill_wait = FILL_WAIT_SEC + (30 if (prefer_limit or limit_price) else 0)
+    fill_wait = FILL_WAIT_SEC + (
+        LIMIT_FILL_EXTRA_SEC if (prefer_limit or limit_price) else 0
+    )
+    # Clear leftover Day BUYs from a prior no_fill / failed cancel before stacking.
+    cancel_working_buys_for_symbol(ib, sym)
     order = build_entry_order(
         session, shares, px, limit_price=limit_price, prefer_limit=prefer_limit,
     )
@@ -253,6 +319,7 @@ def place_tsd_entry(
 
     filled, avg_fill, st = _poll_fill(trade, fill_wait)
     if filled <= 0 and st in ("Cancelled", "Inactive", "ApiCancelled"):
+        cancel_working_buys_for_symbol(ib, sym)
         return {
             "status": "REJECTED",
             "reason": f"order_{st}",
@@ -263,11 +330,9 @@ def place_tsd_entry(
     # Autopsy P0: one requote for resting limits so a dead #1 does not waste the hour.
     requoted = False
     if filled <= 0 and (prefer_limit or (limit_price and limit_price > 0) or session != "RTH"):
-        try:
-            ib.cancelOrder(trade.order)
-            ib.sleep(0.5)
-        except Exception:
-            pass
+        # Cancel-on-replace: drop *all* working BUYs, not only the last trade
+        # (silent cancel failure previously left MLYS limits stacked).
+        cancel_working_buys_for_symbol(ib, sym)
         live = _ref_price(ib, contract) or px
         prior_lmt = float(limit_price) if limit_price and limit_price > 0 else float(px)
         # Nudge limit toward market (still a limit — never intentional short chase market)
@@ -279,6 +344,7 @@ def place_tsd_entry(
         requoted = True
         filled, avg_fill, st = _poll_fill(trade, REQUOTE_WAIT_SEC)
         if filled <= 0 and st in ("Cancelled", "Inactive", "ApiCancelled"):
+            cancel_working_buys_for_symbol(ib, sym)
             return {
                 "status": "REJECTED",
                 "reason": f"order_{st}",
@@ -288,10 +354,7 @@ def place_tsd_entry(
             }
 
     if filled <= 0:
-        try:
-            ib.cancelOrder(trade.order)
-        except Exception:
-            pass
+        cancel_working_buys_for_symbol(ib, sym)
         return {
             "status": "REJECTED",
             "reason": "no_fill_timeout",
