@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "candidates"))
 sys.path.insert(0, str(ROOT / "strategy_lab"))
 
-from tsd_scan_pipeline.tsd_exit import kill_should_ratchet_up  # noqa: E402
+from tsd_scan_pipeline.tsd_exit import kill_stop_needs_ratchet  # noqa: E402
 from tsd_scan_pipeline.tsd_keep_profit import (  # noqa: E402
     init_php_trail_state,
     php_process_bar,
@@ -196,16 +196,19 @@ class TestKillStillWorks(unittest.TestCase):
 
 
 class TestKillRatchetUpOnly(unittest.TestCase):
+    """UP-only kill rewrite; unread 0.0 (stopPrice without auxPrice) must not storm."""
+
     def test_raises_when_target_higher(self):
-        self.assertTrue(kill_should_ratchet_up(9.50, 9.75))
+        self.assertTrue(kill_stop_needs_ratchet(9.50, 9.75))
 
     def test_never_loosens(self):
-        self.assertFalse(kill_should_ratchet_up(9.75, 9.50))
-        self.assertFalse(kill_should_ratchet_up(9.75, 9.75))
+        self.assertFalse(kill_stop_needs_ratchet(9.75, 9.50))
+        self.assertFalse(kill_stop_needs_ratchet(9.75, 9.75))
 
-    def test_missing_current_stop_replaces(self):
-        self.assertTrue(kill_should_ratchet_up(0.0, 9.50))
-        self.assertFalse(kill_should_ratchet_up(9.50, 0.0))
+    def test_unreadable_current_stop_skips_rewrite(self):
+        # 0.0 is unread/missing trigger (IB stores STP LMT on auxPrice), not ratchet-from-zero.
+        self.assertFalse(kill_stop_needs_ratchet(0.0, 9.50))
+        self.assertFalse(kill_stop_needs_ratchet(9.50, 0.0))
 
 
 class TestProcessLegLivePath(unittest.TestCase):
