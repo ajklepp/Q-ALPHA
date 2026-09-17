@@ -325,6 +325,131 @@ class TestGhostConfirmed(unittest.TestCase):
         )
         self.assertEqual(wq.in_flight_confirmed_symbols(book, now=now), set())
 
+    def test_scrub_confirmed_on_book_close_clears_cap(self):
+        """Same-session CONFIRMED + book CLOSED → CLEARED_STALE; Cap free."""
+        self._write_queue([
+            {
+                "symbol": "ATRC",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T09:40:00-04:00",
+            },
+        ])
+        closed_at = "2026-09-15T14:05:00-04:00"
+        now = wq.ET.localize(datetime(2026, 9, 15, 14, 15))
+        self.assertTrue(
+            wq.scrub_confirmed_on_book_close(
+                "ATRC", closed_at=closed_at, reason="book_closed",
+            )
+        )
+        row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
+        self.assertEqual(row["status"], "CLEARED_STALE")
+        self.assertEqual(row["skip_reason"], "book_closed")
+        self.assertTrue(row.get("confirmed_cleared_on_close"))
+        book = {
+            "positions": [
+                {
+                    "symbol": "ATRC",
+                    "status": "CLOSED",
+                    "closed_at": closed_at,
+                    "entry_count": 1,
+                    "legs": [],
+                },
+            ],
+        }
+        self.assertEqual(wq.in_flight_confirmed_symbols(book, now=now), set())
+        self.assertFalse(
+            wq.is_confirmed_in_flight(row, now=now, open_syms=set()),
+        )
+
+    def test_scrub_skips_newer_confirm_after_close(self):
+        """Re-entry: CONFIRMED after closed_at stays Cap in-flight."""
+        self._write_queue([
+            {
+                "symbol": "IRD",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T15:10:00-04:00",
+            },
+        ])
+        closed_at = "2026-09-15T14:05:00-04:00"
+        now = wq.ET.localize(datetime(2026, 9, 15, 15, 15))
+        self.assertFalse(
+            wq.scrub_confirmed_on_book_close(
+                "IRD", closed_at=closed_at, reason="book_closed",
+            )
+        )
+        row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
+        self.assertEqual(row["status"], "CONFIRMED")
+        book = {
+            "positions": [
+                {
+                    "symbol": "IRD",
+                    "status": "CLOSED",
+                    "closed_at": closed_at,
+                    "entry_count": 1,
+                    "legs": [],
+                },
+            ],
+        }
+        self.assertEqual(
+            wq.in_flight_confirmed_symbols(book, now=now),
+            {"IRD"},
+        )
+
+    def test_scrub_confirmed_for_closed_book_batch(self):
+        """1H safety-net: CLOSED book rows scrub matching CONFIRMED only."""
+        self._write_queue([
+            {
+                "symbol": "ATRC",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T09:40:00-04:00",
+            },
+            {
+                "symbol": "HPE",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T15:12:00-04:00",
+            },
+            {
+                "symbol": "OPENX",
+                "status": "CONFIRMED",
+                "confirmed_at": "2026-09-15T10:00:00-04:00",
+            },
+        ])
+        now = wq.ET.localize(datetime(2026, 9, 15, 15, 15))
+        book = {
+            "positions": [
+                {
+                    "symbol": "ATRC",
+                    "status": "CLOSED",
+                    "closed_at": "2026-09-15T14:05:00-04:00",
+                    "legs": [],
+                },
+                {
+                    "symbol": "HPE",
+                    "status": "CLOSED",
+                    "closed_at": "2026-09-15T14:00:00-04:00",
+                    "legs": [],
+                },
+                {
+                    "symbol": "OPENX",
+                    "status": "OPEN",
+                    "legs": [],
+                },
+            ],
+        }
+        scrubbed = wq.scrub_confirmed_for_closed_book(book, now=now)
+        self.assertEqual(scrubbed, ["ATRC"])
+        by_sym = {
+            r["symbol"]: r
+            for r in json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"]
+        }
+        self.assertEqual(by_sym["ATRC"]["status"], "CLEARED_STALE")
+        self.assertEqual(by_sym["HPE"]["status"], "CONFIRMED")
+        self.assertEqual(by_sym["OPENX"]["status"], "CONFIRMED")
+        self.assertEqual(
+            wq.in_flight_confirmed_symbols(book, now=now),
+            {"HPE", "OPENX"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
