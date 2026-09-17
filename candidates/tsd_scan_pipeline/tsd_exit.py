@@ -131,6 +131,47 @@ def _working_protective_kills(ib: IB, symbol: str) -> list[Any]:
     return out
 
 
+def cancel_extra_protective_kills(
+    ib: IB,
+    symbol: str,
+    keep_oid: int,
+    *,
+    dry_run: bool = False,
+) -> list[int]:
+    """
+    Idempotent kill hygiene: at most one working protective stop per symbol.
+
+    Keeps ``keep_oid`` and cancels every other working SELL STP / STP LMT.
+    Needed after the ATRC rewrite storm left multiple identical kills @53.13
+    even once skip-rewrite stopped placing new ones.
+    """
+    try:
+        keep = int(keep_oid)
+    except (TypeError, ValueError):
+        return []
+    if keep <= 0:
+        return []
+    cancelled: list[int] = []
+    for trade in _working_protective_kills(ib, symbol):
+        try:
+            oid = int(trade.order.orderId or 0)
+        except (TypeError, ValueError):
+            continue
+        if oid <= 0 or oid == keep:
+            continue
+        if dry_run:
+            cancelled.append(oid)
+            continue
+        if cancel_order_safe(ib, oid):
+            cancelled.append(oid)
+    if cancelled:
+        print(
+            f"  {symbol} cancelled extra protective kill(s) {cancelled} "
+            f"(kept oid={keep})"
+        )
+    return cancelled
+
+
 def _place_kill_stop_order(
     ib: IB,
     symbol: str,
@@ -584,6 +625,8 @@ def sync_kill_quantity(
             stop_shown = order_stop_price(good.order) or target_kill
             if preferred_oid != oid:
                 leg["kill_order_id"] = oid
+            # Orphans from prior rewrite storm: keep one, drop the rest.
+            cancel_extra_protective_kills(ib, symbol, oid, dry_run=dry_run)
             print(
                 f"  {symbol} kill already working @{stop_shown:.2f} "
                 f"oid={oid} — skip rewrite"
@@ -603,6 +646,9 @@ def sync_kill_quantity(
                 return False
             new_trade = _place_kill_stop_order(ib, symbol, remaining, kill_price)
             leg["kill_order_id"] = new_trade.order.orderId
+            cancel_extra_protective_kills(
+                ib, symbol, int(leg["kill_order_id"]), dry_run=False
+            )
             print(
                 f"  {symbol} replaced missing kill "
                 f"oid={leg['kill_order_id']} qty={remaining}"
@@ -618,6 +664,7 @@ def sync_kill_quantity(
             stop_shown = cur_stop or target_kill
             if preferred_oid != oid:
                 leg["kill_order_id"] = oid
+            cancel_extra_protective_kills(ib, symbol, oid, dry_run=dry_run)
             print(
                 f"  {symbol} kill already working @{stop_shown:.2f} "
                 f"oid={oid} — skip rewrite"
@@ -655,6 +702,7 @@ def sync_kill_quantity(
                 ):
                     oid = _oid(leftover)
                     leg["kill_order_id"] = oid
+                    cancel_extra_protective_kills(ib, symbol, oid, dry_run=False)
                     stop_shown = left_stop or target_kill
                     print(
                         f"  {symbol} kill already working @{stop_shown:.2f} "
@@ -663,6 +711,9 @@ def sync_kill_quantity(
                     return True
             new_trade = _place_kill_stop_order(ib, symbol, remaining, target_kill)
             leg["kill_order_id"] = new_trade.order.orderId
+            cancel_extra_protective_kills(
+                ib, symbol, int(leg["kill_order_id"]), dry_run=False
+            )
             print(
                 f"  {symbol} kill ratchet stop {cur_stop}->{target_kill} "
                 f"qty={remaining} oid={leg['kill_order_id']}"
@@ -671,6 +722,7 @@ def sync_kill_quantity(
         trade.order.totalQuantity = remaining
         ib.placeOrder(trade.contract, trade.order)
         ib.sleep(0.3)
+        cancel_extra_protective_kills(ib, symbol, _oid(trade), dry_run=False)
         print(f"  {symbol} kill qty synced {cur_qty} -> {remaining}")
         return True
     except Exception as exc:

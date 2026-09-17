@@ -297,6 +297,37 @@ class TestSyncKillNoRewrite(unittest.TestCase):
         self.assertTrue(leg["trail"]["kill_stop_cancelled"])
 
 
+    def test_three_identical_kills_keeps_one(self):
+        """ATRC screenshot: three STP LMT @53.13 qty=2 → keep one, cancel extras."""
+        trades = [
+            _FakeTrade(_FakeOrder(oid, qty=2, aux_price=53.13, stop_price=0.0))
+            for oid in (43126, 43140, 43155)
+        ]
+        ib = _FakeIB(trades=trades, positions=[_FakePos("ATRC", 2)])
+        leg = _atrc_leg(kill_oid=43126, kill_price=53.13)
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            result = tsd_exit.sync_kill_quantity(ib, leg, "ATRC")
+        self.assertTrue(result)
+        self.assertEqual(ib.placed, [])
+        self.assertEqual(sorted(ib.cancelled), [43140, 43155])
+        self.assertEqual(leg["kill_order_id"], 43126)
+        remaining = [int(t.order.orderId) for t in ib.openTrades()]
+        self.assertEqual(remaining, [43126])
+        self.assertIn("cancelled extra protective kill", buf.getvalue())
+        self.assertIn("skip rewrite", buf.getvalue())
+
+    def test_cancel_extra_protective_kills_helper(self):
+        trades = [
+            _FakeTrade(_FakeOrder(oid, qty=2, aux_price=53.13))
+            for oid in (1, 2, 3)
+        ]
+        ib = _FakeIB(trades=trades, positions=[_FakePos("ATRC", 2)])
+        cancelled = tsd_exit.cancel_extra_protective_kills(ib, "ATRC", 2)
+        self.assertEqual(sorted(cancelled), [1, 3])
+        self.assertEqual([int(t.order.orderId) for t in ib.openTrades()], [2])
+
+
 class TestSyncKillTarget5313(unittest.TestCase):
     """Live ATRC 2026-09-16: target 53.13 with stopPrice=0 / auxPrice set."""
 
