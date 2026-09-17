@@ -704,22 +704,45 @@ def select_enter_rows(
     exclude_symbols: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Only case ENTER rows with tradable popularity (momentum confirmation).
+    Case ENTER rows, then rank into the 2/hour cap.
 
-    Autopsy: popular+structure filter kept the green keep-profit book;
-    obscure non-popular ENTERs were a drag.
+    PHP_MOMENTUM_RANK ON (default): popularity is a lane, not the only filter.
+    First-day rippers with momentum_context + hot tape can take. Sort is
+    momentum-adjusted continuation (confidence is tiebreak only).
+
+    Flag OFF: restore popularity-only filter + confidence-first sort.
 
     exclude_symbols: already OPEN / in-flight CONFIRMED — do not consume take
     slots (autopsy P0 cap accounting). Ghost historical CONFIRMEDs should not
     be passed here.
     """
     skip = {str(s).upper() for s in (exclude_symbols or set())}
+
+    def _is_enter(r: dict[str, Any]) -> bool:
+        return (
+            str(r.get("case_verdict") or r.get("case_review", {}).get("verdict") or "").upper()
+            == "ENTER"
+            and str(r.get("symbol") or "").upper() not in skip
+        )
+
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import (
+            momentum_rank_enabled,
+            take_eligible,
+            take_sort_key,
+        )
+
+        if momentum_rank_enabled():
+            enters = [r for r in reviewed if _is_enter(r) and take_eligible(r)]
+            enters.sort(key=take_sort_key)
+            return enters[: max(0, int(max_n))]
+    except Exception:
+        pass
+
     enters = [
         r for r in reviewed
-        if str(r.get("case_verdict") or r.get("case_review", {}).get("verdict") or "").upper()
-        == "ENTER"
+        if _is_enter(r)
         and bool(r.get("tradable_popular") or r.get("recent_leaderboard") or r.get("on_gainers"))
-        and str(r.get("symbol") or "").upper() not in skip
     ]
     enters.sort(
         key=lambda r: (

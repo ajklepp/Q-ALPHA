@@ -9,7 +9,9 @@ orange admit-but-deprioritize.
 
 Live slot pick: continuation_score (v1.6 same-day extension objective).
 When PHP_EQUAL_SIGNAL is ON (default), stage terms and the phase→extended
-leak are neutralized — see php_equal_signal.py and REVERT.md.
+leak are neutralized — see php_equal_signal.py.
+When PHP_MOMENTUM_RANK is ON (default), same-day rippers outrank slow
+popular names — see php_momentum_rank.py and REVERT.md.
 """
 from __future__ import annotations
 
@@ -172,17 +174,31 @@ def equal_signal_mode_label() -> str:
 
 
 def live_ranker_version_label() -> str:
-    """v1.6 or v1.6+equal_signal depending on the live flag."""
+    """v1.6 plus live overlays currently ON (equal_signal / momentum_rank)."""
+    label = CONTINUATION_SCORE_VERSION
     if equal_signal_enabled():
-        return f"{CONTINUATION_SCORE_VERSION}+equal_signal"
-    return CONTINUATION_SCORE_VERSION
+        label += "+equal_signal"
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import ranker_suffix
+
+        label += ranker_suffix()
+    except Exception:
+        pass
+    return label
 
 
 def launch_score_banner() -> str:
     """Log fragment every 1H launch tick must print (report + apply stay paired)."""
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import momentum_rank_mode_label
+
+        mo = momentum_rank_mode_label()
+    except Exception:
+        mo = "ON"
     return (
         f"score={live_ranker_version_label()}  "
-        f"equal_signal={equal_signal_mode_label()}"
+        f"equal_signal={equal_signal_mode_label()}  "
+        f"momentum_rank={mo}"
     )
 
 
@@ -598,14 +614,31 @@ def compute_continuation_score_v1_1(row: dict[str, Any]) -> float:
 
 
 def compute_continuation_score(row: dict[str, Any]) -> float:
-    """Live ranker entrypoint. Equal-signal overlay when PHP_EQUAL_SIGNAL is ON."""
+    """
+    Live ranker entrypoint.
+
+    Equal-signal overlay when PHP_EQUAL_SIGNAL is ON, then momentum-rank
+    tilt when PHP_MOMENTUM_RANK is ON (default). Trails / take cap untouched.
+    """
     if equal_signal_enabled():
         from tsd_scan_pipeline.php_equal_signal import (
             compute_continuation_score_equal_signal,
         )
 
-        return compute_continuation_score_equal_signal(row)
-    return compute_continuation_score_v1_1(row)
+        base = compute_continuation_score_equal_signal(row)
+    else:
+        base = compute_continuation_score_v1_1(row)
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import (
+            apply_momentum_rank,
+            momentum_rank_enabled,
+        )
+
+        if momentum_rank_enabled():
+            return apply_momentum_rank(base, row)
+    except Exception:
+        pass
+    return base
 
 
 def is_continuation_list_candidate(row: dict[str, Any]) -> bool:
@@ -649,6 +682,12 @@ def enrich_launch_fields(row: dict[str, Any]) -> dict[str, Any]:
     out["continuation_score"] = compute_continuation_score(out)
     out["continuation_score_version"] = live_ranker_version_label()
     out["equal_signal"] = equal_signal_enabled()
+    try:
+        from tsd_scan_pipeline.php_momentum_rank import annotate_momentum_rank
+
+        out = annotate_momentum_rank(out)
+    except Exception:
+        pass
     out["combined_rank_score"] = out["continuation_score"]
     out["entry_score"] = out["combined_rank_score"]
     return out

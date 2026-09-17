@@ -394,6 +394,7 @@ class TestEqualSignalLaunchBanner(unittest.TestCase):
         text = buf.getvalue()
         self.assertIn("score=v1.6+equal_signal", text)
         self.assertIn("equal_signal=ON", text)
+        self.assertIn("momentum_rank=", text)
         self.assertNotRegex(text, r"score=v1\.6\s+slots=")
 
 

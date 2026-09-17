@@ -100,6 +100,7 @@ def format_scan_summary(
         ht_line,
     ]
     try:
+        from tsd_scan_pipeline.php_momentum_rank import momentum_rank_mode_label
         from tsd_scan_pipeline.tsd_launch_score import (
             equal_signal_mode_label,
             live_ranker_version_label,
@@ -107,6 +108,7 @@ def format_scan_summary(
 
         lines.append(
             f"equal_signal={equal_signal_mode_label()} "
+            f"momentum_rank={momentum_rank_mode_label()} "
             f"score={live_ranker_version_label()}"
         )
     except Exception:

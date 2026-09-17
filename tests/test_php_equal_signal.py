@@ -112,11 +112,12 @@ class TestEqualSignalFlag(unittest.TestCase):
     def test_off_label(self):
         with php_equal_signal(False):
             self.assertFalse(equal_signal_enabled())
-            self.assertEqual(live_ranker_version_label(), "v1.6")
-            self.assertEqual(
-                launch_score_banner(),
-                "score=v1.6  equal_signal=OFF",
-            )
+            label = live_ranker_version_label()
+            self.assertTrue(label.startswith("v1.6"))
+            self.assertNotIn("equal_signal", label)
+            banner = launch_score_banner()
+            self.assertIn("equal_signal=OFF", banner)
+            self.assertIn("momentum_rank=", banner)
 
     def test_empty_env_and_missing_dotenv_default_on(self):
         """Blank PHP_EQUAL_SIGNAL= must not drop the overlay (mid-day banner bug)."""
@@ -124,15 +125,17 @@ class TestEqualSignalFlag(unittest.TestCase):
         from tsd_scan_pipeline import tsd_launch_score as ls
 
         prev = os.environ.get("PHP_EQUAL_SIGNAL")
+        prev_mo = os.environ.get("PHP_MOMENTUM_RANK")
         try:
             os.environ["PHP_EQUAL_SIGNAL"] = ""
+            os.environ["PHP_MOMENTUM_RANK"] = "1"
             with tempfile.TemporaryDirectory() as td:
                 with patch.object(ls, "_REPO_ROOT", Path(td)):
                     self.assertTrue(equal_signal_enabled())
-                    self.assertEqual(
-                        launch_score_banner(),
-                        "score=v1.6+equal_signal  equal_signal=ON",
-                    )
+                    banner = launch_score_banner()
+                    self.assertIn("score=v1.6+equal_signal", banner)
+                    self.assertIn("equal_signal=ON", banner)
+                    self.assertIn("momentum_rank=ON", banner)
                     apply_php_equal_signal_env()
                     self.assertEqual(os.environ.get("PHP_EQUAL_SIGNAL"), "1")
         finally:
@@ -140,6 +143,10 @@ class TestEqualSignalFlag(unittest.TestCase):
                 os.environ.pop("PHP_EQUAL_SIGNAL", None)
             else:
                 os.environ["PHP_EQUAL_SIGNAL"] = prev
+            if prev_mo is None:
+                os.environ.pop("PHP_MOMENTUM_RANK", None)
+            else:
+                os.environ["PHP_MOMENTUM_RANK"] = prev_mo
 
 
 class TestSoftExtensionLeak(unittest.TestCase):
@@ -189,12 +196,20 @@ class TestEqualContinuation(unittest.TestCase):
             )
 
     def test_flag_off_restores_stage_grading_gap(self):
-        with php_equal_signal(False):
-            live_l = compute_continuation_score(LAUNCH)
-            live_e = compute_continuation_score(SOFT_EXT)
-            self.assertGreater(live_l, live_e + 20)
-            # Dispatcher is v1.6 when OFF.
-            self.assertAlmostEqual(live_l, compute_continuation_score_v1_1(LAUNCH), places=2)
+        prev_mo = os.environ.get("PHP_MOMENTUM_RANK")
+        os.environ["PHP_MOMENTUM_RANK"] = "0"
+        try:
+            with php_equal_signal(False):
+                live_l = compute_continuation_score(LAUNCH)
+                live_e = compute_continuation_score(SOFT_EXT)
+                self.assertGreater(live_l, live_e + 20)
+                # Dispatcher is v1.6 when both overlays are OFF.
+                self.assertAlmostEqual(live_l, compute_continuation_score_v1_1(LAUNCH), places=2)
+        finally:
+            if prev_mo is None:
+                os.environ.pop("PHP_MOMENTUM_RANK", None)
+            else:
+                os.environ["PHP_MOMENTUM_RANK"] = prev_mo
 
     def test_room_still_ranks_under_equal_signal(self):
         tight = _shared(symbol="TIGHT", scan_score=68.0, trend_strength=0.75,
