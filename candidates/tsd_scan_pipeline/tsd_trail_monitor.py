@@ -71,6 +71,25 @@ _TRAIL_LOCK_PATH = CANDIDATES_DIR / "logs" / "tsd_trail_monitor.lock"
 _TRAIL_LOCK_FH = None
 
 
+def _cap_scrub_on_book_close(
+    symbol: str,
+    *,
+    closed_at: str,
+    dry_run: bool = False,
+) -> None:
+    """Persist Cap scrub when trail marks a name CLOSED (Ghost CONFIRMED)."""
+    if dry_run:
+        return
+    try:
+        from tsd_scan_pipeline.tsd_watch_queue import scrub_confirmed_on_book_close
+
+        scrub_confirmed_on_book_close(
+            symbol, closed_at=closed_at, reason="book_closed",
+        )
+    except Exception as exc:
+        print(f"  Cap scrub warn {symbol}: {exc}")
+
+
 def _acquire_trail_lock(*, fail_closed: bool = False) -> bool:
     """Return False if another trail --loop already holds the lock."""
     global _TRAIL_LOCK_FH
@@ -739,9 +758,11 @@ def _process_position(
                         })
             pos["legs"][i] = leg
         if all(l.get("status") == "CLOSED" for l in pos.get("legs") or []):
+            closed_at = datetime.now(ET).isoformat()
             pos["status"] = "CLOSED"
-            pos["closed_at"] = datetime.now(ET).isoformat()
+            pos["closed_at"] = closed_at
             print(f"  {sym}: position CLOSED (kill_escalate)")
+            _cap_scrub_on_book_close(sym, closed_at=closed_at, dry_run=dry_run)
         return results
 
     quote = _fetch_quote(ib, sym)
@@ -793,6 +814,7 @@ def _process_position(
         pos["status"] = "CLOSED"
         pos["closed_at"] = when
         print(f"  {sym}: position CLOSED")
+        _cap_scrub_on_book_close(sym, closed_at=when, dry_run=dry_run)
 
     return results
 

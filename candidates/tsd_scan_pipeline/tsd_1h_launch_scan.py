@@ -658,6 +658,17 @@ def run_1h_launch_scan(
             )
     except Exception as exc:
         print(f"  Queue expire warn: {exc}", flush=True)
+    try:
+        from tsd_scan_pipeline.tsd_watch_queue import scrub_confirmed_for_closed_book
+
+        scrubbed = scrub_confirmed_for_closed_book(book, now=now_et)
+        if scrubbed:
+            print(
+                f"  Cap scrub CONFIRMED on book CLOSE -> CLEARED_STALE: {scrubbed}",
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"  Cap scrub warn: {exc}", flush=True)
 
     rows = _evaluate_universe(
         symbols, htf_rows=htf_rows, polygon_key=key, now_et=now_et,

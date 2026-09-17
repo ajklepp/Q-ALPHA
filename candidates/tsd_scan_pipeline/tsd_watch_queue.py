@@ -40,7 +40,8 @@ WatchStatus = Literal["WATCHING", "CONFIRMED", "SKIPPED", "CLEARED_STALE"]
 QUEUE_PATH = state_path("tsd_watch_queue.json")
 # Stale CONFIRMED rows (prior session, now flat) are downgraded so they cannot
 # permanently block NEW takes. Same-session CONFIRMED stays in-flight unless
-# the enter path never opened risk (already_long flat / no fill).
+# the enter path never opened risk (already_long flat / no fill) OR the book
+# closes and Cap scrub clears the confirm (scrub_confirmed_on_book_close).
 STALE_CONFIRMED_STATUS = "CLEARED_STALE"
 # Skip/fail reasons that mean CONFIRMED must not occupy a Cap in-flight slot.
 # 2026-09-15 IRD: MICRO CONFIRM then already_long (open=False) left CONFIRMED.
@@ -201,6 +202,131 @@ def release_confirmed_without_risk(
         flush=True,
     )
     return True
+
+
+def _parse_et_datetime(raw: Any) -> datetime | None:
+    """Parse an ISO timestamp to an aware ET datetime (date-only → midnight ET)."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return ET.localize(dt)
+        return dt.astimezone(ET)
+    except (TypeError, ValueError):
+        d = _parse_et_date(text)
+        if d is None:
+            return None
+        return ET.localize(datetime(d.year, d.month, d.day))
+
+
+def _confirmed_belongs_to_closed_trade(
+    row: dict[str, Any],
+    *,
+    closed_at: Any = None,
+) -> bool:
+    """
+    True when this CONFIRMED row belongs to a trade that already closed.
+
+    Re-entry race: after a close scrub, a later same-day micro CONFIRM can
+    land while the book is still CLOSED pending fill. That new confirm has
+    confirmed_at > closed_at and must stay Cap in-flight.
+    """
+    conf_at = _parse_et_datetime(row.get("confirmed_at"))
+    close_at = _parse_et_datetime(closed_at)
+    if conf_at is None or close_at is None:
+        # Missing timestamps: treat CLOSED book as owned by this confirm
+        # (event-driven scrub always passes closed_at).
+        return True
+    return conf_at <= close_at
+
+
+def scrub_confirmed_on_book_close(
+    symbol: str,
+    *,
+    closed_at: Any = None,
+    reason: str = "book_closed",
+    extra: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Cap scrub when local book / risk shows CLOSED (flat).
+
+    Same-session CONFIRMED that successfully traded then flattened must not
+    stay Cap-exclude — otherwise NEW takes of that name (and Cap accounting)
+    stay blocked until next-day expire or a manual CLEARED_STALE. Line-check
+    alone is insufficient; persist the scrub on the queue row.
+
+    Does not scrub a newer CONFIRMED that landed after closed_at (pending
+    re-entry fill). Returns True when a row was downgraded.
+    """
+    sym = str(symbol or "").upper()
+    if not sym:
+        return False
+    state = load_queue()
+    idx = _queue_index(state, sym)
+    if idx is None:
+        return False
+    row = state["queue"][idx]
+    if str(row.get("status") or "").upper() != "CONFIRMED":
+        return False
+    if not _confirmed_belongs_to_closed_trade(row, closed_at=closed_at):
+        return False
+    when = _parse_et_datetime(closed_at) or datetime.now(ET)
+    when_iso = when.isoformat()
+    row["status"] = STALE_CONFIRMED_STATUS
+    row["skip_reason"] = reason or "book_closed"
+    row["cleared_stale_at"] = when_iso
+    row["confirmed_cleared_on_close"] = True
+    row["confirmed_cleared_at"] = when_iso
+    if closed_at is not None:
+        row["book_closed_at"] = str(closed_at)
+    if extra:
+        row.update(extra)
+    state["queue"][idx] = row
+    save_queue(state)
+    print(
+        f"  QUEUE SCRUB {sym}: CONFIRMED → {STALE_CONFIRMED_STATUS} "
+        f"({reason}; book CLOSED)",
+        flush=True,
+    )
+    return True
+
+
+def scrub_confirmed_for_closed_book(
+    book: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> list[str]:
+    """
+    Safety-net Cap scrub: CONFIRMED rows whose book position is CLOSED.
+
+    Walks CLOSED (flat) book rows and scrub_confirmed_on_book_close each.
+    Skips OPEN names and newer confirms after closed_at. Call from trail
+    close hooks and at 1H launch alongside expire_stale_confirmed.
+    """
+    try:
+        from tsd_scan_pipeline.tsd_capacity import load_state
+
+        state = book if book is not None else load_state()
+    except Exception:
+        return []
+    scrubbed: list[str] = []
+    for pos in state.get("positions") or []:
+        if str(pos.get("status") or "").upper() != "CLOSED":
+            continue
+        sym = str(pos.get("symbol") or "").upper()
+        if not sym:
+            continue
+        if scrub_confirmed_on_book_close(
+            sym,
+            closed_at=pos.get("closed_at") or (now.isoformat() if now else None),
+            reason="book_closed",
+        ):
+            scrubbed.append(sym)
+    return sorted(scrubbed)
 
 
 def add_to_watch_queue(

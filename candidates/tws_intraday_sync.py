@@ -361,10 +361,21 @@ def _reconcile_tsd_broker_kills(
             str(leg.get("status") or "").upper() == "CLOSED"
             for leg in pos.get("legs") or []
         ):
+            closed_at = datetime.now(ET).isoformat()
             pos["status"] = "CLOSED"
-            pos["closed_at"] = datetime.now(ET).isoformat()
+            pos["closed_at"] = closed_at
             if symbol not in reconciled:
                 reconciled.append(symbol)
+            try:
+                from tsd_scan_pipeline.tsd_watch_queue import (
+                    scrub_confirmed_on_book_close,
+                )
+
+                scrub_confirmed_on_book_close(
+                    symbol, closed_at=closed_at, reason="book_closed",
+                )
+            except Exception as exc:
+                print(f"  Cap scrub warn {symbol}: {exc}")
 
     if changed:
         save_state(book)
