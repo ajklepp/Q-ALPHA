@@ -1,0 +1,1135 @@
+{
+  "paper_only": true,
+  "asof": "2026-09-16",
+  "universe_source": "fixture",
+  "bar_source": "fixture",
+  "n_entries": 4,
+  "n_tickers": 4,
+  "symbols": [
+    "BANK",
+    "CHOP",
+    "FADE",
+    "RUNR"
+  ],
+  "recent_php_ticker_hints": [
+    "ARQQ",
+    "ATRC",
+    "BETA",
+    "CAI",
+    "CBLL",
+    "CLYM",
+    "CNH",
+    "FGI",
+    "FWDI",
+    "METC",
+    "NX",
+    "OCUL",
+    "PURR",
+    "QMCO",
+    "RDW",
+    "SLS"
+  ],
+  "modes_run": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "cost_per_trade": 0.0015,
+  "language": {
+    "units": "pct_of_entry_and_pct_off_high",
+    "plus_1r_means": "+kill_pct of entry (fallback 5.00% of entry)",
+    "live_t1_bank_pct_of_entry": 0.02,
+    "live_trail_pct_off_high": 0.025
+  },
+  "grid": {
+    "trail_off_high": [
+      0.01,
+      0.015,
+      0.02,
+      0.025,
+      0.03
+    ],
+    "arm_mfe_pct_of_entry": [
+      0.015,
+      0.02,
+      0.03,
+      0.04
+    ],
+    "kill_milestones_mfe_pct_of_entry": [
+      0.0,
+      0.02,
+      0.03,
+      0.04
+    ],
+    "score": "mean_pnl_pct_of_entry - 0.01 * green_then_lost_rate"
+  },
+  "schedules": [
+    {
+      "symbol": "BANK",
+      "early_trail_pct_off_high": 0.01,
+      "trail_arm_mfe_pct_of_entry": 0.03,
+      "kill_schedule": [
+        {
+          "after_mfe_pct": 0.0,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.02,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.03,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.04,
+          "kill_pct_below_entry": 0.015
+        }
+      ],
+      "drivers": {
+        "mae_p50": 0.007083,
+        "mae_p75": 0.009375,
+        "mfe_p50": 0.056667,
+        "fade_p75_off_high_after_3pct": 0.049244,
+        "n_touched_plus_3pct": 10,
+        "n_faded_after_3pct": 10,
+        "n_faded_after_4pct": 10
+      },
+      "n_analogs": 10,
+      "status": "OK",
+      "grid_winner": {
+        "early_trail_pct_off_high": 0.01,
+        "trail_arm_mfe_pct_of_entry": 0.03,
+        "kill_template": "mae_driven",
+        "score": 0.047333,
+        "mean_pnl_pct_of_entry": 0.047333,
+        "mean_capture_frac_of_mfe": 0.826241,
+        "green_then_lost_rate": 0.0,
+        "n": 10
+      },
+      "grid_n_combos": 60,
+      "note": "grid = trail%off-high \u00d7 arm MFE%of-entry \u00d7 kill template; scored on prior analogs only"
+    },
+    {
+      "symbol": "CHOP",
+      "early_trail_pct_off_high": 0.01,
+      "trail_arm_mfe_pct_of_entry": 0.015,
+      "kill_schedule": [
+        {
+          "after_mfe_pct": 0.0,
+          "kill_pct_below_entry": 0.06
+        },
+        {
+          "after_mfe_pct": 0.02,
+          "kill_pct_below_entry": 0.055625
+        },
+        {
+          "after_mfe_pct": 0.03,
+          "kill_pct_below_entry": 0.025
+        },
+        {
+          "after_mfe_pct": 0.04,
+          "kill_pct_below_entry": 0.015
+        }
+      ],
+      "drivers": {
+        "mae_p50": 0.055625,
+        "mae_p75": 0.060625,
+        "mfe_p50": 0.012,
+        "fade_p75_off_high_after_3pct": null,
+        "n_touched_plus_3pct": 0,
+        "n_faded_after_3pct": 0,
+        "n_faded_after_4pct": 0
+      },
+      "n_analogs": 10,
+      "status": "OK",
+      "grid_winner": {
+        "early_trail_pct_off_high": 0.01,
+        "trail_arm_mfe_pct_of_entry": 0.015,
+        "kill_template": "mae_driven",
+        "score": -0.050159,
+        "mean_pnl_pct_of_entry": -0.045159,
+        "mean_capture_frac_of_mfe": -4.666735,
+        "green_then_lost_rate": 0.5,
+        "n": 10
+      },
+      "grid_n_combos": 60,
+      "note": "grid = trail%off-high \u00d7 arm MFE%of-entry \u00d7 kill template; scored on prior analogs only"
+    },
+    {
+      "symbol": "FADE",
+      "early_trail_pct_off_high": 0.01,
+      "trail_arm_mfe_pct_of_entry": 0.015,
+      "kill_schedule": [
+        {
+          "after_mfe_pct": 0.0,
+          "kill_pct_below_entry": 0.05
+        },
+        {
+          "after_mfe_pct": 0.02,
+          "kill_pct_below_entry": 0.025
+        },
+        {
+          "after_mfe_pct": 0.03,
+          "kill_pct_below_entry": 0.015
+        },
+        {
+          "after_mfe_pct": 0.04,
+          "kill_pct_below_entry": 0.01
+        }
+      ],
+      "drivers": {
+        "mae_p50": 0.0495,
+        "mae_p75": 0.0525,
+        "mfe_p50": 0.04,
+        "fade_p75_off_high_after_3pct": 0.089054,
+        "n_touched_plus_3pct": 10,
+        "n_faded_after_3pct": 10,
+        "n_faded_after_4pct": 6
+      },
+      "n_analogs": 10,
+      "status": "OK",
+      "grid_winner": {
+        "early_trail_pct_off_high": 0.01,
+        "trail_arm_mfe_pct_of_entry": 0.015,
+        "kill_template": "tight",
+        "score": 0.023432,
+        "mean_pnl_pct_of_entry": 0.024432,
+        "mean_capture_frac_of_mfe": 0.581913,
+        "green_then_lost_rate": 0.1,
+        "n": 10
+      },
+      "grid_n_combos": 60,
+      "note": "grid = trail%off-high \u00d7 arm MFE%of-entry \u00d7 kill template; scored on prior analogs only"
+    },
+    {
+      "symbol": "RUNR",
+      "early_trail_pct_off_high": 0.03,
+      "trail_arm_mfe_pct_of_entry": 0.015,
+      "kill_schedule": [
+        {
+          "after_mfe_pct": 0.0,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.02,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.03,
+          "kill_pct_below_entry": 0.02
+        },
+        {
+          "after_mfe_pct": 0.04,
+          "kill_pct_below_entry": 0.015
+        }
+      ],
+      "drivers": {
+        "mae_p50": 0.00475,
+        "mae_p75": 0.007125,
+        "mfe_p50": 0.09,
+        "fade_p75_off_high_after_3pct": 0.026733,
+        "n_touched_plus_3pct": 10,
+        "n_faded_after_3pct": 3,
+        "n_faded_after_4pct": 1
+      },
+      "n_analogs": 10,
+      "status": "OK",
+      "grid_winner": {
+        "early_trail_pct_off_high": 0.03,
+        "trail_arm_mfe_pct_of_entry": 0.015,
+        "kill_template": "mae_driven",
+        "score": 0.0825,
+        "mean_pnl_pct_of_entry": 0.0825,
+        "mean_capture_frac_of_mfe": 0.897036,
+        "green_then_lost_rate": 0.0,
+        "n": 10
+      },
+      "grid_n_combos": 60,
+      "note": "grid = trail%off-high \u00d7 arm MFE%of-entry \u00d7 kill template; scored on prior analogs only"
+    }
+  ],
+  "modes": {
+    "A": {
+      "mode": "A",
+      "label": "live php_keep_profit_v1 (T1 bank +2% of entry)",
+      "book_pnl": 8.32,
+      "book_pnl_pct_of_entry_mean": 0.008005,
+      "capture_frac_of_mfe_mean": -0.906413,
+      "capture_frac_when_mfe_ge_1pct_mean": -0.906413,
+      "green_then_lost_rate": 0.5,
+      "score": 0.003005,
+      "n": 4,
+      "n_no_bars": 0,
+      "runtime_s": 0.001,
+      "trades": [
+        {
+          "symbol": "FADE",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.043,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.089166,
+            "giveback_after_3pct_off_high": 0.089166,
+            "giveback_after_4pct_off_high": 0.089166,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.65,
+          "cost": 0.12,
+          "pnl": -0.77,
+          "pnl_pct_of_entry": -0.009625,
+          "mfe_peak_pct": 0.043,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": -0.223837,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "t1_bank",
+            "kill",
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T4",
+              "shares": 1,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "RUNR",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.1,
+            "mae_peak_pct": 0.003,
+            "giveback_from_high_pct": 0.026364,
+            "giveback_after_3pct_off_high": 0.026364,
+            "giveback_after_4pct_off_high": 0.026364,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.0925,
+            "n_bars": 4
+          },
+          "entry_price": 20.0,
+          "shares": 8,
+          "realized_gross": 8.85,
+          "cost": 0.24,
+          "pnl": 8.61,
+          "pnl_pct_of_entry": 0.053812,
+          "mfe_peak_pct": 0.1,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.538125,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "t1_bank",
+            "trail",
+            "trail",
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 20.4,
+              "reason": "t1_bank",
+              "when": "2026-09-08T14:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 21.45,
+              "reason": "trail",
+              "when": "2026-09-09T11:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 21.45,
+              "reason": "trail",
+              "when": "2026-09-09T11:00:00"
+            },
+            {
+              "tranche_id": "REMAINING",
+              "shares": 1,
+              "exit_price": 21.85,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "CHOP",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.01125,
+            "mae_peak_pct": 0.06,
+            "giveback_from_high_pct": 0.070457,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.055,
+            "n_bars": 2
+          },
+          "entry_price": 8.0,
+          "shares": 8,
+          "realized_gross": -3.2,
+          "cost": 0.096,
+          "pnl": -3.296,
+          "pnl_pct_of_entry": -0.0515,
+          "mfe_peak_pct": 0.01125,
+          "mae_peak_pct": 0.06,
+          "capture_frac_of_mfe": -4.577778,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill",
+            "kill",
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T4",
+              "shares": 1,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "BANK",
+          "entry_date": "2026-09-09",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.061667,
+            "mae_peak_pct": 0.005,
+            "giveback_from_high_pct": 0.048666,
+            "giveback_after_3pct_off_high": 0.048666,
+            "giveback_after_4pct_off_high": 0.048666,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.053333,
+            "n_bars": 3
+          },
+          "entry_price": 12.0,
+          "shares": 8,
+          "realized_gross": 3.92,
+          "cost": 0.144,
+          "pnl": 3.776,
+          "pnl_pct_of_entry": 0.039333,
+          "mfe_peak_pct": 0.061667,
+          "mae_peak_pct": 0.005,
+          "capture_frac_of_mfe": 0.637838,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "t1_bank",
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 12.24,
+              "reason": "t1_bank",
+              "when": "2026-09-09T12:00:00"
+            },
+            {
+              "tranche_id": "REMAINING",
+              "shares": 5,
+              "exit_price": 12.64,
+              "reason": "hold_end",
+              "when": "2026-09-10T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        }
+      ]
+    },
+    "B": {
+      "mode": "B",
+      "label": "paper trail-everything + MAE-p50 trail (no hard bank)",
+      "book_pnl": -5.608,
+      "book_pnl_pct_of_entry_mean": -0.021765,
+      "capture_frac_of_mfe_mean": -1.251765,
+      "capture_frac_when_mfe_ge_1pct_mean": -1.251765,
+      "green_then_lost_rate": 0.5,
+      "score": -0.026765,
+      "n": 4,
+      "n_no_bars": 0,
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "FADE",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.043,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.089166,
+            "giveback_after_3pct_off_high": 0.089166,
+            "giveback_after_4pct_off_high": 0.089166,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -4.0,
+          "cost": 0.12,
+          "pnl": -4.12,
+          "pnl_pct_of_entry": -0.0515,
+          "mfe_peak_pct": 0.043,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": -1.197674,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.5,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "B"
+        },
+        {
+          "symbol": "RUNR",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.1,
+            "mae_peak_pct": 0.003,
+            "giveback_from_high_pct": 0.026364,
+            "giveback_after_3pct_off_high": 0.026364,
+            "giveback_after_4pct_off_high": 0.026364,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.0925,
+            "n_bars": 4
+          },
+          "entry_price": 20.0,
+          "shares": 8,
+          "realized_gross": 0.9344,
+          "cost": 0.24,
+          "pnl": 0.6944,
+          "pnl_pct_of_entry": 0.00434,
+          "mfe_peak_pct": 0.016,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.27125,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 20.1168,
+              "reason": "trail",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "B"
+        },
+        {
+          "symbol": "CHOP",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.01125,
+            "mae_peak_pct": 0.06,
+            "giveback_from_high_pct": 0.070457,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.055,
+            "n_bars": 2
+          },
+          "entry_price": 8.0,
+          "shares": 8,
+          "realized_gross": -3.2,
+          "cost": 0.096,
+          "pnl": -3.296,
+          "pnl_pct_of_entry": -0.0515,
+          "mfe_peak_pct": 0.01125,
+          "mae_peak_pct": 0.06,
+          "capture_frac_of_mfe": -4.577778,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "B"
+        },
+        {
+          "symbol": "BANK",
+          "entry_date": "2026-09-09",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.061667,
+            "mae_peak_pct": 0.005,
+            "giveback_from_high_pct": 0.048666,
+            "giveback_after_3pct_off_high": 0.048666,
+            "giveback_after_4pct_off_high": 0.048666,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.053333,
+            "n_bars": 3
+          },
+          "entry_price": 12.0,
+          "shares": 8,
+          "realized_gross": 1.2576,
+          "cost": 0.144,
+          "pnl": 1.1136,
+          "pnl_pct_of_entry": 0.0116,
+          "mfe_peak_pct": 0.023333,
+          "mae_peak_pct": 0.003333,
+          "capture_frac_of_mfe": 0.497143,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 12.1572,
+              "reason": "trail",
+              "when": "2026-09-09T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "B"
+        }
+      ]
+    },
+    "C": {
+      "mode": "C",
+      "label": "paper per-ticker early-trail + kill schedule",
+      "book_pnl": 18.0856,
+      "book_pnl_pct_of_entry_mean": 0.028101,
+      "capture_frac_of_mfe_mean": -0.748392,
+      "capture_frac_when_mfe_ge_1pct_mean": -0.748392,
+      "green_then_lost_rate": 0.25,
+      "score": 0.025601,
+      "n": 4,
+      "n_no_bars": 0,
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "FADE",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.043,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.089166,
+            "giveback_after_3pct_off_high": 0.089166,
+            "giveback_after_4pct_off_high": 0.089166,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.6056,
+          "cost": 0.12,
+          "pnl": 2.4856,
+          "pnl_pct_of_entry": 0.03107,
+          "mfe_peak_pct": 0.043,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.722558,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.3257,
+              "reason": "trail",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.01,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "RUNR",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.1,
+            "mae_peak_pct": 0.003,
+            "giveback_from_high_pct": 0.026364,
+            "giveback_after_3pct_off_high": 0.026364,
+            "giveback_after_4pct_off_high": 0.026364,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.0925,
+            "n_bars": 4
+          },
+          "entry_price": 20.0,
+          "shares": 8,
+          "realized_gross": 14.8,
+          "cost": 0.24,
+          "pnl": 14.56,
+          "pnl_pct_of_entry": 0.091,
+          "mfe_peak_pct": 0.1,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.91,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 21.85,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.015,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "CHOP",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.01125,
+            "mae_peak_pct": 0.06,
+            "giveback_from_high_pct": 0.070457,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.055,
+            "n_bars": 2
+          },
+          "entry_price": 8.0,
+          "shares": 8,
+          "realized_gross": -3.84,
+          "cost": 0.096,
+          "pnl": -3.936,
+          "pnl_pct_of_entry": -0.0615,
+          "mfe_peak_pct": 0.01125,
+          "mae_peak_pct": 0.06,
+          "capture_frac_of_mfe": -5.466667,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 7.52,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.06,
+          "trail_armed": false,
+          "mode": "C"
+        },
+        {
+          "symbol": "BANK",
+          "entry_date": "2026-09-09",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.061667,
+            "mae_peak_pct": 0.005,
+            "giveback_from_high_pct": 0.048666,
+            "giveback_after_3pct_off_high": 0.048666,
+            "giveback_after_4pct_off_high": 0.048666,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.053333,
+            "n_bars": 3
+          },
+          "entry_price": 12.0,
+          "shares": 8,
+          "realized_gross": 5.12,
+          "cost": 0.144,
+          "pnl": 4.976,
+          "pnl_pct_of_entry": 0.051833,
+          "mfe_peak_pct": 0.061667,
+          "mae_peak_pct": 0.005,
+          "capture_frac_of_mfe": 0.840541,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 12.64,
+              "reason": "hold_end",
+              "when": "2026-09-10T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.015,
+          "trail_armed": true,
+          "mode": "C"
+        }
+      ]
+    },
+    "D": {
+      "mode": "D",
+      "label": "shadow MT3 hard banks (1.75/2.5/4.5% of entry; +1R=+5%)",
+      "book_pnl": 3.34,
+      "book_pnl_pct_of_entry_mean": 0.001938,
+      "capture_frac_of_mfe_mean": -0.829125,
+      "capture_frac_when_mfe_ge_1pct_mean": -0.829125,
+      "green_then_lost_rate": 0.25,
+      "score": -0.000562,
+      "n": 4,
+      "n_no_bars": 0,
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "FADE",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.043,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.089166,
+            "giveback_after_3pct_off_high": 0.089166,
+            "giveback_after_4pct_off_high": 0.089166,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.7,
+          "cost": 0.12,
+          "pnl": 1.58,
+          "pnl_pct_of_entry": 0.01975,
+          "mfe_peak_pct": 0.043,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.459302,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "target",
+            "target"
+          ],
+          "exits": [
+            {
+              "id": "S1",
+              "shares": 4,
+              "exit_price": 10.175,
+              "reason": "target",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "id": "S2",
+              "shares": 4,
+              "exit_price": 10.25,
+              "reason": "target",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": false,
+          "mode": "D"
+        },
+        {
+          "symbol": "RUNR",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.1,
+            "mae_peak_pct": 0.003,
+            "giveback_from_high_pct": 0.026364,
+            "giveback_after_3pct_off_high": 0.026364,
+            "giveback_after_4pct_off_high": 0.026364,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.0925,
+            "n_bars": 4
+          },
+          "entry_price": 20.0,
+          "shares": 8,
+          "realized_gross": 3.4,
+          "cost": 0.24,
+          "pnl": 3.16,
+          "pnl_pct_of_entry": 0.01975,
+          "mfe_peak_pct": 0.041,
+          "mae_peak_pct": 0.003,
+          "capture_frac_of_mfe": 0.481707,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "target",
+            "target"
+          ],
+          "exits": [
+            {
+              "id": "S1",
+              "shares": 4,
+              "exit_price": 20.35,
+              "reason": "target",
+              "when": "2026-09-08T14:00:00"
+            },
+            {
+              "id": "S2",
+              "shares": 4,
+              "exit_price": 20.5,
+              "reason": "target",
+              "when": "2026-09-08T14:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": false,
+          "mode": "D"
+        },
+        {
+          "symbol": "CHOP",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.01125,
+            "mae_peak_pct": 0.06,
+            "giveback_from_high_pct": 0.070457,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.055,
+            "n_bars": 2
+          },
+          "entry_price": 8.0,
+          "shares": 8,
+          "realized_gross": -3.2,
+          "cost": 0.096,
+          "pnl": -3.296,
+          "pnl_pct_of_entry": -0.0515,
+          "mfe_peak_pct": 0.01125,
+          "mae_peak_pct": 0.06,
+          "capture_frac_of_mfe": -4.577778,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "id": "S1",
+              "shares": 4,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "id": "S2",
+              "shares": 4,
+              "exit_price": 7.6,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": false,
+          "mode": "D"
+        },
+        {
+          "symbol": "BANK",
+          "entry_date": "2026-09-09",
+          "entry_hour": 11,
+          "source": "fixture",
+          "path": {
+            "mfe_peak_pct": 0.061667,
+            "mae_peak_pct": 0.005,
+            "giveback_from_high_pct": 0.048666,
+            "giveback_after_3pct_off_high": 0.048666,
+            "giveback_after_4pct_off_high": 0.048666,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.053333,
+            "n_bars": 3
+          },
+          "entry_price": 12.0,
+          "shares": 8,
+          "realized_gross": 2.04,
+          "cost": 0.144,
+          "pnl": 1.896,
+          "pnl_pct_of_entry": 0.01975,
+          "mfe_peak_pct": 0.061667,
+          "mae_peak_pct": 0.005,
+          "capture_frac_of_mfe": 0.32027,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "target",
+            "target"
+          ],
+          "exits": [
+            {
+              "id": "S1",
+              "shares": 4,
+              "exit_price": 12.21,
+              "reason": "target",
+              "when": "2026-09-09T12:00:00"
+            },
+            {
+              "id": "S2",
+              "shares": 4,
+              "exit_price": 12.3,
+              "reason": "target",
+              "when": "2026-09-10T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": false,
+          "mode": "D"
+        }
+      ]
+    }
+  },
+  "degrade_notes": "dry-run fixture (no Polygon)",
+  "runtime_s": 0.144,
+  "live_files_edited": [],
+  "note": "PAPER-ONLY. Mode A calls live php_process_bar read-only. Modes B/C use php_early_trail_kill_paper.paper_process_bar. Mode D calls tsd_multi_target read-only."
+}
