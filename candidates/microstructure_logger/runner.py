@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from .constants import (
+    ABSOLUTE_MAX_DEPTH_SYMBOLS,
     BOOK_SNAPSHOT_SEC,
     DEFAULT_TOP_N,
     DEPTH_SOURCE,
     IDLE_POLL_SEC,
     JSONL_ROOT_REL,
+    PROBE_DEFAULT_SYMBOLS,
+    PROBE_MAX_SYMBOLS,
     SOURCE_L2,
     SOURCE_TAPE,
     TWS_CLIENT_ID,
@@ -55,7 +58,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--top",
         type=int,
         default=DEFAULT_TOP_N,
-        help=f"Max names to subscribe (default {DEFAULT_TOP_N}).",
+        help=(
+            f"Max names to subscribe (default {DEFAULT_TOP_N}; "
+            f"--once/--probe capped at {PROBE_MAX_SYMBOLS})."
+        ),
     )
     p.add_argument(
         "--allow-extended",
@@ -65,7 +71,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--once",
         action="store_true",
-        help="Write one L2 + one tape row per symbol then exit.",
+        help=(
+            "Write one L2 + one tape row per symbol then exit. "
+            f"Caps depth to {PROBE_MAX_SYMBOLS} names; defaults to "
+            f"{','.join(PROBE_DEFAULT_SYMBOLS)} if --symbols omitted "
+            "(does not pull Cap watchlists)."
+        ),
+    )
+    p.add_argument(
+        "--probe",
+        action="store_true",
+        help=(
+            f"L2 subscription smoke: max {PROBE_MAX_SYMBOLS} depth names "
+            f"(default {','.join(PROBE_DEFAULT_SYMBOLS)}). Implies --once."
+        ),
     )
     p.add_argument(
         "--seconds",
@@ -174,9 +193,52 @@ def _dry_cycle(symbols: list[str], writer: JsonlWriter) -> int:
     return 0
 
 
+def apply_depth_subscribe_limits(args: argparse.Namespace) -> argparse.Namespace:
+    """
+    Cap L2 depth subscriptions so probes never request Cap-scale lists.
+
+    WHY: Paper SMART depth (reqMktDepth) is fragile — 100+ names (or even a
+    full Cap watchlist) can fail. --once / --probe stay at 1–3 symbols.
+    Continuous logging still uses DEFAULT_TOP_N but never above the hard max.
+    """
+    probeish = bool(getattr(args, "probe", False) or getattr(args, "once", False))
+    if getattr(args, "probe", False):
+        args.once = True
+    top = max(1, int(args.top))
+    if probeish:
+        if top > PROBE_MAX_SYMBOLS:
+            print(
+                f"  probe/once depth cap: --top {top} -> {PROBE_MAX_SYMBOLS} "
+                "(few symbols at a time)"
+            )
+            top = PROBE_MAX_SYMBOLS
+        if not (args.symbols or "").strip():
+            args.symbols = ",".join(PROBE_DEFAULT_SYMBOLS)
+            print(
+                f"  probe/once default symbols={args.symbols} "
+                "(skip Cap watchlist artifacts)"
+            )
+    if top > ABSOLUTE_MAX_DEPTH_SYMBOLS:
+        print(
+            f"  absolute depth cap: --top {top} -> {ABSOLUTE_MAX_DEPTH_SYMBOLS}"
+        )
+        top = ABSOLUTE_MAX_DEPTH_SYMBOLS
+    args.top = top
+    # Also truncate an explicit --symbols list that exceeds the capped top.
+    parsed = _parse_symbols(args.symbols)
+    if parsed and len(parsed) > top:
+        kept = parsed[:top]
+        print(
+            f"  truncating --symbols {len(parsed)} -> {top}: {','.join(kept)}"
+        )
+        args.symbols = ",".join(kept)
+    return args
+
+
 def run(args: argparse.Namespace) -> int:
     """Resolve universe, optionally connect clientId 72, log A+B JSONL."""
     assert_paper_endpoint(args.host, int(args.port), TWS_CLIENT_ID)
+    args = apply_depth_subscribe_limits(args)
     root = repo_root()
     uni = resolve_universe(
         root=root,
@@ -206,13 +268,22 @@ def run(args: argparse.Namespace) -> int:
             writer.close()
 
     now = _utcnow()
-    if not should_stream(now, allow_extended=bool(args.allow_extended)) and args.once:
+    streaming = should_stream(now, allow_extended=bool(args.allow_extended))
+    # --probe must still hit TWS even overnight (CLOSED) so smoke gets a real
+    # connect result instead of a silent session skip. Continuous/--once
+    # remain RTH-primary (plus PRE/POST with --allow-extended).
+    if not streaming and args.once and not bool(getattr(args, "probe", False)):
         print(
             f"  skip: session={session_tag(now)} ET={to_et(now).strftime('%H:%M:%S')} "
             f"(RTH-primary; pass --allow-extended to stream)"
         )
         writer.close()
         return 0
+    if not streaming and bool(getattr(args, "probe", False)):
+        print(
+            f"  probe: session={session_tag(now)} ET={to_et(now).strftime('%H:%M:%S')} "
+            "outside PRE/RTH/POST — still connecting for L2 smoke"
+        )
 
     stop = {"flag": False}
 
@@ -234,7 +305,9 @@ def run(args: argparse.Namespace) -> int:
             now = _utcnow()
             if args.seconds > 0 and (time.monotonic() - started) >= args.seconds:
                 break
-            if not should_stream(now, allow_extended=bool(args.allow_extended)):
+            streaming_now = should_stream(now, allow_extended=bool(args.allow_extended))
+            probe_force = bool(getattr(args, "probe", False))
+            if not streaming_now and not probe_force:
                 if worker is not None:
                     print(f"  idle session={session_tag(now)} — cancelling subscriptions")
                     worker.cancel_subscriptions()
@@ -298,7 +371,7 @@ def run(args: argparse.Namespace) -> int:
                 if worker is not None and worker.error_2152:
                     extra = " error_2152=yes"
                 print(f"  snapshot n={snapshots} session={session_tag(now)}{extra}")
-            if args.once:
+            if args.once or probe_force:
                 break
             time.sleep(BOOK_SNAPSHOT_SEC)
         return 0

@@ -86,8 +86,8 @@ the first ~60s).
 
 ## Universe
 
-Default: top **8** (`--top N`) liquid Peak Hour names, merged from local
-artifacts if present (read-only JSON, no TSD imports):
+Default (continuous): top **8** (`--top N`) liquid Peak Hour names, merged
+from local artifacts if present (read-only JSON, no TSD imports):
 
 1. `candidates/tsd_scan_pipeline/results/last_1h_launch.json`
 2. `candidates/tsd_watch_queue.json`
@@ -98,7 +98,16 @@ continuation / launch / scan score; rank is a small tie-break.
 
 `--symbols AAPL,MSFT` overrides artifacts entirely (still capped by `--top`).
 
-If all artifacts are missing/empty, fallback **dry-structure** names:
+**L2 probe / `--once` / `--probe` (mandatory few-at-a-time):** depth is
+capped at **3** names. If `--symbols` is omitted, defaults to **`SPY` only**
+and **does not** pull Cap watchlists (avoids 8–100+ simultaneous
+`reqMktDepth`). Example: `--probe --allow-extended --seconds 20` or
+`--once --symbols SPY,AAPL --allow-extended`.
+
+Absolute depth ceiling for any mode: **8** (never Cap-scale / 100+).
+
+If all artifacts are missing/empty (continuous only), fallback **dry-structure**
+names:
 
 `SPY QQQ IWM AAPL MSFT NVDA TSLA AMD`
 
@@ -121,6 +130,7 @@ These are **not** Peak Hour signals — documented on stdout as fallback.
 .\candidates\start_microstructure_logger.ps1
 .\candidates\start_microstructure_logger.ps1 -Top 8 -AllowExtended
 .\candidates\start_microstructure_logger.ps1 -Symbols "AAPL,MSFT,NVDA" -Once
+.\candidates\start_microstructure_logger.ps1 -Probe -AllowExtended -Seconds 20
 
 # stop
 .\candidates\stop_microstructure_logger.ps1
@@ -131,8 +141,14 @@ Equivalent:
 ```powershell
 $env:PYTHONPATH = (Get-Location)
 .\venv\Scripts\python.exe -u -m candidates.microstructure_logger --top 8
+.\venv\Scripts\python.exe -u -m candidates.microstructure_logger --probe --allow-extended --seconds 20
+.\venv\Scripts\python.exe -u -m candidates.microstructure_logger --once --symbols SPY,AAPL --allow-extended --seconds 20
 .\venv\Scripts\python.exe -u -m candidates.microstructure_logger --no-connect --once
 ```
+
+`--probe` / `--once` keep depth at **1–3** names (default SPY). Continuous
+`--top 8` is for overnight research logging only — do **not** use Cap-scale
+lists for L2 smoke.
 
 `--no-connect` writes null-schema rows (no TWS). Use it to verify path/schema
 on a machine without TWS. Cloud agents must not pass a live connect.

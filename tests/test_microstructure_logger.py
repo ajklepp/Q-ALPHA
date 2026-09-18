@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from candidates.microstructure_logger.constants import (  # noqa: E402
     DEPTH_SOURCE,
     FALLBACK_SYMBOLS,
+    PROBE_MAX_SYMBOLS,
     ROW_KEYS,
     SOURCE_L2,
     TEST01_REQUIRED_KEYS,
@@ -337,6 +338,32 @@ def test_cli_no_connect_writes_test01_rows() -> None:
                 assert row["tape_burst_z"] is None
                 assert row["print_imb_5s"] is None
                 assert row["depth_source"] == DEPTH_SOURCE
+
+
+def test_probe_once_caps_depth_to_few_symbols() -> None:
+    """--once/--probe must never subscribe Cap-scale depth lists."""
+    from candidates.microstructure_logger.runner import apply_depth_subscribe_limits, parse_args
+
+    assert PROBE_MAX_SYMBOLS == 3
+
+    capped = apply_depth_subscribe_limits(
+        parse_args(["--once", "--top", "8", "--symbols", "SPY,QQQ,IWM,AAPL,MSFT,NVDA"])
+    )
+    assert capped.top == PROBE_MAX_SYMBOLS
+    assert _parse_symbols_helper(capped.symbols) == ["SPY", "QQQ", "IWM"]
+
+    probe = apply_depth_subscribe_limits(parse_args(["--probe", "--top", "100"]))
+    assert probe.once is True
+    assert probe.top == PROBE_MAX_SYMBOLS
+    assert probe.symbols == "SPY"
+
+    continuous = apply_depth_subscribe_limits(parse_args(["--top", "8"]))
+    assert continuous.top == 8
+    assert (continuous.symbols or "") == ""
+
+
+def _parse_symbols_helper(raw: str) -> list[str]:
+    return [part.strip().upper() for part in raw.split(",") if part.strip()]
 
 
 def test_run_refuses_live_port() -> None:
