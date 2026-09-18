@@ -94,20 +94,37 @@ To turn it back on: delete the line / unset (default ON), or set
 
 ## Laptop verify before next RTH
 
-From the laptop (next to live `.env` + scan JSON):
+**Pull tip (cloud-ready for laptop agents):** `origin/main` must be at or
+after **`4dda75accae108eb3943e62d9581dd5d85a9fc46`** (includes #22/#23/#15/#24/#18/#25/#26/#27:
+all-trailing, Cap scrub, momentum-rank, order hygiene, `cancel_orphan_kills`,
+Track100 paper_book mirror). Prefer tip SHA after any later squash.
+
+Paper TWS **7497** only (never 7496). Never Telegram. Aaron does not paste CLI —
+a laptop / self-hosted agent runs the pull + smoke.
+
+From the laptop (`Documents\Q-ALPHA`, next to live `.env` + scan JSON):
 
 ```text
-git pull
-# confirm flags default ON (or unset)
-py -3 -m unittest tests.test_php_momentum_rank tests.test_php_equal_signal -v
-py -3 candidates/tsd_scan_pipeline/php_momentum_rank_counterfactual.py --date 2026-09-14
+git pull origin main
+git rev-parse HEAD
+# expect tip >= 4dda75a (or newer main)
+
+# offline unit gates (venv)
+.\venv\Scripts\python.exe -m unittest tests.test_php_momentum_rank tests.test_php_equal_signal tests.test_sync_kill_no_rewrite tests.test_entry_buy_dedupe tests.test_cancel_orphan_kills -v
+
+# confirm start script pins dumps OFF
+findstr /C:"TSD_LIVE_STRUCTURE_STOP" candidates\start_tsd_trail_monitor_scheduled.ps1
 ```
 
-Next live `:15` log / Telegram must show:
+After trail + scheduler are up on **7497**, smoke:
 
-```text
-equal_signal=ON  momentum_rank=ON  score=v1.6+equal_signal+momentum_rank
-```
+- Trail banner: all-trailing / `structure_stop` dumps OFF (not REVERT path ON)
+- No `0.0→` kill rewrite storm; ATRC at most one working STP LMT
+- If duplicate ATRC kills remain: `cancel_orphan_kills.py --dry-run` then `--live --symbol ATRC` (do not flatten long)
+- Cap exclude OPEN / in-flight only; CLOSED names Cap-scrubbed (no manual CLEARED_STALE)
+- First `:15`: `equal_signal=ON  momentum_rank=ON  score=v1.6+equal_signal+momentum_rank`
+- No stacked Day BUY LMTs after no_fill / requote
+- Optional L2: microstructure logger once (SPY/AAPL); 2152 partial OK
 
 If you see bare `score=v1.6` with no `momentum_rank=`, the tick is not on
 this code.
@@ -136,8 +153,10 @@ the 3R paper shadow.
 
 ## Canonical flag (laptop)
 
-`TSD_LIVE_STRUCTURE_STOP` — default **OFF**. Laptop start script pins
-`TSD_LIVE_STRUCTURE_STOP=0` **and** `PHP_STRUCTURE_STOP_EXITS=0`.
+`TSD_LIVE_STRUCTURE_STOP` — default **OFF**. Laptop start script
+`candidates/start_tsd_trail_monitor_scheduled.ps1` pins
+`TSD_LIVE_STRUCTURE_STOP=0` **and** `PHP_STRUCTURE_STOP_EXITS=0` so a stale
+User env cannot restore dumps.
 
 `PHP_STRUCTURE_STOP_EXITS` is an **alias** of the same gate (not a second
 path). Either variable `=1` restores Phase 2.5 dumps.

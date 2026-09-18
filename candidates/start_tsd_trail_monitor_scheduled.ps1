@@ -15,6 +15,11 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = $Root
 
+# Live locks: all-trailing ON (structure/BE dumps OFF). Pin both so a stale
+# User env =1 cannot silently restore Phase 2.5 dumps. Revert: see REVERT.md.
+$env:TSD_LIVE_STRUCTURE_STOP = "0"
+$env:PHP_STRUCTURE_STOP_EXITS = "0"
+
 $Python = Join-Path $Root "venv\Scripts\python.exe"
 $Runner = Join-Path $CandDir "tsd_scan_pipeline\tsd_trail_monitor.py"
 
