@@ -174,6 +174,67 @@ def remaining_shares(trail_doc: dict[str, Any]) -> int:
     return sum(t.shares for t in state.tranches if not t.closed)
 
 
+def set_remaining_shares(trail_doc: dict[str, Any], target: int) -> dict[str, Any]:
+    """
+    Force open-tranche inventory to *target* shares (broker truth).
+
+    Does not invent fill prices. Shrinks the runner (last open tranche) first
+    so T1–T3 bank history stays intact. Grows the last open tranche, or
+    reopens the last closed tranche, when the broker holds more than the book.
+    Target 0 closes every open tranche. Mutates *trail_doc* in place.
+    """
+    target = max(0, int(target))
+    tranches = list(trail_doc.get("tranches") or [])
+    current = remaining_shares(trail_doc) if tranches else 0
+    if current == target:
+        return trail_doc
+    if target == 0:
+        for tranche in tranches:
+            if tranche.get("closed"):
+                continue
+            tranche["closed"] = True
+            tranche["trailing"] = False
+            tranche["exit_reason"] = tranche.get("exit_reason") or "broker_qty_sync"
+        trail_doc["tranches"] = tranches
+        return trail_doc
+    if current > target:
+        excess = current - target
+        for tranche in reversed(tranches):
+            if excess <= 0:
+                break
+            if tranche.get("closed"):
+                continue
+            shares = int(tranche.get("shares") or 0)
+            if shares <= 0:
+                continue
+            take = min(shares, excess)
+            leftover = shares - take
+            excess -= take
+            if leftover <= 0:
+                tranche["closed"] = True
+                tranche["trailing"] = False
+                tranche["shares"] = 0
+                tranche["exit_reason"] = tranche.get("exit_reason") or "broker_qty_sync"
+            else:
+                tranche["shares"] = leftover
+        trail_doc["tranches"] = tranches
+        return trail_doc
+    need = target - current
+    open_tranches = [t for t in reversed(tranches) if not t.get("closed")]
+    if open_tranches:
+        open_tranches[0]["shares"] = int(open_tranches[0].get("shares") or 0) + need
+    elif tranches:
+        last = tranches[-1]
+        last["closed"] = False
+        last["trailing"] = False
+        last["exit_price"] = None
+        last["exit_time"] = None
+        last["exit_reason"] = None
+        last["shares"] = need
+    trail_doc["tranches"] = tranches
+    return trail_doc
+
+
 def is_t4_only(trail_doc: dict[str, Any]) -> bool:
     """
     True when only runner inventory remains (T3 and/or T4; no T1/T2).

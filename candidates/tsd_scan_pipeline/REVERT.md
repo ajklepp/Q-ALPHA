@@ -110,7 +110,7 @@ git rev-parse HEAD
 # expect tip >= 4dda75a (or newer main)
 
 # offline unit gates (venv)
-.\venv\Scripts\python.exe -m unittest tests.test_php_momentum_rank tests.test_php_equal_signal tests.test_sync_kill_no_rewrite tests.test_entry_buy_dedupe tests.test_cancel_orphan_kills -v
+.\venv\Scripts\python.exe -m unittest tests.test_php_momentum_rank tests.test_php_equal_signal tests.test_sync_kill_no_rewrite tests.test_entry_buy_dedupe tests.test_cancel_orphan_kills tests.test_tsd_broker_ops tests.test_tsd_watch_queue -v
 
 # confirm start script pins dumps OFF
 findstr /C:"TSD_LIVE_STRUCTURE_STOP" candidates\start_tsd_trail_monitor_scheduled.ps1
@@ -201,3 +201,38 @@ trail `--once` so `sync_kill_quantity` ratchets the working stop UP if needed.
 ## Default
 
 `TSD_LIVE_STRUCTURE_STOP` / `PHP_STRUCTURE_STOP_EXITS` default **OFF** (`0` / unset).
+
+---
+
+# Broker-truth qty reconcile (book ← TWS)
+
+**Owner:** Peak Hour ops  
+**Flag:** `TSD_BROKER_QTY_RECONCILE` (default **ON**)
+
+After MMED (fill/log 12, book 7, TWS 2) and ATRC (3× STP LMT @53.13 from
+different clientIds), trail + TWS sync re-read broker qty and keep exactly
+one protective SELL.
+
+- **Qty.** OPEN remaining / kill target follow TWS, not fill-log arithmetic.
+  Broker ≈ 0 closes the book leg and Cap-scrubs CONFIRMED → `CLOSED_SCRUB`.
+- **Single kill.** `enforce_single_protective_kill` keeps one working
+  STP/STP LMT (book `kill_order_id` if qty-matched, else highest `auxPrice`),
+  cancels the rest (other clientIds when cancelable), rearms if naked, and
+  rewrites qty to position size without stacking a duplicate. Ratchet is
+  still **UP only**; `order_stop_price` reads `auxPrice` first.
+- Does **not** change ranking, exit gates, trail width, or structure-stop.
+
+### One-step revert (qty force only)
+
+Set **`TSD_BROKER_QTY_RECONCILE=0`** in repo `.env` or the trail-monitor /
+TWS-sync process env. Next trail tick and TWS sync skip book←broker remaining
+updates. Single-kill hygiene stays on (AG hard fail if ≠1 protective).
+
+Confirm in the log: no `QTY_SYNC book→broker` lines after a partial fill.
+To turn qty force back on: unset the var (default ON) or set `1`.
+
+Offline:
+
+```
+.\venv\Scripts\python.exe -m unittest tests.test_tsd_broker_ops tests.test_sync_kill_no_rewrite tests.test_tsd_watch_queue -v
+```

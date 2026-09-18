@@ -1026,6 +1026,41 @@ def run_tws_intraday_sync(
             print(f"  TSD broker-kill reconcile warn: {exc}")
             summary["sync_errors"].append(f"tsd_reconcile:{exc}")
 
+        try:
+            from tsd_scan_pipeline.tsd_capacity import load_state, save_state
+            from tsd_scan_pipeline.tsd_exit import (
+                enforce_single_protective_kill,
+                reconcile_open_position_to_broker,
+            )
+
+            book = load_state()
+            qty_changed: list[str] = []
+            for pos in book.get("positions") or []:
+                if str(pos.get("status") or "").upper() != "OPEN":
+                    continue
+                rec = reconcile_open_position_to_broker(
+                    ib, pos, dry_run=False, book=book,
+                )
+                if rec.get("changed") or rec.get("closed"):
+                    qty_changed.append(str(pos.get("symbol") or "").upper())
+                if (
+                    not rec.get("closed")
+                    and str(pos.get("status") or "").upper() == "OPEN"
+                ):
+                    for leg in pos.get("legs") or []:
+                        if str(leg.get("status") or "").upper() != "OPEN":
+                            continue
+                        enforce_single_protective_kill(
+                            ib, str(pos.get("symbol") or ""), leg, dry_run=False,
+                        )
+            if qty_changed:
+                save_state(book)
+                print(f"  TSD qty sync book←broker: {qty_changed}")
+            summary["tsd_qty_sync"] = qty_changed
+        except Exception as exc:
+            print(f"  TSD qty-sync warn: {exc}")
+            summary["sync_errors"].append(f"tsd_qty_sync:{exc}")
+
         # --- TSD sync first (clean MD subscriptions before gap-agent marks) ---
         try:
             from tsd_supabase_sync import sync_tsd_positions_to_supabase

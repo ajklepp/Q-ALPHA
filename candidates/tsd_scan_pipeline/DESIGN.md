@@ -78,6 +78,7 @@ Pacing: **~2.5s/symbol** for historical pulls.
 - After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet **UP only** via `sync_kill_quantity`).
 - **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%` — lock-profit is the tighter trail after ~+3–4% MFE, not a hard BE dump.
 - **LIVE structure_stop / be_lock_1r dumps are OFF** (`TSD_LIVE_STRUCTURE_STOP` default `0`; `PHP_STRUCTURE_STOP_EXITS` is the same gate). Emergency kill remains the single protective SELL. Restore dumps: see `REVERT.md`.
+- **Broker-truth qty** (`TSD_BROKER_QTY_RECONCILE` default ON): after fills / trail ticks / TWS sync, OPEN remaining matches TWS; exactly one working protective SELL (`enforce_single_protective_kill`). Cap-scrub on flat → `CLOSED_SCRUB`. Disable qty force: `TSD_BROKER_QTY_RECONCILE=0` (see `REVERT.md`).
 - After ~+3–4% MFE, `maybe_lock_profit_via_trail` tightens remaining tranche trail widths and may ratchet kill **UP** (capped under last). Not a second broker BE sell.
 - Offline book helper: `migrate_structure_stop_to_trail.py` (dry-run default). ATRC already cleared on the laptop; helper remains for other opens.
 - **Do not** place primary kill at structure area-low (Chat A + autopsy: net negative on runners).

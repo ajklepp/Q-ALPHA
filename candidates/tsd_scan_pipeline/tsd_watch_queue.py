@@ -36,13 +36,24 @@ from tsd_scan_pipeline.tsd_launch_score import enrich_launch_fields
 
 ET = pytz.timezone("America/New_York")
 
-WatchStatus = Literal["WATCHING", "CONFIRMED", "SKIPPED", "CLEARED_STALE"]
+WatchStatus = Literal[
+    "WATCHING", "CONFIRMED", "SKIPPED", "CLEARED_STALE", "CLOSED_SCRUB",
+]
 QUEUE_PATH = state_path("tsd_watch_queue.json")
 # Stale CONFIRMED rows (prior session, now flat) are downgraded so they cannot
 # permanently block NEW takes. Same-session CONFIRMED stays in-flight unless
 # the enter path never opened risk (already_long flat / no fill) OR the book
 # closes and Cap scrub clears the confirm (scrub_confirmed_on_book_close).
 STALE_CONFIRMED_STATUS = "CLEARED_STALE"
+# Event-driven Cap scrub when the local book / broker goes flat.
+CLOSED_SCRUB_STATUS = "CLOSED_SCRUB"
+# Cap-exclude ignores these — they are not in-flight CONFIRMED.
+_CAP_IGNORE_STATUSES = frozenset({
+    STALE_CONFIRMED_STATUS,
+    CLOSED_SCRUB_STATUS,
+    "SKIPPED",
+    "WATCHING",
+})
 # Skip/fail reasons that mean CONFIRMED must not occupy a Cap in-flight slot.
 # 2026-09-15 IRD: MICRO CONFIRM then already_long (open=False) left CONFIRMED.
 NO_RISK_CONFIRM_REASON_MARKERS = (
@@ -148,8 +159,10 @@ def is_confirmed_in_flight(
     session (fill pending / same-day lock). Not in-flight when the enter
     path skipped/failed without opening risk (already_long + flat, no fill).
     Prior-day CONFIRMED that is now flat is a ghost confirm and must not block.
+    CLOSED_SCRUB / CLEARED_STALE never block Cap.
     """
-    if str(row.get("status") or "").upper() != "CONFIRMED":
+    status = str(row.get("status") or "").upper()
+    if status in _CAP_IGNORE_STATUSES or status != "CONFIRMED":
         return False
     sym = str(row.get("symbol") or "").upper()
     if not sym:
@@ -276,7 +289,7 @@ def scrub_confirmed_on_book_close(
         return False
     when = _parse_et_datetime(closed_at) or datetime.now(ET)
     when_iso = when.isoformat()
-    row["status"] = STALE_CONFIRMED_STATUS
+    row["status"] = CLOSED_SCRUB_STATUS
     row["skip_reason"] = reason or "book_closed"
     row["cleared_stale_at"] = when_iso
     row["confirmed_cleared_on_close"] = True
@@ -288,7 +301,7 @@ def scrub_confirmed_on_book_close(
     state["queue"][idx] = row
     save_queue(state)
     print(
-        f"  QUEUE SCRUB {sym}: CONFIRMED → {STALE_CONFIRMED_STATUS} "
+        f"  QUEUE SCRUB {sym}: CONFIRMED → {CLOSED_SCRUB_STATUS} "
         f"({reason}; book CLOSED)",
         flush=True,
     )

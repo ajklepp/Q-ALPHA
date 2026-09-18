@@ -326,7 +326,7 @@ class TestGhostConfirmed(unittest.TestCase):
         self.assertEqual(wq.in_flight_confirmed_symbols(book, now=now), set())
 
     def test_scrub_confirmed_on_book_close_clears_cap(self):
-        """Same-session CONFIRMED + book CLOSED → CLEARED_STALE; Cap free."""
+        """Same-session CONFIRMED + book CLOSED → CLOSED_SCRUB; Cap free."""
         self._write_queue([
             {
                 "symbol": "ATRC",
@@ -342,7 +342,7 @@ class TestGhostConfirmed(unittest.TestCase):
             )
         )
         row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
-        self.assertEqual(row["status"], "CLEARED_STALE")
+        self.assertEqual(row["status"], "CLOSED_SCRUB")
         self.assertEqual(row["skip_reason"], "book_closed")
         self.assertTrue(row.get("confirmed_cleared_on_close"))
         book = {
@@ -359,6 +359,26 @@ class TestGhostConfirmed(unittest.TestCase):
         self.assertEqual(wq.in_flight_confirmed_symbols(book, now=now), set())
         self.assertFalse(
             wq.is_confirmed_in_flight(row, now=now, open_syms=set()),
+        )
+
+    def test_closed_scrub_status_never_cap_excludes(self):
+        """Cap exclude must ignore CLOSED_SCRUB even on the same session."""
+        self._write_queue([
+            {
+                "symbol": "MMED",
+                "status": "CLOSED_SCRUB",
+                "confirmed_at": "2026-09-17T10:00:00-04:00",
+                "skip_reason": "book_closed",
+            },
+        ])
+        now = wq.ET.localize(datetime(2026, 9, 17, 15, 15))
+        row = json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"][0]
+        self.assertFalse(
+            wq.is_confirmed_in_flight(row, now=now, open_syms=set()),
+        )
+        self.assertEqual(
+            wq.in_flight_confirmed_symbols({"positions": []}, now=now),
+            set(),
         )
 
     def test_scrub_skips_newer_confirm_after_close(self):
@@ -442,7 +462,7 @@ class TestGhostConfirmed(unittest.TestCase):
             r["symbol"]: r
             for r in json.loads(self._queue_path.read_text(encoding="utf-8"))["queue"]
         }
-        self.assertEqual(by_sym["ATRC"]["status"], "CLEARED_STALE")
+        self.assertEqual(by_sym["ATRC"]["status"], "CLOSED_SCRUB")
         self.assertEqual(by_sym["HPE"]["status"], "CONFIRMED")
         self.assertEqual(by_sym["OPENX"]["status"], "CONFIRMED")
         self.assertEqual(

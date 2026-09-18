@@ -5,7 +5,9 @@ Mirrors tsd_entry session rules for SELL legs (trail / kill / time_cap).
 """
 from __future__ import annotations
 
+import os
 import time
+from datetime import datetime
 from typing import Any
 
 from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopLimitOrder
@@ -19,7 +21,7 @@ from tsd_scan_pipeline.tsd_entry import (
     session_allows_exit_orders,
 )
 from tsd_scan_pipeline.tsd_pool import release_on_exit
-from tsd_scan_pipeline.tsd_trail import remaining_shares
+from tsd_scan_pipeline.tsd_trail import remaining_shares, set_remaining_shares
 
 EXIT_LIMIT_SLIP = 0.998
 # Aggressive AH/overnight limit for kill_escalate when STP LMT is stuck through.
@@ -37,6 +39,10 @@ _MAX_SANE_PRICE = 1.0e7
 _TERMINAL_ORDER_STATUS = frozenset(
     {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 )
+# Book remaining ← TWS position. Default ON. Set 0/false/off to disable.
+BROKER_QTY_RECONCILE_ENV = "TSD_BROKER_QTY_RECONCILE"
+_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
+_ENV_FALSE = frozenset({"0", "false", "no", "off"})
 
 
 def _sane_price(value: Any) -> float:
@@ -75,13 +81,13 @@ def _normalize_order_type(order_type: Any) -> str:
     return str(order_type or "").upper().replace("_", " ").replace("-", " ")
 
 
-def is_protective_sell_stop(order: Any) -> bool:
-    """True for broker kill types (STP / STP LMT), not TRAIL or naked LMT."""
+def is_protective_sell_stop(order: Any, *, include_trail: bool = False) -> bool:
+    """True for broker kill types (STP / STP LMT). TRAIL only when requested."""
     if str(getattr(order, "action", "") or "").upper() != "SELL":
         return False
     otype = _normalize_order_type(getattr(order, "orderType", ""))
     if "TRAIL" in otype:
-        return False
+        return bool(include_trail)
     if otype in {"STP", "STP LMT", "STPLMT", "STOP", "STOP LIMIT"}:
         return True
     return "STP" in otype
@@ -108,7 +114,12 @@ def kill_stop_needs_ratchet(
     return (tgt - cur) >= float(eps) - 1e-12
 
 
-def _working_protective_kills(ib: IB, symbol: str) -> list[Any]:
+def _working_protective_kills(
+    ib: IB,
+    symbol: str,
+    *,
+    include_trail: bool = False,
+) -> list[Any]:
     """Working SELL STP / STP LMT orders for *symbol* (any clientId)."""
     sym = symbol.upper()
     out: list[Any] = []
@@ -120,7 +131,9 @@ def _working_protective_kills(ib: IB, symbol: str) -> list[Any]:
         try:
             if str(getattr(trade.contract, "symbol", "") or "").upper() != sym:
                 continue
-            if not is_protective_sell_stop(trade.order):
+            if not is_protective_sell_stop(
+                trade.order, include_trail=include_trail,
+            ):
                 continue
             status = str(trade.orderStatus.status or "")
             if status in _TERMINAL_ORDER_STATUS:
@@ -170,6 +183,560 @@ def cancel_extra_protective_kills(
             f"(kept oid={keep})"
         )
     return cancelled
+
+
+def broker_qty_reconcile_enabled() -> bool:
+    """True when OPEN remaining must follow TWS qty (default ON)."""
+    raw = (os.environ.get(BROKER_QTY_RECONCILE_ENV) or "1").strip().lower()
+    if raw in _ENV_FALSE:
+        return False
+    return raw in _ENV_TRUE or raw == ""
+
+
+def reread_broker_qty(ib: IB, symbol: str) -> float | None:
+    """
+    Force a TWS position snapshot for *symbol*.
+
+    Broker is source of truth. Returns None when the snapshot cannot be read
+    so callers do not invent a flat from a failed request.
+    """
+    sym = symbol.upper()
+    try:
+        req = getattr(ib, "reqPositions", None)
+        if callable(req):
+            req()
+            ib.sleep(0.35)
+    except Exception as exc:
+        print(f"  {sym} broker qty refresh warn: {exc}")
+    try:
+        return float(_broker_qty_map(ib).get(sym, 0.0))
+    except Exception as exc:
+        print(f"  {sym} broker qty unavailable: {exc}")
+        return None
+
+
+def _leg_remaining(leg: dict[str, Any]) -> int:
+    """Open remaining on a book leg; trail inventory wins over stale shares."""
+    trail = leg.get("trail") or {}
+    if trail.get("tranches"):
+        try:
+            return int(remaining_shares(trail))
+        except Exception:
+            pass
+    return int(leg.get("shares") or 0)
+
+
+def apply_broker_qty_to_open_leg(
+    leg: dict[str, Any],
+    broker_qty: int,
+) -> dict[str, Any]:
+    """
+    Force OPEN remaining (+ kill target qty) to broker shares.
+
+    Prefers TWS qty over fill-log arithmetic. broker_qty<=0 closes the leg.
+    Mutates *leg*. Does not place orders.
+    """
+    target = max(0, int(broker_qty))
+    trail = dict(leg.get("trail") or {})
+    book_was = _leg_remaining(leg)
+    if trail.get("tranches"):
+        set_remaining_shares(trail, target)
+        still = int(remaining_shares(trail))
+    else:
+        still = target
+    leg["shares"] = still
+    if still <= 0:
+        leg["status"] = "CLOSED"
+        trail["kill_stop_cancelled"] = True
+        leg["kill_order_id"] = None
+    else:
+        if str(leg.get("status") or "").upper() != "OPEN":
+            leg["status"] = "OPEN"
+        trail["kill_stop_cancelled"] = False
+    leg["trail"] = trail
+    return {
+        "changed": book_was != still,
+        "book_was": book_was,
+        "broker_qty": target,
+        "remaining": still,
+        "closed": still <= 0,
+    }
+
+
+def select_keep_protective_trade(
+    working: list[Any],
+    *,
+    prefer_oid: int | None,
+    target_qty: int,
+) -> Any | None:
+    """
+    Pick the single protective SELL to keep.
+
+    Preference:
+      1. Book kill_order_id if still working AND qty matches
+      2. Highest auxPrice / stop (tightest long) among qty-matched
+      3. Book oid if working (qty will be rewritten)
+      4. Highest auxPrice among remaining working
+    """
+    if not working:
+        return None
+    target = max(0, int(target_qty))
+
+    def _oid(trade: Any) -> int:
+        try:
+            return int(trade.order.orderId or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _qty(trade: Any) -> int:
+        try:
+            return int(trade.order.totalQuantity or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _rank(trade: Any) -> tuple[float, int]:
+        # Highest stop first (tightest long), then lowest oid for stability.
+        return (-order_stop_price(trade.order), _oid(trade))
+
+    qty_matched = [t for t in working if _qty(t) == target and _oid(t) > 0]
+    if prefer_oid is not None:
+        for trade in qty_matched:
+            if _oid(trade) == int(prefer_oid):
+                return trade
+    if qty_matched:
+        return sorted(qty_matched, key=_rank)[0]
+    if prefer_oid is not None:
+        for trade in working:
+            if _oid(trade) == int(prefer_oid) and _oid(trade) > 0:
+                return trade
+    live = [t for t in working if _oid(t) > 0]
+    if not live:
+        return None
+    return sorted(live, key=_rank)[0]
+
+
+def _now_et_iso() -> str:
+    """ET timestamp for book close / Cap scrub."""
+    try:
+        import pytz
+
+        return datetime.now(pytz.timezone("America/New_York")).isoformat()
+    except Exception:
+        return datetime.now().isoformat()
+
+
+def _scrub_cap_on_flat(symbol: str, *, closed_at: str, dry_run: bool) -> None:
+    """Persist Cap scrub when a name goes broker/book flat."""
+    if dry_run:
+        return
+    try:
+        from tsd_scan_pipeline.tsd_watch_queue import scrub_confirmed_on_book_close
+
+        scrub_confirmed_on_book_close(
+            symbol, closed_at=closed_at, reason="book_closed",
+        )
+    except Exception as exc:
+        print(f"  Cap scrub warn {symbol}: {exc}")
+
+
+def _close_position_if_all_legs_flat(
+    pos: dict[str, Any],
+    symbol: str,
+    *,
+    dry_run: bool = False,
+    closed_at: str | None = None,
+) -> bool:
+    """Mark the book row CLOSED and Cap-scrub when every leg is flat."""
+    legs = pos.get("legs") or []
+    if not legs:
+        return False
+    if any(str(leg.get("status") or "").upper() != "CLOSED" for leg in legs):
+        return False
+    when = closed_at or _now_et_iso()
+    pos["status"] = "CLOSED"
+    pos["closed_at"] = when
+    print(f"  {symbol}: position CLOSED (broker qty sync)")
+    _scrub_cap_on_flat(symbol, closed_at=when, dry_run=dry_run)
+    return True
+
+
+def _cancel_oids_with_owner_retry(
+    ib: IB,
+    order_ids: set[int],
+    *,
+    host: str = "127.0.0.1",
+    port: int = 7497,
+    owner_retry: bool = True,
+) -> list[int]:
+    """Cancel oids on this connection, then retry as owner clientIds."""
+    if not order_ids:
+        return []
+    cancelled = set(_cancel_oids_on_ib(ib, set(order_ids)))
+    remaining = set(order_ids) - cancelled
+    if not remaining or not owner_retry:
+        return sorted(cancelled)
+    owner_ids: list[int] = []
+    for trade in list(ib.openTrades() or []):
+        try:
+            oid = int(trade.order.orderId or 0)
+        except Exception:
+            continue
+        if oid not in remaining:
+            continue
+        cid = int(getattr(trade.order, "clientId", 0) or 0)
+        if cid and cid not in owner_ids:
+            owner_ids.append(cid)
+    for cid in OWNER_CANCEL_CLIENT_IDS:
+        if cid not in owner_ids:
+            owner_ids.append(cid)
+    primary_cid = int(getattr(getattr(ib, "client", None), "clientId", -1) or -1)
+    for cid in owner_ids:
+        leftover = remaining - cancelled
+        if not leftover:
+            break
+        if cid == primary_cid:
+            cancelled.update(_cancel_oids_on_ib(ib, leftover))
+            continue
+        temp = IB()
+        try:
+            temp.connect(host, port, clientId=cid, timeout=8)
+        except Exception as exc:
+            print(f"  owner clientId={cid} connect skip: {exc}")
+            try:
+                temp.disconnect()
+            except Exception:
+                pass
+            continue
+        try:
+            cancelled.update(_cancel_oids_on_ib(temp, leftover))
+        finally:
+            try:
+                temp.disconnect()
+            except Exception:
+                pass
+    return sorted(cancelled)
+
+
+def enforce_single_protective_kill(
+    ib: IB,
+    symbol: str,
+    leg: dict[str, Any] | None = None,
+    *,
+    dry_run: bool = False,
+    host: str = "127.0.0.1",
+    port: int = 7497,
+    owner_retry: bool = True,
+) -> dict[str, Any]:
+    """
+    AG HARD FAIL: exactly one working protective SELL per open long.
+
+    Lists working STP / STP LMT (and TRAIL if present). Keeps one:
+    book kill_order_id if still working and qty-matched, else highest
+    auxPrice among qty-matched. Cancels the rest, including other
+    clientIds when cancelable. Rearms if naked. Rewrites qty to broker
+    size without stacking a duplicate. Never loosens the stop.
+    """
+    sym = symbol.upper()
+    result: dict[str, Any] = {
+        "symbol": sym,
+        "action": "SKIP",
+        "keep_oid": None,
+        "cancelled": [],
+        "broker_qty": None,
+    }
+    broker_qty = reread_broker_qty(ib, sym)
+    result["broker_qty"] = broker_qty
+    if broker_qty is None:
+        result["reason"] = "broker_unavailable"
+        return result
+
+    broker_int = int(round(broker_qty)) if broker_qty > 0.4 else 0
+    if broker_qty < 0:
+        broker_int = 0
+
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.3)
+    except Exception:
+        pass
+    working = _working_protective_kills(ib, sym, include_trail=True)
+
+    def _oid(trade: Any) -> int:
+        try:
+            return int(trade.order.orderId or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    if broker_int <= 0:
+        oids = {_oid(t) for t in working if _oid(t) > 0}
+        cancelled = (
+            sorted(oids)
+            if dry_run
+            else _cancel_oids_with_owner_retry(
+                ib, oids, host=host, port=port, owner_retry=owner_retry,
+            )
+        )
+        if leg is not None:
+            trail = leg.get("trail") or {}
+            trail["kill_stop_cancelled"] = True
+            leg["trail"] = trail
+            leg["kill_order_id"] = None
+        result["action"] = "FLAT_CLEANUP"
+        result["cancelled"] = cancelled
+        if cancelled:
+            print(f"  {sym} SINGLE_KILL flat cancel={cancelled}")
+        return result
+
+    prefer_oid: int | None = None
+    if leg is not None:
+        try:
+            raw = leg.get("kill_order_id")
+            prefer_oid = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            prefer_oid = None
+
+    keep = select_keep_protective_trade(
+        working, prefer_oid=prefer_oid, target_qty=broker_int,
+    )
+    keep_oid = _oid(keep) if keep is not None else 0
+    extras = [
+        t for t in working
+        if _oid(t) > 0 and _oid(t) != keep_oid
+    ]
+    extra_oids = {_oid(t) for t in extras}
+    cancelled: list[int] = []
+    if extra_oids:
+        if dry_run:
+            cancelled = sorted(extra_oids)
+        else:
+            for trade in extras:
+                oid = _oid(trade)
+                if oid <= 0:
+                    continue
+                if cancel_order_safe(ib, oid):
+                    cancelled.append(oid)
+            leftover = extra_oids - set(cancelled)
+            if leftover and owner_retry:
+                cancelled = sorted(
+                    set(cancelled)
+                    | set(
+                        _cancel_oids_with_owner_retry(
+                            ib,
+                            leftover,
+                            host=host,
+                            port=port,
+                            owner_retry=True,
+                        )
+                    )
+                )
+
+    trail = (leg or {}).get("trail") or {}
+    target_kill = float(trail.get("kill_price") or 0)
+    if keep is None:
+        if dry_run or target_kill <= 0:
+            result["action"] = "NAKED_REARM"
+            result["cancelled"] = cancelled
+            result["reason"] = "dry_run_or_no_kill_price"
+            print(f"  {sym} NAKED_REARM skipped ({result['reason']}) qty={broker_int}")
+            return result
+        new_trade = _place_kill_stop_order(ib, sym, broker_int, target_kill)
+        new_oid = int(new_trade.order.orderId or 0)
+        if leg is not None:
+            leg["kill_order_id"] = new_oid
+        result["action"] = "NAKED_REARM"
+        result["keep_oid"] = new_oid
+        result["cancelled"] = cancelled
+        print(
+            f"  {sym} NAKED_REARM oid={new_oid} qty={broker_int} "
+            f"cancel={cancelled}"
+        )
+        return result
+
+    keep_qty = int(keep.order.totalQuantity or 0)
+    keep_stop = order_stop_price(keep.order)
+    if keep_qty != broker_int:
+        # Rewrite the single keep to broker size — never stack a second kill.
+        place_stop = keep_stop if keep_stop > 0 else target_kill
+        if target_kill > 0 and place_stop > 0:
+            place_stop = max(place_stop, target_kill)
+        if place_stop <= 0:
+            result["action"] = "QTY_SYNC"
+            result["keep_oid"] = keep_oid
+            result["cancelled"] = cancelled
+            result["reason"] = "no_stop_price"
+            return result
+        if dry_run:
+            result["action"] = "QTY_SYNC"
+            result["keep_oid"] = keep_oid
+            result["cancelled"] = cancelled
+            print(
+                f"  {sym} DRY_RUN QTY_SYNC kill {keep_qty}->{broker_int} "
+                f"oid={keep_oid}"
+            )
+            return result
+        # Place replacement first so the long is never naked, then drop the
+        # old qty-mismatched stop (MMED oid=43760 qty=12 class).
+        new_trade = _place_kill_stop_order(ib, sym, broker_int, place_stop)
+        new_oid = int(new_trade.order.orderId or 0)
+        drop = {keep_oid} if keep_oid > 0 else set()
+        drop_cancelled = _cancel_oids_with_owner_retry(
+            ib, drop, host=host, port=port, owner_retry=owner_retry,
+        )
+        cancelled = sorted(set(cancelled) | set(drop_cancelled))
+        if leg is not None:
+            leg["kill_order_id"] = new_oid
+        result["action"] = "QTY_SYNC"
+        result["keep_oid"] = new_oid
+        result["cancelled"] = cancelled
+        print(
+            f"  {sym} QTY_SYNC kill {keep_qty}->{broker_int} "
+            f"keep={new_oid} cancel={cancelled}"
+        )
+        return result
+
+    if extras and not cancelled and extra_oids:
+        # Owner retry may have been skipped; still log the keep.
+        pass
+    if leg is not None and prefer_oid != keep_oid:
+        leg["kill_order_id"] = keep_oid
+    result["action"] = "SINGLE_KILL"
+    result["keep_oid"] = keep_oid
+    result["cancelled"] = cancelled
+    print(
+        f"  {sym} SINGLE_KILL keep={keep_oid} cancel={cancelled}"
+    )
+    return result
+
+
+def reconcile_open_position_to_broker(
+    ib: IB,
+    pos: dict[str, Any],
+    *,
+    dry_run: bool = False,
+    book: dict[str, Any] | None = None,
+    host: str = "127.0.0.1",
+    port: int = 7497,
+) -> dict[str, Any]:
+    """
+    Re-read TWS qty and force OPEN remaining to match.
+
+    Broker is source of truth. On flat (qty≈0): close every OPEN leg,
+    cancel leftover SELL stops, Cap-scrub CONFIRMED. When remaining
+    shrinks, caller should rewrite the single kill to the new qty.
+    """
+    sym = str(pos.get("symbol") or "").upper()
+    result: dict[str, Any] = {
+        "symbol": sym,
+        "changed": False,
+        "closed": False,
+        "book_was": None,
+        "broker_qty": None,
+        "skipped": False,
+    }
+    if not sym:
+        result["skipped"] = True
+        return result
+    if not broker_qty_reconcile_enabled():
+        result["skipped"] = True
+        result["reason"] = "flag_off"
+        return result
+    if str(pos.get("status") or "").upper() != "OPEN":
+        result["skipped"] = True
+        result["reason"] = "not_open"
+        return result
+
+    broker_qty = reread_broker_qty(ib, sym)
+    result["broker_qty"] = broker_qty
+    if broker_qty is None:
+        result["skipped"] = True
+        result["reason"] = "broker_unavailable"
+        return result
+
+    broker_int = int(round(broker_qty)) if broker_qty > 0.4 else 0
+    if broker_qty < 0:
+        broker_int = 0
+
+    open_legs = [
+        (idx, leg)
+        for idx, leg in enumerate(pos.get("legs") or [])
+        if str(leg.get("status") or "").upper() == "OPEN"
+    ]
+    book_was = sum(_leg_remaining(leg) for _idx, leg in open_legs)
+    result["book_was"] = book_was
+
+    if not open_legs:
+        result["skipped"] = True
+        result["reason"] = "no_open_legs"
+        return result
+
+    if broker_int <= 0:
+        for _idx, leg in open_legs:
+            apply_broker_qty_to_open_leg(leg, 0)
+            pos["legs"][_idx] = leg
+        result["changed"] = True
+        result["closed"] = _close_position_if_all_legs_flat(
+            pos, sym, dry_run=dry_run,
+        )
+        if not dry_run:
+            cancel_working_sells_for_symbol(ib, sym, dry_run=False)
+        print(f"  {sym} QTY_SYNC book→broker {book_was}→0")
+        if not dry_run and book is not None:
+            try:
+                from tsd_scan_pipeline.tsd_pool import rebuild_deployed_from_book
+
+                rebuild_deployed_from_book(book)
+            except Exception as exc:
+                print(f"  {sym} pool rebuild warn: {exc}")
+        return result
+
+    if len(open_legs) == 1:
+        idx, leg = open_legs[0]
+        applied = apply_broker_qty_to_open_leg(leg, broker_int)
+        pos["legs"][idx] = leg
+        result["changed"] = bool(applied.get("changed"))
+        if result["changed"]:
+            print(
+                f"  {sym} QTY_SYNC book→broker "
+                f"{applied['book_was']}→{broker_int}"
+            )
+        if applied.get("closed"):
+            result["closed"] = _close_position_if_all_legs_flat(
+                pos, sym, dry_run=dry_run,
+            )
+        elif not dry_run:
+            enforce_single_protective_kill(
+                ib, sym, leg, dry_run=False, host=host, port=port,
+            )
+    else:
+        total = sum(_leg_remaining(leg) for _idx, leg in open_legs)
+        delta = broker_int - total
+        if delta != 0:
+            last_idx, last_leg = open_legs[-1]
+            last_rem = _leg_remaining(last_leg)
+            apply_broker_qty_to_open_leg(last_leg, max(0, last_rem + delta))
+            pos["legs"][last_idx] = last_leg
+            result["changed"] = True
+            print(
+                f"  {sym} QTY_SYNC book→broker {total}→{broker_int} "
+                f"(adjusted last open leg)"
+            )
+        if _leg_remaining(open_legs[-1][1]) <= 0:
+            result["closed"] = _close_position_if_all_legs_flat(
+                pos, sym, dry_run=dry_run,
+            )
+        elif not dry_run:
+            enforce_single_protective_kill(
+                ib, sym, open_legs[-1][1], dry_run=False, host=host, port=port,
+            )
+
+    if result["changed"] and not dry_run and book is not None:
+        try:
+            from tsd_scan_pipeline.tsd_pool import rebuild_deployed_from_book
+
+            rebuild_deployed_from_book(book)
+        except Exception as exc:
+            print(f"  {sym} pool rebuild warn: {exc}")
+    return result
 
 
 def _place_kill_stop_order(
@@ -346,9 +913,10 @@ def _cancel_oids_on_ib(ib: IB, order_ids: set[int]) -> list[int]:
             ib.cancelOrder(trade.order)
             attempted.add(oid)
             sym = str(getattr(trade.contract, "symbol", "") or "").upper()
+            client_id = getattr(getattr(ib, "client", None), "clientId", "?")
             print(
                 f"  {sym} cancel sent oid={oid} "
-                f"type={trade.order.orderType} via clientId={getattr(ib.client, 'clientId', '?')}"
+                f"type={trade.order.orderType} via clientId={client_id}"
             )
         except Exception as exc:
             print(f"  cancel oid={oid} warn: {exc}")
@@ -385,7 +953,8 @@ def _cancel_oids_on_ib(ib: IB, order_ids: set[int]) -> list[int]:
         print(f"  confirm cancelled oid={oid}")
     if attempted and still_open:
         print(
-            f"  cancel incomplete via clientId={getattr(ib.client, 'clientId', '?')}: "
+            f"  cancel incomplete via clientId="
+            f"{getattr(getattr(ib, 'client', None), 'clientId', '?')}: "
             f"still open {sorted(still_open)}"
         )
     return confirmed
@@ -544,21 +1113,25 @@ def sync_kill_quantity(
     be treated as a ratchet from zero.
     """
     trail = leg.get("trail") or {}
-    remaining = remaining_shares(trail) if trail else int(leg.get("shares") or 0)
+    remaining = _leg_remaining(leg)
     kill_oid = leg.get("kill_order_id")
     target_kill = float(trail.get("kill_price") or 0)
 
-    # Long-only invariant: never leave working SELL stops on a flat broker book.
-    try:
-        broker_qty = sum(
-            float(pos.position or 0)
-            for pos in (ib.positions() or [])
-            if str(getattr(pos.contract, "symbol", "") or "").upper()
-            == symbol.upper()
-        )
-    except Exception as exc:
-        print(f"  {symbol} kill sync blocked: broker position unavailable ({exc})")
-        broker_qty = None
+    # Broker is source of truth — re-read TWS rather than trusting fill-log qty.
+    broker_qty = reread_broker_qty(ib, symbol)
+    if broker_qty_reconcile_enabled() and broker_qty is not None:
+        broker_int = int(round(broker_qty)) if broker_qty > 0.4 else 0
+        if broker_qty < 0:
+            broker_int = 0
+        applied = apply_broker_qty_to_open_leg(leg, broker_int)
+        if applied.get("changed"):
+            print(
+                f"  {symbol} QTY_SYNC book→broker "
+                f"{applied['book_was']}→{broker_int}"
+            )
+        trail = leg.get("trail") or trail
+        remaining = _leg_remaining(leg)
+        kill_oid = leg.get("kill_order_id")
 
     if remaining <= 0 or (broker_qty is not None and broker_qty <= 0):
         cancelled = cancel_working_sells_for_symbol(ib, symbol, dry_run=dry_run)
@@ -572,10 +1145,19 @@ def sync_kill_quantity(
         )
         return True
 
-    remaining = min(remaining, int(broker_qty))
+    if broker_qty is not None:
+        remaining = min(remaining, int(broker_qty))
 
     if trail.get("kill_stop_cancelled"):
         return False
+
+    # Exactly one protective SELL, sized to broker qty (cancels other clientIds).
+    if broker_qty is not None:
+        enforce_single_protective_kill(ib, symbol, leg, dry_run=dry_run)
+        kill_oid = leg.get("kill_order_id")
+        trail = leg.get("trail") or trail
+        remaining = min(_leg_remaining(leg), int(broker_qty))
+        target_kill = float(trail.get("kill_price") or 0)
 
     try:
         try:
@@ -635,9 +1217,21 @@ def sync_kill_quantity(
 
         trade = preferred or (working[0] if working else None)
 
-        # No working kill and we never recorded one — do not invent a stop.
+        # Never leave a long naked — re-arm at the current kill target.
         if trade is None and preferred_oid is None:
-            return False
+            kill_price = float(trail.get("kill_price") or 0)
+            if kill_price <= 0 or dry_run:
+                return False
+            new_trade = _place_kill_stop_order(ib, symbol, remaining, kill_price)
+            leg["kill_order_id"] = new_trade.order.orderId
+            cancel_extra_protective_kills(
+                ib, symbol, int(leg["kill_order_id"]), dry_run=False
+            )
+            print(
+                f"  {symbol} NAKED_REARM oid={leg['kill_order_id']} "
+                f"qty={remaining}"
+            )
+            return True
 
         if trade is None:
             # Recorded oid is gone and nothing else is working — re-arm.

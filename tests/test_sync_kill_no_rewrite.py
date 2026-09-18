@@ -288,6 +288,16 @@ class TestSyncKillNoRewrite(unittest.TestCase):
         self.assertEqual(len(ib.placed), 1)
         self.assertNotEqual(leg["kill_order_id"], 43126)
 
+    def test_naked_rearm_when_no_recorded_oid(self):
+        ib = _FakeIB(trades=[], positions=[_FakePos("ATRC", 2)])
+        leg = _atrc_leg()
+        leg["kill_order_id"] = None
+        with patch.object(tsd_exit, "classify_session", return_value="EXTENDED"):
+            result = tsd_exit.sync_kill_quantity(ib, leg, "ATRC")
+        self.assertTrue(result)
+        self.assertEqual(len(ib.placed), 1)
+        self.assertIsNotNone(leg["kill_order_id"])
+
     def test_broker_flat_does_not_place_kill(self):
         ib = _FakeIB(trades=[], positions=[])
         leg = _atrc_leg()
@@ -314,8 +324,7 @@ class TestSyncKillNoRewrite(unittest.TestCase):
         self.assertEqual(leg["kill_order_id"], 43126)
         remaining = [int(t.order.orderId) for t in ib.openTrades()]
         self.assertEqual(remaining, [43126])
-        self.assertIn("cancelled extra protective kill", buf.getvalue())
-        self.assertIn("skip rewrite", buf.getvalue())
+        self.assertIn("SINGLE_KILL keep=43126", buf.getvalue())
 
     def test_cancel_extra_protective_kills_helper(self):
         trades = [
