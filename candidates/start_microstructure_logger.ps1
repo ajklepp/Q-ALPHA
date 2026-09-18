@@ -3,14 +3,22 @@
 # Research-only READ-ONLY L2 + tape logger (clientId 72, paper 7497).
 # Does not start Peak Hour / TSD. Does not place orders.
 #
+# Depth: --depth-max defaults to 3 (IB Error 309). L1/tape can be larger (--Top).
+# Error 2152 for NASDAQ/BATS/BEX is expected; ARCA/NYSE/IEX are entitled.
+# Do NOT require BATS/BEX. Long-term: add NASDAQ TotalView when available.
+#
 # Usage:
 #   .\candidates\start_microstructure_logger.ps1
-#   .\candidates\start_microstructure_logger.ps1 -Top 8 -AllowExtended
+#   .\candidates\start_microstructure_logger.ps1 -Top 8 -DepthMax 3
+#   .\candidates\start_microstructure_logger.ps1 -Symbols "HOOD,MSTR,TARS" -DepthMax 3
+#   .\candidates\start_microstructure_logger.ps1 -Top 8 -DepthSymbols "HOOD,MSTR,TARS"
 #   .\candidates\start_microstructure_logger.ps1 -Symbols "AAPL,MSFT" -Once
 # =============================================================================
 param(
     [string]$Symbols = "",
     [int]$Top = 8,
+    [int]$DepthMax = 3,
+    [string]$DepthSymbols = "",
     [switch]$AllowExtended,
     [switch]$Once,
     [switch]$NoConnect,
@@ -68,9 +76,12 @@ $argList = @(
     "-m",
     "candidates.microstructure_logger",
     "--top",
-    "$Top"
+    "$Top",
+    "--depth-max",
+    "$DepthMax"
 )
 if ($Symbols) { $argList += @("--symbols", $Symbols) }
+if ($DepthSymbols) { $argList += @("--depth-symbols", $DepthSymbols) }
 if ($AllowExtended) { $argList += "--allow-extended" }
 if ($Once) { $argList += "--once" }
 if ($NoConnect) { $argList += "--no-connect" }
@@ -85,7 +96,7 @@ if (-not $proc) {
     exit 1
 }
 Set-Content -LiteralPath $PidFile -Value $proc.Id -Encoding ascii
-$meta = "START $stamp PID=$($proc.Id) clientId=72 paper 127.0.0.1:7497 READ-ONLY depth_source=PARTIAL_IEX_SMART"
+$meta = "START $stamp PID=$($proc.Id) clientId=72 paper 127.0.0.1:7497 READ-ONLY depth-max=$DepthMax depth_source=PARTIAL_ARCA_NYSE_IEX (2152 NASDAQ/BATS/BEX expected; no BATS/BEX required)"
 Add-Content -LiteralPath $ErrFile -Value $meta
-Write-Host "started microstructure logger PID=$($proc.Id) log=$LogFile pidfile=$PidFile"
+Write-Host "started microstructure logger PID=$($proc.Id) log=$LogFile pidfile=$PidFile depth-max=$DepthMax"
 exit 0

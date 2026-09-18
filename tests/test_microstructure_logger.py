@@ -12,12 +12,27 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from candidates.microstructure_logger.constants import (  # noqa: E402
+    DEFAULT_DEPTH_MAX,
     DEPTH_SOURCE,
     FALLBACK_SYMBOLS,
+    IB_ACCOUNT_DEPTH_CAP,
     ROW_KEYS,
     SOURCE_L2,
     TEST01_REQUIRED_KEYS,
     TWS_CLIENT_ID,
+)
+from candidates.microstructure_logger.depth import (  # noqa: E402
+    DEPTH_SOURCE_IEX_NATIVE,
+    DEPTH_SOURCE_L1_ONLY,
+    DEPTH_SOURCE_PARTIAL_SMART,
+    ExpectedDepthErrorGate,
+    classify_depth_source,
+    is_expected_2152,
+    merge_l1_and_depth_symbols,
+    message_is_filtered_depth_error,
+    parse_2152_venues,
+    select_depth_symbols,
+    should_try_iex_fallback,
 )
 from candidates.microstructure_logger.features import (  # noqa: E402
     BookHistory,
@@ -337,6 +352,39 @@ def test_cli_no_connect_writes_test01_rows() -> None:
                 assert row["tape_burst_z"] is None
                 assert row["print_imb_5s"] is None
                 assert row["depth_source"] == DEPTH_SOURCE
+                assert row["depth_source"] == "PARTIAL_ARCA_NYSE_IEX"
+
+
+def test_cli_top_not_capped_by_depth_max() -> None:
+    """L1/tape universe stays at --top; only depth lines are capped at 3."""
+    from candidates.microstructure_logger.runner import main
+
+    with tempfile.TemporaryDirectory() as td:
+        log_root = Path(td) / "microstructure"
+        rc = main([
+            "--no-connect",
+            "--once",
+            "--symbols",
+            "HOOD,MSTR,TARS,AAPL,MSFT,NVDA,TSLA,AMD",
+            "--top",
+            "8",
+            "--depth-max",
+            "3",
+            "--log-root",
+            str(log_root),
+        ])
+        assert rc == 0
+        names = {p.stem for p in log_root.glob("*/*.jsonl")}
+        assert names == {"HOOD", "MSTR", "TARS", "AAPL", "MSFT", "NVDA", "TSLA", "AMD"}
+        hood = json.loads(
+            next(log_root.glob("*/HOOD.jsonl")).read_text(encoding="utf-8").splitlines()[0]
+        )
+        aapl = json.loads(
+            next(log_root.glob("*/AAPL.jsonl")).read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert hood["depth_source"] == "PARTIAL_ARCA_NYSE_IEX"
+        assert aapl["depth_source"] == "L1_ONLY"
+
 
 
 def test_run_refuses_live_port() -> None:
@@ -363,6 +411,7 @@ def test_package_does_not_import_peak_hour() -> None:
         "ibkr_connector",
         "paper_trader",
         "setup_watch_agent",
+        "tsd_notify",
     )
     pkg = ROOT / "candidates" / "microstructure_logger"
     leaked: list[str] = []
@@ -378,6 +427,180 @@ def test_package_does_not_import_peak_hour() -> None:
                 if any(tok in name for tok in banned):
                     leaked.append(f"{path.name}:{name}")
     assert leaked == [], f"Peak Hour imports leaked: {leaked}"
+    for path in pkg.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "send_telegram" not in text, f"{path.name} must not send Telegram"
+        assert "api.telegram.org" not in text, f"{path.name} must not call Telegram"
+
+
+def test_depth_max_default_is_ib_cap() -> None:
+    assert DEFAULT_DEPTH_MAX == 3
+    assert IB_ACCOUNT_DEPTH_CAP == 3
+    assert DEPTH_SOURCE == DEPTH_SOURCE_PARTIAL_SMART
+    assert DEPTH_SOURCE == "PARTIAL_ARCA_NYSE_IEX"
+
+
+def test_select_depth_symbols_caps_and_override() -> None:
+    eight = ["HOOD", "MSTR", "TARS", "AAPL", "MSFT", "NVDA", "TSLA", "AMD"]
+    assert select_depth_symbols(eight, 3) == ["HOOD", "MSTR", "TARS"]
+    assert select_depth_symbols(eight, 3, depth_symbols=["TSLA", "AMD", "NVDA", "HOOD"]) == [
+        "TSLA",
+        "AMD",
+        "NVDA",
+    ]
+    assert select_depth_symbols(eight, 0) == []
+    assert select_depth_symbols(eight, 3, depth_symbols=["ZZZ"]) == []
+
+
+def test_select_depth_prefers_entitled_listings() -> None:
+    names = ["HOOD", "IBM", "MSTR"]
+    px = {"HOOD": "NASDAQ", "IBM": "NYSE", "MSTR": "NASDAQ"}
+    got = select_depth_symbols(names, 1, primary_exchange=px)
+    assert got == ["IBM"]
+    # Override still wins over listing heuristic.
+    got2 = select_depth_symbols(names, 2, depth_symbols=["HOOD", "MSTR"], primary_exchange=px)
+    assert got2 == ["HOOD", "MSTR"]
+
+
+def test_merge_depth_symbols_into_l1() -> None:
+    assert merge_l1_and_depth_symbols(["HOOD", "MSTR"], ["TARS"]) == ["HOOD", "MSTR", "TARS"]
+    assert merge_l1_and_depth_symbols(["HOOD"], ["HOOD", "MSTR"]) == ["HOOD", "MSTR"]
+
+
+def test_expected_2152_nasdaq_bats_bex() -> None:
+    perm = "Need Depth of Market permissions for NASDAQ; BATS; BEX."
+    assert parse_2152_venues(perm) == {"NASDAQ", "BATS", "BEX"}
+    assert is_expected_2152(perm) is True
+    full = (
+        "Need Depth of Market permissions for NASDAQ; BATS; BEX. "
+        "Depth present: ARCA; NYSE; IEX."
+    )
+    assert is_expected_2152(full) is True
+    assert is_expected_2152("Requested market data is not subscribed. SMART/NASDAQ") is True
+    assert is_expected_2152("") is True
+    assert is_expected_2152("Depth of Market not subscribed for ARCA") is False
+
+
+def test_classify_depth_source_labels() -> None:
+    assert classify_depth_source(has_depth_sub=False, iex_native=False) == DEPTH_SOURCE_L1_ONLY
+    assert classify_depth_source(has_depth_sub=True, iex_native=True) == DEPTH_SOURCE_IEX_NATIVE
+    assert classify_depth_source(has_depth_sub=True, iex_native=False, saw_2152=True) == (
+        DEPTH_SOURCE_PARTIAL_SMART
+    )
+    assert classify_depth_source(has_depth_sub=True, iex_native=False, saw_2152=False) == (
+        DEPTH_SOURCE_PARTIAL_SMART
+    )
+
+
+def test_iex_fallback_only_when_dom_empty() -> None:
+    class _Row:
+        def __init__(self, price: float, size: float) -> None:
+            self.price = price
+            self.size = size
+
+    assert should_try_iex_fallback([], []) is True
+    assert should_try_iex_fallback(None, None) is True
+    assert should_try_iex_fallback([_Row(10.0, 5.0)], []) is False
+    assert should_try_iex_fallback([], [_Row(10.1, 2.0)]) is False
+
+
+def test_2152_gate_logs_once_never_telegram() -> None:
+    gate = ExpectedDepthErrorGate()
+    first = gate.handle(2152, "Need Depth of Market permissions for NASDAQ; BATS; BEX.")
+    second = gate.handle(2152, "Need Depth of Market permissions for NASDAQ; BATS; BEX.")
+    assert first is not None
+    assert "EXPECTED" in first
+    assert "Telegram" in first
+    assert second is None
+    assert gate.count_2152 == 2
+    third = gate.handle(309, "Max number of market depth requests has been reached")
+    fourth = gate.handle(309, "Max number of market depth requests has been reached")
+    assert third is not None
+    assert "309" in third
+    assert fourth is None
+    assert gate.count_309 == 2
+    info = gate.handle(2104, "Market data farm connection is OK")
+    assert info is None
+
+
+def test_ib_log_filter_drops_2152_and_309() -> None:
+    assert message_is_filtered_depth_error("Error 2152, reqId 4: Need Depth of Market") is True
+    assert message_is_filtered_depth_error("Error 309, reqId -1: Max number of market depth") is True
+    assert message_is_filtered_depth_error("Error 200, reqId 3: No security definition") is False
+
+
+def test_ib_worker_depth_max_never_opens_fourth() -> None:
+    """reqMktDepth is refused locally once depth-max concurrent lines are open."""
+    from candidates.microstructure_logger.ib_worker import IBWorker
+
+    class _FakeIB:
+        def __init__(self) -> None:
+            self.depth_calls: list[tuple[str, bool]] = []
+
+        def reqMktDepth(self, contract: object, numRows: int = 5, isSmartDepth: bool = True) -> None:
+            self.depth_calls.append((getattr(contract, "symbol", "?"), bool(isSmartDepth)))
+
+    class _C:
+        def __init__(self, symbol: str) -> None:
+            self.symbol = symbol
+
+    worker = IBWorker(depth_max=3)
+    ib = _FakeIB()
+    for sym in ("HOOD", "MSTR", "TARS", "AAPL"):
+        worker._request_mkt_depth(
+            ib,
+            _C(sym),
+            symbol=sym,
+            is_smart=True,
+            iex_native=False,
+        )
+    assert len(ib.depth_calls) == 3
+    assert [c[0] for c in ib.depth_calls] == ["HOOD", "MSTR", "TARS"]
+    assert "AAPL" not in worker._depth_subs
+    assert worker._depth_source_by_symbol["AAPL"] == DEPTH_SOURCE_L1_ONLY
+    assert worker.depth_source_for("HOOD") == DEPTH_SOURCE_PARTIAL_SMART
+
+
+def test_ib_worker_2152_does_not_clobber_iex_native() -> None:
+    from candidates.microstructure_logger.ib_worker import DepthSub, IBWorker
+
+    class _C:
+        def __init__(self, symbol: str) -> None:
+            self.symbol = symbol
+
+    worker = IBWorker(depth_max=3)
+    worker._depth_subs["HOOD"] = DepthSub(
+        symbol="HOOD", contract=_C("HOOD"), is_smart=False, iex_native=True
+    )
+    worker._depth_source_by_symbol["HOOD"] = DEPTH_SOURCE_IEX_NATIVE
+    worker._on_error(
+        1, 2152, "Need Depth of Market permissions for NASDAQ; BATS; BEX.", _C("HOOD")
+    )
+    assert worker._depth_source_by_symbol["HOOD"] == DEPTH_SOURCE_IEX_NATIVE
+    worker._on_error(
+        2, 2152, "Need Depth of Market permissions for NASDAQ; BATS; BEX.", _C("HOOD")
+    )
+    assert worker.error_gate.count_2152 == 2
+    assert worker.error_gate.logged_expected_2152 is True
+
+
+def test_cli_depth_max_and_depth_symbols() -> None:
+    from candidates.microstructure_logger.runner import parse_args
+
+    args = parse_args([])
+    assert args.depth_max == 3
+    assert args.top == 8
+    args2 = parse_args(["--top", "8", "--depth-max", "3", "--depth-symbols", "HOOD,MSTR,TARS"])
+    assert args2.depth_max == 3
+    assert args2.depth_symbols == "HOOD,MSTR,TARS"
+    assert args2.top == 8
+
+
+def test_start_script_defaults_depth_max_3() -> None:
+    text = (ROOT / "candidates" / "start_microstructure_logger.ps1").read_text(encoding="utf-8")
+    assert "[int]$DepthMax = 3" in text
+    assert "--depth-max" in text
+    assert "PARTIAL_ARCA_NYSE_IEX" in text
 
 
 if __name__ == "__main__":
@@ -399,5 +622,19 @@ if __name__ == "__main__":
     test_client_id_constant()
     test_package_does_not_import_peak_hour()
     test_cli_no_connect_writes_test01_rows()
+    test_cli_top_not_capped_by_depth_max()
     test_run_refuses_live_port()
+    test_depth_max_default_is_ib_cap()
+    test_select_depth_symbols_caps_and_override()
+    test_select_depth_prefers_entitled_listings()
+    test_merge_depth_symbols_into_l1()
+    test_expected_2152_nasdaq_bats_bex()
+    test_classify_depth_source_labels()
+    test_iex_fallback_only_when_dom_empty()
+    test_2152_gate_logs_once_never_telegram()
+    test_ib_log_filter_drops_2152_and_309()
+    test_ib_worker_depth_max_never_opens_fourth()
+    test_ib_worker_2152_does_not_clobber_iex_native()
+    test_cli_depth_max_and_depth_symbols()
+    test_start_script_defaults_depth_max_3()
     print("OK microstructure logger")
