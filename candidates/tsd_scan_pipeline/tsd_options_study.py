@@ -194,6 +194,11 @@ def _fetch_options_day_volume(
     Best-effort same-day call/put volume near ATM via Polygon options contracts.
 
     Returns empty dict when the API tier blocks options or no chain exists.
+
+    Do NOT call from the live 1H LAUNCH path. This loops up to 40 per-contract
+    daily aggs with polygon_get's 60s default timeout and hung the 2026-09-15
+    hour-7 tick after Deep features. Live uses snapshot + 8s timeout in
+    tsd_decision_context.fetch_options_call_share.
     """
     out: dict[str, Any] = {
         "options_available": False,
