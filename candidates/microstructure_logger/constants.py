@@ -63,6 +63,12 @@ IDLE_POLL_SEC = 15.0
 
 # --- Universe -----------------------------------------------------------------
 DEFAULT_TOP_N = 8
+# L2/depth probes: IB paper often fails when too many reqMktDepth at once.
+# --once / --probe must stay tiny (1–3). Continuous logger may still use top 8.
+PROBE_MAX_SYMBOLS = 3
+PROBE_DEFAULT_SYMBOLS = ("SPY",)
+# Hard ceiling for any depth subscribe path (never Cap-scale / 100+ names).
+ABSOLUTE_MAX_DEPTH_SYMBOLS = 8
 FALLBACK_SYMBOLS = (
     "SPY",
     "QQQ",

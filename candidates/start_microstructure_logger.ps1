@@ -7,12 +7,15 @@
 #   .\candidates\start_microstructure_logger.ps1
 #   .\candidates\start_microstructure_logger.ps1 -Top 8 -AllowExtended
 #   .\candidates\start_microstructure_logger.ps1 -Symbols "AAPL,MSFT" -Once
+#   .\candidates\start_microstructure_logger.ps1 -Probe              # SPY only, max 3
+#   .\candidates\start_microstructure_logger.ps1 -Probe -Symbols "SPY,AAPL"
 # =============================================================================
 param(
     [string]$Symbols = "",
     [int]$Top = 8,
     [switch]$AllowExtended,
     [switch]$Once,
+    [switch]$Probe,
     [switch]$NoConnect,
     [double]$Seconds = 0
 )
@@ -63,6 +66,13 @@ if (Test-Path -LiteralPath $PidFile) {
     Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
 }
 
+# L2 probes: few symbols only (1–3). Never Cap-scale depth at once.
+$ProbeMax = 3
+if ($Probe -or $Once) {
+    if ($Top -gt $ProbeMax) { $Top = $ProbeMax }
+    if (-not $Symbols) { $Symbols = "SPY" }
+}
+
 $argList = @(
     "-u",
     "-m",
@@ -72,7 +82,8 @@ $argList = @(
 )
 if ($Symbols) { $argList += @("--symbols", $Symbols) }
 if ($AllowExtended) { $argList += "--allow-extended" }
-if ($Once) { $argList += "--once" }
+if ($Probe) { $argList += "--probe" }
+elseif ($Once) { $argList += "--once" }
 if ($NoConnect) { $argList += "--no-connect" }
 if ($Seconds -gt 0) { $argList += @("--seconds", "$Seconds") }
 
