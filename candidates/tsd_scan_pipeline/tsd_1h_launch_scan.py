@@ -675,7 +675,7 @@ def run_1h_launch_scan(
         scrubbed = scrub_confirmed_for_closed_book(book, now=now_et)
         if scrubbed:
             print(
-                f"  Cap scrub CONFIRMED on book CLOSE -> CLEARED_STALE: {scrubbed}",
+                f"  Cap scrub CONFIRMED on book CLOSE -> CLOSED_SCRUB: {scrubbed}",
                 flush=True,
             )
     except Exception as exc:

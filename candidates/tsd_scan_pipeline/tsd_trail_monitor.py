@@ -57,9 +57,11 @@ from tsd_scan_pipeline.tsd_entry import (  # noqa: E402
     session_allows_exit_orders,
 )
 from tsd_scan_pipeline.tsd_exit import (  # noqa: E402
+    enforce_single_protective_kill,
     escalate_stuck_kill_stops,
     housekeep_orphan_sell_orders,
     place_tsd_exit,
+    reconcile_open_position_to_broker,
     sync_kill_quantity,
 )
 from tsd_scan_pipeline.tsd_notify import format_exited, notify_tsd  # noqa: E402
@@ -88,6 +90,37 @@ def _cap_scrub_on_book_close(
         )
     except Exception as exc:
         print(f"  Cap scrub warn {symbol}: {exc}")
+
+
+def _broker_truth_after_fill(
+    ib: IB,
+    pos: dict[str, Any],
+    leg: dict[str, Any],
+    sym: str,
+    *,
+    dry_run: bool,
+) -> None:
+    """
+    After a fill or partial: TWS qty wins, then exactly one protective.
+
+    Re-reads broker position, forces OPEN remaining to match, Cap-scrubs
+    on flat, and cancel/replaces the kill to the new qty.
+    """
+    if dry_run:
+        return
+    try:
+        rec = reconcile_open_position_to_broker(ib, pos, dry_run=False)
+        if rec.get("closed"):
+            return
+    except Exception as exc:
+        print(f"  {sym} broker qty reconcile warn: {exc}")
+    if str(leg.get("status") or "").upper() != "OPEN":
+        return
+    try:
+        enforce_single_protective_kill(ib, sym, leg, dry_run=False)
+        sync_kill_quantity(ib, leg, sym, dry_run=False)
+    except Exception as exc:
+        print(f"  {sym} single-kill/sync warn: {exc}")
 
 
 def _acquire_trail_lock(*, fail_closed: bool = False) -> bool:
@@ -323,7 +356,7 @@ def _exit_all_remaining(
         leg["shares"] = still
     pos["legs"][leg_index] = leg
     if not dry_run:
-        sync_kill_quantity(ib, leg, sym, dry_run=False)
+        _broker_truth_after_fill(ib, pos, leg, sym, dry_run=False)
     pnl = (exit_px - entry_px) * filled_sh if entry_px > 0 else None
     if not dry_run:
         notify_tsd(
@@ -567,12 +600,12 @@ def _process_leg(
     pos["legs"][leg_index] = leg
 
     if not dry_run:
-        sync_kill_quantity(ib, leg, sym, dry_run=False)
+        _broker_truth_after_fill(ib, pos, leg, sym, dry_run=False)
 
     if remaining_shares(trail) <= 0:
         leg["status"] = "CLOSED"
         if not dry_run:
-            sync_kill_quantity(ib, leg, sym, dry_run=False)
+            _broker_truth_after_fill(ib, pos, leg, sym, dry_run=False)
             # Aggregate PnL across exits on this leg for one telegram (full flat).
             entry_px = float(trail.get("entry_price") or leg.get("price") or 0)
             pnl = 0.0
@@ -678,8 +711,8 @@ def _apply_kill_escalate_fill(
     leg["trail"] = trail
     pos["legs"][leg_index] = leg
 
-    if not dry_run and still > 0:
-        sync_kill_quantity(ib, leg, sym, dry_run=False)
+    if not dry_run:
+        _broker_truth_after_fill(ib, pos, leg, sym, dry_run=False)
 
     pnl = (exit_px - entry_px) * filled_sh if entry_px > 0 else None
     if not dry_run:
@@ -713,6 +746,21 @@ def _process_position(
     session = classify_session()
     exits_ok = session_allows_exit_orders(session)
 
+    if not dry_run:
+        try:
+            rec = reconcile_open_position_to_broker(ib, pos, dry_run=False)
+            if rec.get("closed"):
+                return results
+        except Exception as exc:
+            print(f"  {sym} broker qty reconcile warn: {exc}")
+        for i, leg in enumerate(list(pos.get("legs") or [])):
+            if str(leg.get("status") or "").upper() != "OPEN":
+                continue
+            try:
+                enforce_single_protective_kill(ib, sym, leg, dry_run=False)
+            except Exception as exc:
+                print(f"  {sym} SINGLE_KILL warn: {exc}")
+
     if session != "RTH":
         if exits_ok:
             print(
@@ -730,7 +778,7 @@ def _process_position(
             if leg.get("status") == "CLOSED":
                 continue
             if not dry_run:
-                sync_kill_quantity(ib, leg, sym, dry_run=False)
+                _broker_truth_after_fill(ib, pos, leg, sym, dry_run=False)
             # Overnight-open / AH (EXTENDED): escalate stuck through-limit kills.
             # Dead window (OVERNIGHT): keep broker STP LMT; do not cancel/flatten.
             if exits_ok and last_px > 0:
@@ -949,6 +997,21 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
                     pos for pos in state.get("positions") or []
                     if str(pos.get("status", "OPEN")).upper() == "OPEN"
                 ]
+            qty_closed: list[str] = []
+            for pos in list(opens):
+                rec = reconcile_open_position_to_broker(
+                    ib, pos, dry_run=False, book=state,
+                )
+                if rec.get("closed"):
+                    qty_closed.append(str(pos.get("symbol") or "").upper())
+            if qty_closed:
+                print(f"Broker qty sync closed: {qty_closed}")
+                save_state(state)
+                state = load_state()
+                opens = [
+                    pos for pos in state.get("positions") or []
+                    if str(pos.get("status", "OPEN")).upper() == "OPEN"
+                ]
         except Exception as exc:
             print(f"  broker reconcile warn: {exc}")
 
@@ -956,10 +1019,18 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
     for pos in opens:
         sym = pos["symbol"]
         if not dry_run and float(broker_positions.get(sym, 0.0)) <= 0:
-            # Never submit a SELL unless IBKR confirms a live long. A broker
-            # kill may have filled while the local loop was disconnected.
+            # Never submit a SELL unless IBKR confirms a live long. Re-read
+            # TWS and force the book closed + Cap-scrub (broker is SoT).
             print(f"\n--- {sym} ---")
             print(f"  {sym}: broker flat — trail SELL blocked")
+            try:
+                rec = reconcile_open_position_to_broker(
+                    ib, pos, dry_run=False, book=state,
+                )
+                if rec.get("closed"):
+                    print(f"  {sym}: book CLOSED from broker qty sync")
+            except Exception as exc:
+                print(f"  {sym} broker-flat reconcile warn: {exc}")
             continue
         print(f"\n--- {sym} ---")
         leg_results = _process_position(ib, pos, dry_run=dry_run)
