@@ -1,6 +1,7 @@
 # Q-ALPHA SYSTEM HANDOFF
 ## Operational state — hand this to a fresh assistant with zero prior context
 
+**Conversation brief (current map):** `LUCA_BRIEF.md` — use that first when HANDOFF and live code disagree.  
 **Version focus:** Peak Hour Performers (Live Paper) · dashboard v3.1  
 **MOTHBALLED (2026-09-04):** Gap Strategy Lab SIM — tasks Disabled; dashboard **Weekly Research** tab instead  
 **Companion architecture doc:** `Q_ALPHA_MASTER_CONTEXT.md`  
@@ -355,9 +356,10 @@ schtasks /Query /TN "QAlpha Readonly Mirror Sync" /FO LIST
 I am Aaron Klepp building Q-ALPHA.
 
 Read first (in order):
-1) Q_ALPHA_HANDOFF.md — operational state, Monday Lab schedule, Telegram, reset rules
-2) Q_ALPHA_MASTER_CONTEXT.md — durable architecture, Strategy Lab decisions, debt
-3) GLOSSARY.md — if terms are unfamiliar
+1) LUCA_BRIEF.md — current architecture + mission map (prefer when this handoff disagrees)
+2) Q_ALPHA_HANDOFF.md — operational state, Monday Lab schedule, Telegram, reset rules
+3) Q_ALPHA_MASTER_CONTEXT.md — durable architecture, Strategy Lab decisions, debt
+4) GLOSSARY.md — if terms are unfamiliar
 
 Today’s focus: [describe]
 
