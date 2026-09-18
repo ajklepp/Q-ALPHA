@@ -41,8 +41,16 @@ _TERMINAL_ORDER_STATUS = frozenset(
 )
 # Book remaining ← TWS position. Default ON. Set 0/false/off to disable.
 BROKER_QTY_RECONCILE_ENV = "TSD_BROKER_QTY_RECONCILE"
+# Exactly one protective SELL per open long. Default ON.
+SINGLE_KILL_ENFORCE_ENV = "TSD_ENFORCE_SINGLE_KILL"
 _ENV_TRUE = frozenset({"1", "true", "yes", "on"})
 _ENV_FALSE = frozenset({"0", "false", "no", "off"})
+# Trail loop is 95 with fallbacks 85/75; TWS sync 96/86/76. ATRC 2026-09-18
+# live FAIL was 3× STP LMT from clients 85+95 — 85 must be in owner retry.
+# (0, 91–97, 88–90 already used by orphan housekeep; 85/75/86/76/92 added.)
+OWNER_CANCEL_CLIENT_IDS = (
+    0, 85, 75, 86, 76, 91, 92, 93, 94, 95, 96, 97, 88, 89, 90,
+)
 
 
 def _sane_price(value: Any) -> float:
@@ -185,12 +193,22 @@ def cancel_extra_protective_kills(
     return cancelled
 
 
-def broker_qty_reconcile_enabled() -> bool:
-    """True when OPEN remaining must follow TWS qty (default ON)."""
-    raw = (os.environ.get(BROKER_QTY_RECONCILE_ENV) or "1").strip().lower()
+def _env_flag_default_on(name: str) -> bool:
+    """True unless the named env is an explicit off value. Default ON."""
+    raw = (os.environ.get(name) or "1").strip().lower()
     if raw in _ENV_FALSE:
         return False
     return raw in _ENV_TRUE or raw == ""
+
+
+def broker_qty_reconcile_enabled() -> bool:
+    """True when OPEN remaining must follow TWS qty (default ON)."""
+    return _env_flag_default_on(BROKER_QTY_RECONCILE_ENV)
+
+
+def single_kill_enforce_enabled() -> bool:
+    """True when each open long must have exactly one protective (default ON)."""
+    return _env_flag_default_on(SINGLE_KILL_ENFORCE_ENV)
 
 
 def reread_broker_qty(ib: IB, symbol: str) -> float | None:
@@ -417,6 +435,46 @@ def _cancel_oids_with_owner_retry(
     return sorted(cancelled)
 
 
+def _log_ag_hard_fail_if_needed(
+    ib: IB,
+    symbol: str,
+    *,
+    keep_oid: int | None,
+    broker_qty: int,
+    dry_run: bool = False,
+) -> bool:
+    """
+    True when working protective count is not exactly 1 (long) or 0 (flat).
+
+    Does not crash the trail loop. Logs AG HARD FAIL so laptop ops can
+    run cancel_orphan_kills.py (client 92) if 85 is still busy (Error 326).
+    """
+    if dry_run:
+        return False
+    try:
+        ib.reqAllOpenOrders()
+        ib.sleep(0.2)
+    except Exception:
+        pass
+    working = _working_protective_kills(ib, symbol, include_trail=True)
+    want = 1 if int(broker_qty) > 0 else 0
+    if len(working) == want:
+        return False
+    leftover: list[int] = []
+    clients: list[int] = []
+    for trade in working:
+        try:
+            leftover.append(int(trade.order.orderId or 0))
+            clients.append(int(getattr(trade.order, "clientId", 0) or 0))
+        except Exception:
+            continue
+    print(
+        f"  {symbol} AG HARD FAIL protective={len(working)} want={want} "
+        f"keep={keep_oid} leftover={leftover} clients={clients}"
+    )
+    return True
+
+
 def enforce_single_protective_kill(
     ib: IB,
     symbol: str,
@@ -433,8 +491,9 @@ def enforce_single_protective_kill(
     Lists working STP / STP LMT (and TRAIL if present). Keeps one:
     book kill_order_id if still working and qty-matched, else highest
     auxPrice among qty-matched. Cancels the rest, including other
-    clientIds when cancelable. Rearms if naked. Rewrites qty to broker
-    size without stacking a duplicate. Never loosens the stop.
+    clientIds when cancelable (trail 95/85/75). Rearms if naked. Rewrites
+    qty to position size without stacking a duplicate. Never loosens
+    the stop. Uses order_stop_price (auxPrice first — 4269bca class).
     """
     sym = symbol.upper()
     result: dict[str, Any] = {
@@ -443,7 +502,12 @@ def enforce_single_protective_kill(
         "keep_oid": None,
         "cancelled": [],
         "broker_qty": None,
+        "hard_fail": False,
     }
+    if not single_kill_enforce_enabled():
+        result["skipped"] = True
+        result["reason"] = "flag_off"
+        return result
     broker_qty = reread_broker_qty(ib, sym)
     result["broker_qty"] = broker_qty
     if broker_qty is None:
@@ -485,6 +549,9 @@ def enforce_single_protective_kill(
         result["cancelled"] = cancelled
         if cancelled:
             print(f"  {sym} SINGLE_KILL flat cancel={cancelled}")
+        result["hard_fail"] = _log_ag_hard_fail_if_needed(
+            ib, sym, keep_oid=None, broker_qty=0, dry_run=dry_run,
+        )
         return result
 
     prefer_oid: int | None = None
@@ -509,26 +576,16 @@ def enforce_single_protective_kill(
         if dry_run:
             cancelled = sorted(extra_oids)
         else:
-            for trade in extras:
-                oid = _oid(trade)
-                if oid <= 0:
-                    continue
-                if cancel_order_safe(ib, oid):
-                    cancelled.append(oid)
-            leftover = extra_oids - set(cancelled)
-            if leftover and owner_retry:
-                cancelled = sorted(
-                    set(cancelled)
-                    | set(
-                        _cancel_oids_with_owner_retry(
-                            ib,
-                            leftover,
-                            host=host,
-                            port=port,
-                            owner_retry=True,
-                        )
-                    )
-                )
+            # Confirm-gone, then owner-retry (85/95/…). Do not trust
+            # cancel_order_safe's "sent" return — 10147 leaves the 85-side
+            # ATRC STP LMT working while client 95 thinks extras are gone.
+            cancelled = _cancel_oids_with_owner_retry(
+                ib,
+                extra_oids,
+                host=host,
+                port=port,
+                owner_retry=owner_retry,
+            )
 
     trail = (leg or {}).get("trail") or {}
     target_kill = float(trail.get("kill_price") or 0)
@@ -538,6 +595,9 @@ def enforce_single_protective_kill(
             result["cancelled"] = cancelled
             result["reason"] = "dry_run_or_no_kill_price"
             print(f"  {sym} NAKED_REARM skipped ({result['reason']}) qty={broker_int}")
+            result["hard_fail"] = _log_ag_hard_fail_if_needed(
+                ib, sym, keep_oid=None, broker_qty=broker_int, dry_run=dry_run,
+            )
             return result
         new_trade = _place_kill_stop_order(ib, sym, broker_int, target_kill)
         new_oid = int(new_trade.order.orderId or 0)
@@ -549,6 +609,9 @@ def enforce_single_protective_kill(
         print(
             f"  {sym} NAKED_REARM oid={new_oid} qty={broker_int} "
             f"cancel={cancelled}"
+        )
+        result["hard_fail"] = _log_ag_hard_fail_if_needed(
+            ib, sym, keep_oid=new_oid, broker_qty=broker_int, dry_run=dry_run,
         )
         return result
 
@@ -592,6 +655,9 @@ def enforce_single_protective_kill(
             f"  {sym} QTY_SYNC kill {keep_qty}->{broker_int} "
             f"keep={new_oid} cancel={cancelled}"
         )
+        result["hard_fail"] = _log_ag_hard_fail_if_needed(
+            ib, sym, keep_oid=new_oid, broker_qty=broker_int, dry_run=dry_run,
+        )
         return result
 
     if extras and not cancelled and extra_oids:
@@ -604,6 +670,9 @@ def enforce_single_protective_kill(
     result["cancelled"] = cancelled
     print(
         f"  {sym} SINGLE_KILL keep={keep_oid} cancel={cancelled}"
+    )
+    result["hard_fail"] = _log_ag_hard_fail_if_needed(
+        ib, sym, keep_oid=keep_oid, broker_qty=broker_int, dry_run=dry_run,
     )
     return result
 
@@ -843,9 +912,6 @@ def cancel_order_safe(ib: IB, order_id: int | None) -> bool:
         return False
     print(f"  cancel oid={target} not in openTrades (stale/10147) — skip")
     return False
-
-
-OWNER_CANCEL_CLIENT_IDS = (0, 91, 93, 94, 95, 96, 97, 88, 89, 90)
 
 
 def _open_sell_rows(ib: IB) -> list[dict[str, Any]]:

@@ -222,7 +222,56 @@ class TestEnforceSingleProtectiveKill(unittest.TestCase):
         self.assertEqual(result["keep_oid"], 43126)
         self.assertEqual(sorted(result["cancelled"]), [43140, 43155])
         self.assertEqual([int(t.order.orderId) for t in ib.openTrades()], [43126])
+        self.assertFalse(result.get("hard_fail"))
         self.assertIn("SINGLE_KILL keep=43126 cancel=", buf.getvalue())
+
+    def test_atrc_live_fail_clients_85_and_95(self):
+        """2026-09-18 ATRC: 3× qty=2 @53.13 from trail 85+95 → keep book oid."""
+        trades = [
+            _FakeTrade(_FakeOrder(43126, qty=2, aux_price=53.13, stop_price=0.0, client_id=95)),
+            _FakeTrade(_FakeOrder(43140, qty=2, aux_price=53.13, stop_price=0.0, client_id=85)),
+            _FakeTrade(_FakeOrder(43155, qty=2, aux_price=53.13, stop_price=0.0, client_id=85)),
+        ]
+        ib = _FakeIB(trades=trades, positions=[_FakePos("ATRC", 2)])
+        ib.client = SimpleNamespace(clientId=95)
+        leg = _open_leg(shares=2, kill_oid=43126, kill_price=53.13)
+        result = tsd_exit.enforce_single_protective_kill(ib, "ATRC", leg)
+        self.assertEqual(result["keep_oid"], 43126)
+        self.assertEqual(sorted(result["cancelled"]), [43140, 43155])
+        self.assertEqual(
+            [int(getattr(t.order, "clientId", 0) or 0) for t in ib.openTrades()],
+            [95],
+        )
+        self.assertIn(85, tsd_exit.OWNER_CANCEL_CLIENT_IDS)
+        self.assertIn(75, tsd_exit.OWNER_CANCEL_CLIENT_IDS)
+        self.assertIn(95, tsd_exit.OWNER_CANCEL_CLIENT_IDS)
+
+    def test_hard_fail_when_foreign_client_kill_stays(self):
+        """10147 / busy 85: leftover extras must log AG HARD FAIL, not silent."""
+        trades = [
+            _FakeTrade(_FakeOrder(43126, qty=2, aux_price=53.13, client_id=95)),
+            _FakeTrade(_FakeOrder(43140, qty=2, aux_price=53.13, client_id=85)),
+        ]
+        ib = _FakeIB(trades=trades, positions=[_FakePos("ATRC", 2)])
+        leg = _open_leg(shares=2, kill_oid=43126, kill_price=53.13)
+        buf = io.StringIO()
+        with patch.object(tsd_exit, "_cancel_oids_with_owner_retry", return_value=[]):
+            with patch("sys.stdout", buf):
+                result = tsd_exit.enforce_single_protective_kill(ib, "ATRC", leg)
+        self.assertTrue(result.get("hard_fail"))
+        self.assertIn("AG HARD FAIL", buf.getvalue())
+        self.assertIn("clients=", buf.getvalue())
+
+    def test_single_kill_flag_off_skips(self):
+        ib = _FakeIB(
+            trades=[_FakeTrade(_FakeOrder(1, qty=2)), _FakeTrade(_FakeOrder(2, qty=2))],
+            positions=[_FakePos("ATRC", 2)],
+        )
+        leg = _open_leg(shares=2, kill_oid=1, kill_price=53.13)
+        with patch.dict(os.environ, {tsd_exit.SINGLE_KILL_ENFORCE_ENV: "0"}):
+            result = tsd_exit.enforce_single_protective_kill(ib, "ATRC", leg)
+        self.assertTrue(result.get("skipped"))
+        self.assertEqual(len(ib.openTrades()), 2)
 
     def test_naked_rearm(self):
         ib = _FakeIB(trades=[], positions=[_FakePos("ATRC", 2)])
@@ -315,12 +364,16 @@ class TestBrokerQtyFlag(unittest.TestCase):
     def test_default_on(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop(tsd_exit.BROKER_QTY_RECONCILE_ENV, None)
+            os.environ.pop(tsd_exit.SINGLE_KILL_ENFORCE_ENV, None)
             self.assertTrue(tsd_exit.broker_qty_reconcile_enabled())
+            self.assertTrue(tsd_exit.single_kill_enforce_enabled())
 
     def test_off_values(self):
         for raw in ("0", "false", "off", "no"):
             with patch.dict(os.environ, {tsd_exit.BROKER_QTY_RECONCILE_ENV: raw}):
                 self.assertFalse(tsd_exit.broker_qty_reconcile_enabled())
+            with patch.dict(os.environ, {tsd_exit.SINGLE_KILL_ENFORCE_ENV: raw}):
+                self.assertFalse(tsd_exit.single_kill_enforce_enabled())
 
 
 if __name__ == "__main__":

@@ -204,32 +204,49 @@ trail `--once` so `sync_kill_quantity` ratchets the working stop UP if needed.
 
 ---
 
-# Broker-truth qty reconcile (book ← TWS)
+# Broker-truth qty + single-kill (book ← TWS)
 
 **Owner:** Peak Hour ops  
-**Flag:** `TSD_BROKER_QTY_RECONCILE` (default **ON**)
+**Flags (both default ON):**
+- `TSD_BROKER_QTY_RECONCILE`
+- `TSD_ENFORCE_SINGLE_KILL`
+
+Canonical modules (do not invent paths):
+- `candidates/tsd_scan_pipeline/tsd_exit.py` — `order_stop_price` / auxPrice (4269bca class), `sync_kill_quantity`, `enforce_single_protective_kill`
+- `candidates/tsd_scan_pipeline/tsd_trail_monitor.py` — live trail loop
+- `candidates/tsd_scan_pipeline/tsd_watch_queue.py` — `scrub_confirmed_on_book_close` → `CLOSED_SCRUB`
+- `candidates/tws_intraday_sync.py` — broker reconcile + scrub + qty/single-kill
+- `candidates/tsd_scan_pipeline/tsd_structure.py` — `live_structure_stop_enabled` / `TSD_LIVE_STRUCTURE_STOP` (alias `PHP_STRUCTURE_STOP_EXITS`). Leave **OFF** (all-trailing). Do not re-enable hard BE.
 
 After MMED (fill/log 12, book 7, TWS 2) and ATRC (3× STP LMT @53.13 from
-different clientIds), trail + TWS sync re-read broker qty and keep exactly
+clients **85+95**), trail + TWS sync re-read broker qty and keep exactly
 one protective SELL.
 
-- **Qty.** OPEN remaining / kill target follow TWS, not fill-log arithmetic.
+- **Qty.** `positions[].legs[].shares` and trail remaining follow TWS.
   Broker ≈ 0 closes the book leg and Cap-scrubs CONFIRMED → `CLOSED_SCRUB`.
-- **Single kill.** `enforce_single_protective_kill` keeps one working
-  STP/STP LMT (book `kill_order_id` if qty-matched, else highest `auxPrice`),
-  cancels the rest (other clientIds when cancelable), rearms if naked, and
-  rewrites qty to position size without stacking a duplicate. Ratchet is
-  still **UP only**; `order_stop_price` reads `auxPrice` first.
+- **Single kill.** `enforce_single_protective_kill` keeps book `kill_order_id`
+  if still working+qty-matched, else highest `auxPrice`. Cancels extras
+  across clientIds 85/95/75/… when cancelable (confirm-gone, then owner
+  retry — `cancel_order_safe` “sent” is not success; 10147 left ATRC 85
+  kills working). Rearms if naked. `AG HARD FAIL` if still ≠1 or naked.
+- Ratchet **UP only**; `order_stop_price` reads `auxPrice` first.
 - Does **not** change ranking, exit gates, trail width, or structure-stop.
 
-### One-step revert (qty force only)
+### One-step revert
 
-Set **`TSD_BROKER_QTY_RECONCILE=0`** in repo `.env` or the trail-monitor /
-TWS-sync process env. Next trail tick and TWS sync skip book←broker remaining
-updates. Single-kill hygiene stays on (AG hard fail if ≠1 protective).
+| Flag | Off | Effect |
+|------|-----|--------|
+| `TSD_BROKER_QTY_RECONCILE=0` | skip book←broker remaining | single-kill still on |
+| `TSD_ENFORCE_SINGLE_KILL=0` | skip keep/cancel/rearm hygiene | qty force still on |
 
-Confirm in the log: no `QTY_SYNC book→broker` lines after a partial fill.
-To turn qty force back on: unset the var (default ON) or set `1`.
+Set in repo `.env` or the trail-monitor / TWS-sync process env.
+
+Confirm: no `QTY_SYNC book→broker` after a partial when qty flag is off;
+no `SINGLE_KILL keep=` / `NAKED_REARM` when single-kill flag is off.
+To restore: unset (default ON) or set `1`.
+
+If log shows `AG HARD FAIL … clients=[85, 95]` and 85 is busy (Error 326),
+run `candidates/uts_v2/cancel_orphan_kills.py --live --symbol ATRC` (client 92).
 
 Offline:
 
