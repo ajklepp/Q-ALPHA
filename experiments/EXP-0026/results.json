@@ -1,0 +1,66 @@
+{
+  "study": "EXP-0026 Peak Hour signals \u00d7 Track100 filter+C $5k/10",
+  "status": "blocked",
+  "blocked_reason": "polygon_secret_or_track100_modules_not_on_this_vm",
+  "signal_definition": "Peak Hour equal-signal / LAUNCH-eligible 1H print: last completed 1H bar with (buy_signal OR early_bull) from tsd_signals.enrich_tsd, is_equal_signal_list_candidate (not hard-extended: scan_score < 75), close hour ET in ALLOWED_HOURS {5\u201315}, \u226580 prior 1H bars, not structure_too_wide (structure risk > 3.5%), and causal HTF-pass membership for that session (dailies strictly before signal date: 20d range 25\u2013150%, close>SMA50, SMA20 rising, price\u2265$5, 20d dollar volume \u2265$5M). Equal-signal ON. Case review, 2/scan cap, popularity, momentum-rank slot pick, and Cap-taken fills are NOT applied.",
+  "fill_rule": "Fill at the next 1H bar OPEN after the signal bar close (tsd_1h_signal bars are start-labeled; next row open is the first causal 1H-grid executable print after the :15 scan). Live Peak Hour additionally micro-confirms on 1m tape and rests a pullback Limit near signal close; this study does not replay 1m micro-confirm (TIMEOUT/ABORT not modeled).",
+  "filter": "paper_filter_winloss_v1",
+  "exit": "C_ratchet_struct",
+  "book": {
+    "starting_cash": 5000.0,
+    "max_seats": 10,
+    "seat_notional": 500.0,
+    "cost_per_trade": 0.0015,
+    "rank": "dollar_equity"
+  },
+  "window": {
+    "start": "2026-01-20",
+    "end": "2026-09-16",
+    "target_start": "2026-01-20",
+    "target_end": "2026-09-16",
+    "snapped": false,
+    "notes": [],
+    "months": 7.9
+  },
+  "is_cut": "2026-07-20",
+  "track100": {
+    "paper_filter": null,
+    "paper_exit": null,
+    "trail_exits": null,
+    "filter_ok": false,
+    "exit_ok": false,
+    "ready": false,
+    "search_roots": [
+      "/workspace/experiments/EXP-0026/vendor_track100",
+      "/track-100",
+      "/workspace/track-100",
+      "/Track 100",
+      "/workspace/Track 100",
+      "/Track100",
+      "/workspace/Track100"
+    ]
+  },
+  "invented_pnl": false,
+  "extra": {
+    "track100": {
+      "paper_filter": null,
+      "paper_exit": null,
+      "trail_exits": null,
+      "filter_ok": false,
+      "exit_ok": false,
+      "ready": false,
+      "search_roots": [
+        "/workspace/experiments/EXP-0026/vendor_track100",
+        "/track-100",
+        "/workspace/track-100",
+        "/Track 100",
+        "/workspace/Track 100",
+        "/Track100",
+        "/workspace/Track100"
+      ]
+    },
+    "note": "Runner complete. No invented P&L."
+  },
+  "primary": null,
+  "variants": null
+}
