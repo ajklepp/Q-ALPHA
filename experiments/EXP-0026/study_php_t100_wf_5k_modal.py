@@ -399,6 +399,7 @@ def run_walkforward() -> dict[str, Any]:
             is_cut=is_cut,
             window_end=win_end,
             include_unfiltered=True,
+            daily_by_sym=daily_frames,
         )
     except Track100Missing as exc:
         payload = build_results_payload(
@@ -455,10 +456,44 @@ def main() -> None:
         choose_window,
         write_results,
     )
-    from track100_adapter import track100_available
+    from track100_adapter import adapter_selftest, track100_available
 
+    # Fail closed before paying for a Modal container if vendor snapshot is incomplete.
+    avail = track100_available()
     print("EXP-0026 — Peak Hour × Track100 $5k WF", flush=True)
-    print(f"track100 visible: {track100_available()}", flush=True)
+    print(f"track100 visible: {avail}", flush=True)
+    if not avail.get("ready"):
+        window = choose_window(None, None)
+        payload = build_results_payload(
+            variants=None,
+            window=window,
+            is_cut=IS_CUT_DEFAULT,
+            status="blocked",
+            blocked_reason="track100_modules_missing_run_vendor_from_track100",
+            extra={"track100": avail},
+        )
+        write_results(payload, None)
+        print("BLOCKED track100_modules_missing_run_vendor_from_track100", flush=True)
+        print("Wrote experiments/EXP-0026/results.md (no invented P&L)", flush=True)
+        return
+
+    # Import self-test: catches the Modal path bug (missing features/playbook/...)
+    # on the laptop before .remote().
+    selftest = adapter_selftest()
+    if not selftest.get("imported"):
+        window = choose_window(None, None)
+        payload = build_results_payload(
+            variants=None,
+            window=window,
+            is_cut=IS_CUT_DEFAULT,
+            status="blocked",
+            blocked_reason=f"track100_import_path_bug:{selftest.get('import_error')}",
+            extra={"track100": selftest},
+        )
+        write_results(payload, None)
+        print(f"BLOCKED track100_import_path_bug:{selftest.get('import_error')}", flush=True)
+        print("Wrote experiments/EXP-0026/results.md (no invented P&L)", flush=True)
+        return
 
     try:
         payload = run_walkforward.remote()

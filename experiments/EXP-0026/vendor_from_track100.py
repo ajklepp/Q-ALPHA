@@ -18,12 +18,31 @@ EXP_DIR = Path(__file__).resolve().parent
 VENDOR = EXP_DIR / "vendor_track100"
 REPO = EXP_DIR.parents[1]
 
+# Frozen entry points + import closure. paper_filter/paper_exit import
+# features/playbook/wave/backtest/leverage — omitting them is the Modal path crash.
 COPY_NAMES = (
     "paper_filter.py",
     "paper_exit.py",
     "trail_exits.py",
+    "features.py",
+    "playbook.py",
+    "wave.py",
+    "backtest.py",
+    "leverage.py",
     "walkforward_5k.py",
     "ops_stack_5k.py",
+)
+
+# Required for a runnable vendor snapshot (optional study scripts excluded).
+REQUIRED_NAMES = (
+    "paper_filter.py",
+    "paper_exit.py",
+    "trail_exits.py",
+    "features.py",
+    "playbook.py",
+    "wave.py",
+    "backtest.py",
+    "leverage.py",
 )
 
 
@@ -79,12 +98,12 @@ def main() -> int:
                     found[n] = p
                     used_root = root
 
-    need_filter = any(p.name == "paper_filter.py" for p in found.values())
-    need_exit = any(p.name in {"paper_exit.py", "trail_exits.py"} for p in found.values())
-    if not need_filter or not need_exit:
-        print("FAIL: Track 100 root found but missing paper_filter.py or exit module.")
+    missing_required = [n for n in REQUIRED_NAMES if n not in found]
+    if missing_required:
+        print("FAIL: Track 100 root found but import closure incomplete.")
         print(f"  root={used_root}")
         print(f"  found={sorted(found)}")
+        print(f"  missing={missing_required}")
         return 3
 
     VENDOR.mkdir(parents=True, exist_ok=True)

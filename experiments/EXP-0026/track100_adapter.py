@@ -94,12 +94,45 @@ def track100_available() -> dict[str, Any]:
     }
 
 
+def _ensure_track100_sys_path(module_path: Path) -> None:
+    """
+    Put the Track 100 package root first on sys.path.
+
+    WHY: vendored `paper_filter.py` does `from features import ...`. Without
+    this, Python can resolve Q-ALPHA's root `features.py` (wrong module) or
+    raise ModuleNotFoundError on Modal where only `/pkg/exp0026/vendor_track100`
+    has the Track 100 files. That was the Modal "path bug".
+    """
+    root = str(module_path.parent.resolve())
+    while root in sys.path:
+        sys.path.remove(root)
+    sys.path.insert(0, root)
+
+
 def _load_module(path: Path, name: str) -> Any:
+    """Load a Track 100 .py with its sibling package root on sys.path."""
+    _ensure_track100_sys_path(path)
+    # Drop stale sibling modules so a prior bad import (e.g. Q-ALPHA features)
+    # cannot shadow the vendored Track 100 package.
+    for stale in (
+        "features",
+        "playbook",
+        "wave",
+        "backtest",
+        "leverage",
+        "trail_exits",
+        "paper_filter",
+        "paper_exit",
+    ):
+        sys.modules.pop(stale, None)
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise Track100Missing(f"cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
+    # Also register under the short name Track 100 code expects.
+    short = path.stem
+    sys.modules[short] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -116,7 +149,11 @@ def load_filter_module() -> Any:
 
 
 def load_exit_module() -> Any:
-    """Import paper_exit.py, else trail_exits.py."""
+    """Import paper_exit.py (preferred) and ensure trail_exits is loadable."""
+    trail_path = resolve_track100_file("trail_exits.py")
+    if trail_path is not None:
+        # Preload so paper_exit's `from trail_exits import ...` resolves.
+        _load_module(trail_path, "exp0026_trail_exits")
     for fname, modname in (
         ("paper_exit.py", "exp0026_paper_exit"),
         ("trail_exits.py", "exp0026_trail_exits"),
@@ -158,20 +195,70 @@ def frozen_is_cut(mod: Any | None = None) -> str:
     return IS_CUT_DEFAULT
 
 
-def apply_paper_filter_winloss_v1(row: dict[str, Any], *, mod: Any | None = None) -> FilterDecision:
+def apply_paper_filter_winloss_v1(
+    row: dict[str, Any],
+    *,
+    mod: Any | None = None,
+    und_1h: Any | None = None,
+    daily_en: Any | None = None,
+    signal_i: int | None = None,
+) -> FilterDecision:
     """
     Apply frozen paper_filter_winloss_v1 to a signal-time row.
 
-    Tries the common Track 100 entry points without guessing thresholds.
+    Prefers Track 100's real entry points:
+      - extract_paper_filter_features + evaluate_paper_filter (when 1H/daily given)
+      - evaluate_paper_filter(features_dict) when row already has frozen feature keys
+    Does not invent thresholds.
     """
     filt = mod or load_filter_module()
     version = str(
         getattr(filt, "FILTER_VERSION", None)
         or getattr(filt, "FILTER_NAME", None)
+        or getattr(filt, "PAPER_FILTER_NAME", None)
         or FILTER_VERSION
     )
 
-    # Preferred: explicit versioned function / evaluate(version=...).
+    # Path A: build Track 100 features from causal 1H + daily frames.
+    extract = getattr(filt, "extract_paper_filter_features", None)
+    evaluate = getattr(filt, "evaluate_paper_filter", None)
+    if callable(extract) and callable(evaluate) and und_1h is not None:
+        h1 = und_1h
+        daily = daily_en
+        ensure_h1 = getattr(filt, "ensure_h1_filter_cols", None)
+        ensure_d = getattr(filt, "ensure_daily_filter_cols", None)
+        if callable(ensure_h1):
+            h1 = ensure_h1(h1)
+        if callable(ensure_d) and daily is not None:
+            daily = ensure_d(daily)
+        idx = signal_i
+        if idx is None:
+            idx = _signal_index(h1, row.get("signal_ts"))
+        if idx is None:
+            return FilterDecision(
+                passed=False,
+                reason="missing_signal_bar",
+                version=version,
+                details={"signal_ts": row.get("signal_ts")},
+            )
+        feats = extract(und_1h=h1, signal_i=int(idx), daily_en=daily)
+        return _normalize_filter(evaluate(feats), version=version)
+
+    # Path B: evaluate_paper_filter on a feature dict (missing keys fail closed).
+    if callable(evaluate):
+        feat_keys = getattr(filt, "PAPER_FILTER_FEATURES", None) or (
+            "h1_ema50_chg_5",
+            "d_px_ema200",
+            "d_sma50_200_spread",
+            "d_sma200_chg_5",
+            "d_ema200_chg_5",
+        )
+        # Prefer explicit frozen-feature payload; otherwise pass row through
+        # (missing / non-finite → fail that rule — Track 100 contract).
+        feats = {k: row.get(k) for k in feat_keys} if any(k in row for k in feat_keys) else dict(row)
+        return _normalize_filter(evaluate(feats), version=version)
+
+    # Path C: legacy / alternate names (tests, older modules).
     for name in (
         "paper_filter_winloss_v1",
         "apply_paper_filter_winloss_v1",
@@ -183,15 +270,15 @@ def apply_paper_filter_winloss_v1(row: dict[str, Any], *, mod: Any | None = None
         if callable(fn):
             return _normalize_filter(fn(row), version=version)
 
-    evaluate = getattr(filt, "evaluate", None) or getattr(filt, "apply_filter", None)
-    if callable(evaluate):
+    evaluate_generic = getattr(filt, "evaluate", None) or getattr(filt, "apply_filter", None)
+    if callable(evaluate_generic):
         try:
-            raw = evaluate(row, version=FILTER_VERSION)
+            raw = evaluate_generic(row, version=FILTER_VERSION)
         except TypeError:
             try:
-                raw = evaluate(row, FILTER_VERSION)
+                raw = evaluate_generic(row, FILTER_VERSION)
             except TypeError:
-                raw = evaluate(row)
+                raw = evaluate_generic(row)
         return _normalize_filter(raw, version=version)
 
     passes = getattr(filt, "passes") if callable(getattr(filt, "passes", None)) else None
@@ -201,14 +288,63 @@ def apply_paper_filter_winloss_v1(row: dict[str, Any], *, mod: Any | None = None
         return _normalize_filter(passes(row), version=version)
 
     raise Track100Missing(
-        "paper_filter.py loaded but no paper_filter_winloss_v1 / evaluate / "
-        "passes entry point. Do not invent a filter."
+        "paper_filter.py loaded but no evaluate_paper_filter / "
+        "paper_filter_winloss_v1 entry point. Do not invent a filter."
     )
+
+
+def _signal_index(df: Any, signal_ts: Any) -> int | None:
+    """Locate signal bar index on a 1H frame (ET timestamps)."""
+    if df is None or signal_ts is None or len(df) == 0:
+        return None
+    try:
+        import pandas as pd
+
+        target = pd.Timestamp(signal_ts)
+        idx = df.index
+        if getattr(idx, "tz", None) is not None and target.tzinfo is None:
+            target = target.tz_localize(idx.tz)
+        elif getattr(idx, "tz", None) is not None and target.tzinfo is not None:
+            target = target.tz_convert(idx.tz)
+        if target in idx:
+            return int(idx.get_loc(target))
+        # Nearest prior bar (causal).
+        prior = idx[idx <= target]
+        if len(prior) == 0:
+            return None
+        return int(idx.get_loc(prior[-1]))
+    except Exception:
+        return None
 
 
 def _normalize_filter(raw: Any, *, version: str) -> FilterDecision:
     if isinstance(raw, FilterDecision):
         return raw
+    # Track 100 PaperFilterDecision dataclass
+    if hasattr(raw, "passed") and hasattr(raw, "failed"):
+        failed = getattr(raw, "failed", None) or []
+        if failed:
+            first = failed[0]
+            reason = str(
+                getattr(first, "feature", None)
+                or getattr(first, "label", None)
+                or getattr(first, "why", None)
+                or "reject"
+            )
+        else:
+            reason = "pass"
+        details: dict[str, Any] = {}
+        if hasattr(raw, "features"):
+            details["features"] = dict(getattr(raw, "features") or {})
+        if hasattr(raw, "as_dict") and callable(raw.as_dict):
+            details.update(raw.as_dict())
+        elif failed:
+            details["failed_features"] = [
+                (f.as_dict() if hasattr(f, "as_dict") else str(f)) for f in failed
+            ]
+        return FilterDecision(
+            passed=bool(raw.passed), reason=reason, version=version, details=details,
+        )
     if isinstance(raw, tuple) and raw:
         ok = bool(raw[0])
         reason = str(raw[1]) if len(raw) > 1 else ("pass" if ok else "reject")
@@ -231,6 +367,8 @@ def _find_c_ratchet_callable(mod: Any) -> Callable[..., Any]:
         "apply_c_ratchet_struct",
         "book_c_ratchet_struct",
         "exit_c_ratchet_struct",
+        "simulate_paper_exit",
+        "measure_exit_path",
     ):
         fn = getattr(mod, name, None)
         if callable(fn):
@@ -265,6 +403,21 @@ def _find_c_ratchet_callable(mod: Any) -> Callable[..., Any]:
     )
 
 
+def _bars_to_frame(bars: list[dict[str, Any]]) -> Any:
+    """OHLC path list → DataFrame for Track 100 measure_exit_path."""
+    import pandas as pd
+
+    if not bars:
+        return pd.DataFrame(columns=["open", "high", "low", "close"])
+    df = pd.DataFrame(bars)
+    if "ts" in df.columns:
+        df = df.set_index(pd.to_datetime(df["ts"]))
+    for col in ("open", "high", "low", "close"):
+        if col not in df.columns:
+            raise Track100Missing(f"exit path missing column {col}")
+    return df
+
+
 def simulate_c_ratchet_struct(
     bars: list[dict[str, Any]],
     *,
@@ -279,20 +432,74 @@ def simulate_c_ratchet_struct(
     `bars` are causal subsequent 1H bars (including the fill bar) with
     keys: ts, open, high, low, close.
     Returns None if the book is still open at the last bar (caller marks).
-    """
-    exit_mod = mod or load_exit_module()
-    fn = _find_c_ratchet_callable(exit_mod)
 
+    Binds to trail_exits.measure_exit_path + book_c_ratchet (or
+    paper_exit.simulate_paper_exit). Does not invent ratchet math.
+    `structure_level` is accepted for Peak Hour compatibility; Track 100 C
+    uses its own structure_lookback on the path.
+    """
+    del structure_level, signal_row  # Peak Hour args; C book ignores explicit level
+    exit_mod = mod or load_exit_module()
+    df = _bars_to_frame(bars)
+    if df is None or len(df) == 0:
+        return None
+
+    # Preferred: paper_exit.simulate_paper_exit(df, entry_i=0, entry=..., end_i=len-1)
+    sim_paper = getattr(exit_mod, "simulate_paper_exit", None)
+    if callable(sim_paper):
+        raw = sim_paper(
+            df,
+            entry_i=0,
+            entry=float(entry),
+            end_i=len(df) - 1,
+            paper_exit=EXIT_BOOK,
+        )
+        return _normalize_exit(raw)
+
+    # Next: measure_exit_path + book_c_ratchet on trail_exits / paper_exit.
+    measure = getattr(exit_mod, "measure_exit_path", None)
+    book_fn = getattr(exit_mod, "book_c_ratchet", None) or getattr(
+        exit_mod, "paper_exit_book", None
+    )
+    if measure is None or book_fn is None:
+        trail_path = resolve_track100_file("trail_exits.py")
+        if trail_path is not None:
+            trail = _load_module(trail_path, "exp0026_trail_exits")
+            measure = measure or getattr(trail, "measure_exit_path", None)
+            book_fn = book_fn or getattr(trail, "book_c_ratchet", None)
+    if callable(measure) and callable(book_fn):
+        book = book_fn()
+        # paper_exit_book / book_c_ratchet return ExitBook; tolerate nested callables.
+        if not hasattr(book, "horizon_bars") and callable(book):
+            book = book()
+        measured = measure(df, 0, book=book, entry=float(entry), cost=0.0)
+        if not isinstance(measured, dict) or not measured.get("valid"):
+            return None
+        exit_i = int(measured.get("exit_i", len(df) - 1))
+        ts = ""
+        try:
+            ts = str(df.index[exit_i])
+        except Exception:
+            ts = ""
+        return ExitFill(
+            exit_px=float(measured["exit"]),
+            reason=str(measured.get("exit_reason") or measured.get("reason") or "c_ratchet"),
+            bar_ts=ts,
+            extra=measured,
+        )
+
+    # Legacy generic binding (tests / alternate modules).
+    fn = _find_c_ratchet_callable(exit_mod)
     kwargs_list = [
         dict(
             bars=bars,
             entry=entry,
-            structure_level=structure_level,
-            signal_row=signal_row or {},
+            structure_level=None,
+            signal_row={},
         ),
-        dict(bars=bars, entry=entry, structure_level=structure_level),
-        dict(ohlc=bars, entry=entry, structure=structure_level),
-        dict(path=bars, entry_px=entry, area_low=structure_level),
+        dict(bars=bars, entry=entry, structure_level=None),
+        dict(ohlc=bars, entry=entry, structure=None),
+        dict(path=bars, entry_px=entry, area_low=None),
     ]
     raw = None
     last_err: Exception | None = None
@@ -305,7 +512,7 @@ def simulate_c_ratchet_struct(
             continue
     if raw is None:
         try:
-            raw = fn(bars, entry, structure_level)
+            raw = fn(bars, entry, None)
         except TypeError as exc:
             raise Track100Missing(
                 f"C_ratchet_struct callable signature not recognized: {exc}"
@@ -337,7 +544,13 @@ def _normalize_exit(raw: Any) -> ExitFill | None:
         return ExitFill(
             exit_px=float(px),
             reason=str(raw.get("reason") or raw.get("exit_reason") or "c_ratchet"),
-            bar_ts=str(raw.get("ts") or raw.get("bar_ts") or raw.get("exit_ts") or ""),
+            bar_ts=str(
+                raw.get("ts")
+                or raw.get("bar_ts")
+                or raw.get("exit_ts")
+                or raw.get("closed_et")
+                or ""
+            ),
             extra=raw,
         )
     return None

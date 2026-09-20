@@ -407,7 +407,8 @@ def simulate_book(
     seat_notional: float = SEAT_NOTIONAL,
     is_cut: date = IS_CUT_DEFAULT,
     window_end: date = WINDOW_END,
-    filter_fn: Callable[[dict[str, Any]], FilterDecision] | None = None,
+    daily_by_sym: dict[str, pd.DataFrame] | None = None,
+    filter_fn: Callable[..., FilterDecision] | None = None,
     exit_fn: Callable[..., ExitFill | None] | None = None,
 ) -> BookResult:
     """
@@ -415,6 +416,8 @@ def simulate_book(
 
     FIFO by (fill_ts, symbol). One open seat per symbol. Filter skips do not
     occupy a seat. Exits are C_ratchet_struct only (injected or Track 100).
+    When apply_filter is True and filter_fn is None, Track 100 features are
+    built from bars_by_sym + daily_by_sym (causal) — not Peak Hour scan fields.
     """
     filt = filter_fn or apply_paper_filter_winloss_v1
     xfn = exit_fn or (
@@ -425,6 +428,7 @@ def simulate_book(
             signal_row=signal_row,
         )
     )
+    dailies = daily_by_sym or {}
 
     ordered = sorted(signals, key=lambda s: (s.fill_ts, s.symbol, s.signal_ts))
     cash = float(starting_cash)
@@ -513,7 +517,16 @@ def simulate_book(
 
         row = signal_to_filter_row(sig)
         if apply_filter:
-            dec = filt(row)
+            h1 = bars_by_sym.get(sig.symbol)
+            daily = dailies.get(sig.symbol)
+            try:
+                dec = filt(
+                    row,
+                    und_1h=h1,
+                    daily_en=daily,
+                )
+            except TypeError:
+                dec = filt(row)
             filter_decisions.append(dec)
             if not dec.passed:
                 n_skip += 1
@@ -681,7 +694,8 @@ def run_variants(
     is_cut: date,
     window_end: date,
     include_unfiltered: bool = True,
-    filter_fn: Callable[[dict[str, Any]], FilterDecision] | None = None,
+    daily_by_sym: dict[str, pd.DataFrame] | None = None,
+    filter_fn: Callable[..., FilterDecision] | None = None,
     exit_fn: Callable[..., ExitFill | None] | None = None,
 ) -> dict[str, BookResult]:
     """Primary = filter ON. Side row (a) = same exits, filter OFF."""
@@ -692,6 +706,7 @@ def run_variants(
         apply_filter=True,
         is_cut=is_cut,
         window_end=window_end,
+        daily_by_sym=daily_by_sym,
         filter_fn=filter_fn,
         exit_fn=exit_fn,
     )
@@ -702,6 +717,7 @@ def run_variants(
             apply_filter=False,
             is_cut=is_cut,
             window_end=window_end,
+            daily_by_sym=daily_by_sym,
             filter_fn=filter_fn,
             exit_fn=exit_fn,
         )

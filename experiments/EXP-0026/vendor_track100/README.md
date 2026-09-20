@@ -20,7 +20,9 @@ Expected sources (first existing wins):
 Required files (copied if present):
 
 - `paper_filter.py` — frozen IS medians, `paper_filter_winloss_v1`
-- `paper_exit.py` and/or `trail_exits.py` — exact `C_ratchet_struct` book
+- `paper_exit.py` + `trail_exits.py` — exact `C_ratchet_struct` book
+- import closure (Modal path-bug fix): `features.py`, `playbook.py`,
+  `wave.py`, `backtest.py`, `leverage.py`
 - optional: `walkforward_5k.py`, `ops_stack_5k.py` (patterns only; book lives in Q-ALPHA)
 
 A `MANIFEST.json` with sha256 is written so the study can prove it did not
