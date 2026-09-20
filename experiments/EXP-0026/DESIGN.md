@@ -37,17 +37,22 @@ causal 1H-grid print after that scan window.
 ## Track 100 stack (frozen — do not recut)
 
 - Filter: `paper_filter_winloss_v1` from track-100 `paper_filter.py` (IS medians
-  already frozen; IS signal dates ≤ **2026-07-20**)
+  already frozen; study book split IS ≤ **2026-09-03**)
 - Exit: exact `C_ratchet_struct` from `paper_exit.py` / `trail_exits.py`
 - Book: $5k, 10 seats, $500/seat, 0.15% RT, **dollar equity**
 
 Vendor on the laptop: `py -3 experiments/EXP-0026/vendor_from_track100.py`
 
+That copy **must** include `features.py` (paper_filter does `from features import ...`).
+The Modal image mounts `vendor_track100/*.py`. Missing `features.py` is the
+confirmed walk-forward crash after the Peak Hour scan.
+
 ## Window
 
-- Target: **2026-01-20 → 2026-09-16** (~8 months), IS ≤ **2026-07-20**
-- If Peak Hour / Polygon history is shorter, use the longest honest causal
-  window and say so (no peeking to pick the window)
+- Aaron-locked: **2026-08-18 → 2026-09-19**
+- IS / OOS cut: **2026-09-03** (mid-window mini walk-forward)
+- Do **not** expand back to 8 months
+- Filter medians stay frozen inside Track 100 `paper_filter.py` (not recut on OOS)
 
 ## Honesty
 

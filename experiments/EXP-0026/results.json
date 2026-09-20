@@ -14,15 +14,15 @@
     "rank": "dollar_equity"
   },
   "window": {
-    "start": "2026-01-20",
-    "end": "2026-09-16",
-    "target_start": "2026-01-20",
-    "target_end": "2026-09-16",
+    "start": "2026-08-18",
+    "end": "2026-09-19",
+    "target_start": "2026-08-18",
+    "target_end": "2026-09-19",
     "snapped": false,
     "notes": [],
-    "months": 7.9
+    "months": 1.1
   },
-  "is_cut": "2026-07-20",
+  "is_cut": "2026-09-03",
   "track100": {
     "paper_filter": null,
     "paper_exit": null,

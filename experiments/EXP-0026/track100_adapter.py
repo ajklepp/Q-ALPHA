@@ -21,7 +21,23 @@ REPO = EXP_DIR.parents[1]
 
 FILTER_VERSION = "paper_filter_winloss_v1"
 EXIT_BOOK = "C_ratchet_struct"
-IS_CUT_DEFAULT = "2026-07-20"
+# Fallback only when paper_filter.py has no IS constant. The study book split
+# is Aaron-locked in php_t100_wf_engine.IS_CUT_DEFAULT (2026-09-03 mini WF).
+IS_CUT_DEFAULT = "2026-09-03"
+
+# paper_filter.py does `from features import ...`. These must sit next to it
+# on the Modal image (VENDOR.glob('*.py')). Missing features.py is the
+# confirmed ModuleNotFoundError after ~8232 Peak Hour signals.
+IMPORT_CLOSURE = (
+    "paper_filter.py",
+    "paper_exit.py",
+    "trail_exits.py",
+    "features.py",
+    "playbook.py",
+    "wave.py",
+    "backtest.py",
+    "leverage.py",
+)
 
 
 @dataclass
@@ -83,48 +99,66 @@ def track100_available() -> dict[str, Any]:
     filt = resolve_track100_file("paper_filter.py")
     exit_py = resolve_track100_file("paper_exit.py")
     trail = resolve_track100_file("trail_exits.py")
+    feat = resolve_track100_file("features.py")
+    closure = {n: (str(p) if (p := resolve_track100_file(n)) else None) for n in IMPORT_CLOSURE}
+    missing = [n for n, p in closure.items() if p is None]
     return {
         "paper_filter": str(filt) if filt else None,
         "paper_exit": str(exit_py) if exit_py else None,
         "trail_exits": str(trail) if trail else None,
+        "features": str(feat) if feat else None,
         "filter_ok": filt is not None,
         "exit_ok": exit_py is not None or trail is not None,
-        "ready": filt is not None and (exit_py is not None or trail is not None),
+        "features_ok": feat is not None,
+        "closure": closure,
+        "closure_missing": missing,
+        # Fail closed if features.py is absent — otherwise Modal scans ~8k
+        # signals then dies in load_filter_module with ModuleNotFoundError.
+        "ready": (
+            filt is not None
+            and (exit_py is not None or trail is not None)
+            and feat is not None
+        ),
         "search_roots": [str(p) for p in track100_search_roots()],
     }
 
 
 def _ensure_track100_sys_path(module_path: Path) -> None:
     """
-    Put the Track 100 package root first on sys.path.
+    Insert vendor_track100 (then the loaded file's directory) at sys.path[0]
+    BEFORE exec'ing paper_filter.py / exit modules.
 
-    WHY: vendored `paper_filter.py` does `from features import ...`. Without
-    this, Python can resolve Q-ALPHA's root `features.py` (wrong module) or
-    raise ModuleNotFoundError on Modal where only `/pkg/exp0026/vendor_track100`
-    has the Track 100 files. That was the Modal "path bug".
+    WHY: vendored `paper_filter.py` does
+        from features import daily_feature_dict, enrich_features_1h,
+            enrich_features_daily, row_to_feature_dict
+    On Modal the image only has `/pkg/exp0026/vendor_track100/*.py`. Without
+    this insert, `import features` raises ModuleNotFoundError (confirmed after
+    ~8232 Peak Hour signals). Q-ALPHA's root `features.py` must not win either.
     """
-    root = str(module_path.parent.resolve())
-    while root in sys.path:
-        sys.path.remove(root)
-    sys.path.insert(0, root)
+    dirs: list[str] = []
+    for candidate in (VENDOR, module_path.parent):
+        try:
+            root = str(Path(candidate).resolve())
+        except Exception:
+            continue
+        if root not in dirs:
+            dirs.append(root)
+    # Insert last-first so VENDOR is sys.path[0].
+    for root in reversed(dirs):
+        while root in sys.path:
+            sys.path.remove(root)
+        sys.path.insert(0, root)
 
 
 def _load_module(path: Path, name: str) -> Any:
-    """Load a Track 100 .py with its sibling package root on sys.path."""
+    """Load a Track 100 .py with vendor_track100 on sys.path (import siblings)."""
     _ensure_track100_sys_path(path)
-    # Drop stale sibling modules so a prior bad import (e.g. Q-ALPHA features)
-    # cannot shadow the vendored Track 100 package.
-    for stale in (
-        "features",
-        "playbook",
-        "wave",
-        "backtest",
-        "leverage",
-        "trail_exits",
-        "paper_filter",
-        "paper_exit",
-    ):
-        sys.modules.pop(stale, None)
+    # Drop Q-ALPHA `features` shadow and the target module so vendor siblings
+    # resolve. Do NOT pop already-preloaded exit siblings (trail_exits) —
+    # paper_exit does `from trail_exits import ...`.
+    sys.modules.pop("features", None)
+    sys.modules.pop(name, None)
+    sys.modules.pop(path.stem, None)
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise Track100Missing(f"cannot load {path}")
@@ -138,13 +172,20 @@ def _load_module(path: Path, name: str) -> Any:
 
 
 def load_filter_module() -> Any:
-    """Import vendored / sibling paper_filter.py."""
+    """Import vendored / sibling paper_filter.py with vendor dir on sys.path."""
     path = resolve_track100_file("paper_filter.py")
     if path is None:
         raise Track100Missing(
             "paper_filter.py not found. Run vendor_from_track100.py "
             "or set TRACK100_ROOT."
         )
+    if resolve_track100_file("features.py") is None:
+        raise Track100Missing(
+            "features.py not found next to paper_filter.py. "
+            "Re-run vendor_from_track100.py (COPY_NAMES includes features.py)."
+        )
+    # Explicit vendor insert before exec — paper_filter imports `features`.
+    _ensure_track100_sys_path(path)
     return _load_module(path, "exp0026_paper_filter")
 
 
@@ -152,6 +193,8 @@ def load_exit_module() -> Any:
     """Import paper_exit.py (preferred) and ensure trail_exits is loadable."""
     trail_path = resolve_track100_file("trail_exits.py")
     if trail_path is not None:
+        # Vendor dir on sys.path so exit siblings (`features`, `trail_exits`) resolve.
+        _ensure_track100_sys_path(trail_path)
         # Preload so paper_exit's `from trail_exits import ...` resolves.
         _load_module(trail_path, "exp0026_trail_exits")
     for fname, modname in (
@@ -176,7 +219,7 @@ def _call_first(obj: Any, names: list[str], *args, **kwargs) -> Any:
 
 
 def frozen_is_cut(mod: Any | None = None) -> str:
-    """IS cut date string from paper_filter, else Track 100 default 2026-07-20."""
+    """IS cut date string from paper_filter, else study default 2026-09-03."""
     if mod is None:
         try:
             mod = load_filter_module()

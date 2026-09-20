@@ -104,6 +104,7 @@ def main() -> int:
         print(f"  root={used_root}")
         print(f"  found={sorted(found)}")
         print(f"  missing={missing_required}")
+        print("  features.py is required: paper_filter does `from features import ...`")
         return 3
 
     VENDOR.mkdir(parents=True, exist_ok=True)

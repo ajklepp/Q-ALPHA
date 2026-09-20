@@ -16,9 +16,9 @@ Fill at the next 1H bar OPEN after the signal bar close (tsd_1h_signal bars are 
 
 ## Walk-forward
 
-- Target window: 2026-01-20 → 2026-09-16 (~8 months)
-- Used window: **2026-01-20 → 2026-09-16** (7.9 months)
-- IS signal dates ≤ **2026-07-20**; OOS after
+- Target window: 2026-08-18 → 2026-09-19 (Aaron-locked mini WF; do not expand to 8 months)
+- Used window: **2026-08-18 → 2026-09-19** (1.1 months)
+- IS signal dates ≤ **2026-09-03**; OOS after
 - Filter thresholds frozen on IS only (Track 100 `paper_filter.py` — not recut on OOS)
 - Rank / report: **dollar equity** (occupancy matters)
 
@@ -34,14 +34,17 @@ Fill at the next 1H bar OPEN after the signal bar close (tsd_1h_signal bars are 
 **No invented P&L.** This VM could not finish a live Polygon walk-forward.
 Reason: `polygon_secret_or_track100_modules_not_on_this_vm`
 
+Track 100 is a private sibling repo; this VM cannot vendor `features.py`.
 Run on the laptop (Track 100 sibling + Modal Polygon secret):
 
 ```powershell
 cd C:\Users\ajkle\Documents\Q-ALPHA
+git fetch && git checkout cursor/exp0026-vendor-features-fa9c
 py -3 experiments\EXP-0026\vendor_from_track100.py
 .\venv\Scripts\python.exe -m modal run experiments/EXP-0026/study_php_t100_wf_5k_modal.py
 ```
 
+That copy must include `features.py` (`paper_filter.py` does `from features import ...`).
 Artifacts overwrite `experiments/EXP-0026/results.md` and `results.json`.
 
 ## Honesty
