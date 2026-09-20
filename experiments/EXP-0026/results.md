@@ -1,6 +1,6 @@
 # EXP-0026 — Peak Hour signals × Track 100 filter + C_ratchet ($5k / 10 seats)
 
-**Status:** `blocked`
+**Status:** `ok`
 
 ## Question
 
@@ -17,7 +17,7 @@ Fill at the next 1H bar OPEN after the signal bar close (tsd_1h_signal bars are 
 ## Walk-forward
 
 - Target window: 2026-08-18 → 2026-09-19 (Aaron-locked mini WF; do not expand to 8 months)
-- Used window: **2026-08-18 → 2026-09-19** (1.1 months)
+- Used window: **2026-08-18 → 2026-09-18** (1.0 months, snapped to available bars)
 - IS signal dates ≤ **2026-09-03**; OOS after
 - Filter thresholds frozen on IS only (Track 100 `paper_filter.py` — not recut on OOS)
 - Rank / report: **dollar equity** (occupancy matters)
@@ -29,27 +29,56 @@ Fill at the next 1H bar OPEN after the signal bar close (tsd_1h_signal bars are 
 3. Exit: `C_ratchet_struct` only
 4. Book: $5k, 10 concurrent seats, $500/seat, 0.15% RT
 
-## P&L
+## P&L (dollar book — primary)
 
-**No invented P&L.** This VM could not finish a live Polygon walk-forward.
-Reason: `polygon_secret_or_track100_modules_not_on_this_vm`
+### Peak Hour signals + paper_filter_winloss_v1 + C_ratchet_struct
+- Starting cash: **$5,000.00**
+- Final $: **$4,598.70**
+- Total P&L: **$-401.30**
+- IS-end $: **$4,982.23**
+- OOS $ (book at end): **$4,598.70**
+- OOS P&L (end − IS-end): **$-383.53**
+- Win%: **43.2%** (132 closed)
+- Max DD (equity): **-12.4%**
+- n signals: **8232**
+- filter pass / skip: **1443 / 6789**
+- skip reasons: `{'d_px_ema200': 5504, 'h1_ema50_chg_5': 1053, 'd_sma50_200_spread': 147, 'd_sma200_chg_5': 65, 'd_ema200_chg_5': 20}`
+- n fills: **132**
+- occupancy skips (full / already-open / cash): **258 / 127 / 926**
+- avg occupancy (at fills): **8.36 / 10**
 
-Track 100 is a private sibling repo; this VM cannot vendor `features.py`.
-Run on the laptop (Track 100 sibling + Modal Polygon secret):
+## Side row (a) — same signals + C_ratchet, **no** Track 100 filter
 
-```powershell
-cd C:\Users\ajkle\Documents\Q-ALPHA
-git fetch && git checkout cursor/exp0026-vendor-features-fa9c
-py -3 experiments\EXP-0026\vendor_from_track100.py
-.\venv\Scripts\python.exe -m modal run experiments/EXP-0026/study_php_t100_wf_5k_modal.py
-```
+### Unfiltered
+- Starting cash: **$5,000.00**
+- Final $: **$4,725.71**
+- Total P&L: **$-274.29**
+- IS-end $: **$4,878.00**
+- OOS $ (book at end): **$4,725.71**
+- OOS P&L (end − IS-end): **$-152.29**
+- Win%: **45.8%** (107 closed)
+- Max DD (equity): **-8.2%**
+- n signals: **8232**
+- filter pass / skip: **8232 / 0**
+- skip reasons: `{}`
+- n fills: **107**
+- occupancy skips (full / already-open / cash): **2338 / 133 / 5654**
+- avg occupancy (at fills): **8.71 / 10**
 
-That copy must include `features.py` (`paper_filter.py` does `from features import ...`).
-Artifacts overwrite `experiments/EXP-0026/results.md` and `results.json`.
+## Side row (b) — Peak Hour live-style exits
+
+Skipped (not cheap / not the question). Live keep-profit stays on the Peak Hour book; this study does not replay it.
+
+## Window notes
+
+- end snapped to last available bar date 2026-09-18
+
+**Runtime:** 837.0s
 
 ## Honesty
 
 - No look-ahead on features, HTF membership, or fills.
 - Filter medians were **not** recut on OOS.
 - Live Peak Hour gates were **not** changed. No IBKR orders.
+- Runner: **local Polygon** (`study_php_t100_wf_5k_local.py`) — same engine/window/IS cut as the Modal study. Modal CLI had no `MODAL_TOKEN_*` on this host; P&L is from live Polygon bars, not invented.
 
