@@ -5,11 +5,22 @@ This folder is the **only** place EXP-0026 is allowed to read
 
 **Do not invent medians or ratchet constants here.**
 
+`paper_filter.py` imports Track 100 `features.py`:
+
+```python
+from features import daily_feature_dict, enrich_features_1h, enrich_features_daily, row_to_feature_dict
+```
+
+The Modal image mounts `VENDOR.glob('*.py')`. If `features.py` is missing, the
+walk-forward scan finishes then dies in `load_filter_module`.
+
 Copy from the Track 100 repo on the laptop:
 
 ```powershell
 cd C:\Users\ajkle\Documents\Q-ALPHA
+git fetch && git checkout cursor/exp0026-vendor-features-fa9c
 py -3 experiments\EXP-0026\vendor_from_track100.py
+.\venv\Scripts\python.exe -m modal run experiments/EXP-0026/study_php_t100_wf_5k_modal.py
 ```
 
 Expected sources (first existing wins):

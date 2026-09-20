@@ -75,10 +75,11 @@ MAX_SEATS = 10
 SEAT_NOTIONAL = 500.0
 COST_PER_TRADE = 0.0015  # 0.15% RT proxy, same as EXP-0012
 
-# Window: align Track 100 IS cut; ~8 months ending ~2026-09-16.
-WINDOW_END = date(2026, 9, 16)
-WINDOW_START_TARGET = date(2026, 1, 20)  # 8 calendar months before 2026-09-16
-IS_CUT_DEFAULT = date(2026, 7, 20)
+# Aaron-locked short signal window (do NOT expand back to 8 months).
+WINDOW_START_TARGET = date(2026, 8, 18)
+WINDOW_END = date(2026, 9, 19)
+# Mid-window mini walk-forward split. Filter medians stay frozen in paper_filter.py.
+IS_CUT_DEFAULT = date(2026, 9, 3)
 
 NYSE_HOLIDAYS = {
     "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03",
@@ -824,7 +825,8 @@ def render_results_md(payload: dict[str, Any], variants: dict[str, BookResult] |
         "## Walk-forward",
         "",
         f"- Target window: {payload.get('window', {}).get('target_start')} → "
-        f"{payload.get('window', {}).get('target_end')} (~8 months)",
+        f"{payload.get('window', {}).get('target_end')} "
+        "(Aaron-locked mini WF; do not expand to 8 months)",
         f"- Used window: **{payload.get('window', {}).get('start')} → "
         f"{payload.get('window', {}).get('end')}** "
         f"({payload.get('window', {}).get('months')} months"
@@ -852,6 +854,7 @@ def render_results_md(payload: dict[str, Any], variants: dict[str, BookResult] |
             "",
             "```powershell",
             "cd C:\\Users\\ajkle\\Documents\\Q-ALPHA",
+            "git fetch && git checkout cursor/exp0026-vendor-features-fa9c",
             "py -3 experiments\\EXP-0026\\vendor_from_track100.py",
             ".\\venv\\Scripts\\python.exe -m modal run experiments/EXP-0026/study_php_t100_wf_5k_modal.py",
             "```",

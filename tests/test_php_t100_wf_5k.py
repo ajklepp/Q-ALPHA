@@ -266,18 +266,18 @@ class BookOccupancyTests(unittest.TestCase):
 
     def test_is_oos_split_on_signal_date(self):
         sigs = [
-            _sig("OLD", "2026-07-20", 10, 10.0),
-            _sig("NEW", "2026-07-21", 10, 10.0),
+            _sig("OLD", "2026-09-03", 10, 10.0),
+            _sig("NEW", "2026-09-04", 10, 10.0),
         ]
         bars = {
-            "OLD": _bars_from_path("2026-07-20", 10, [(10, 10.1, 9.9, 10), (10, 10, 10, 10)]),
-            "NEW": _bars_from_path("2026-07-21", 10, [(10, 10.1, 9.9, 10), (10, 10, 10, 10)]),
+            "OLD": _bars_from_path("2026-09-03", 10, [(10, 10.1, 9.9, 10), (10, 10, 10, 10)]),
+            "NEW": _bars_from_path("2026-09-04", 10, [(10, 10.1, 9.9, 10), (10, 10, 10, 10)]),
         }
         book = simulate_book(
             sigs, bars, apply_filter=False,
             exit_fn=_hard_target_exit,
-            is_cut=IS_CUT_DEFAULT,
-            window_end=date(2026, 7, 22),
+            is_cut=date(2026, 9, 3),
+            window_end=date(2026, 9, 4),
         )
         splits = {t.symbol: t.split for t in book.trades}
         self.assertEqual(splits["OLD"], "IS")
@@ -293,7 +293,7 @@ class AdapterAndResultsTests(unittest.TestCase):
             apply_paper_filter_winloss_v1({"scan_score": 30, "buy_signal": True})
 
     def test_blocked_payload_has_no_invented_pnl(self):
-        window = choose_window(date(2026, 6, 8), date(2026, 9, 4))
+        window = choose_window(date(2026, 8, 20), date(2026, 9, 10))
         payload = build_results_payload(
             variants=None,
             window=window,
@@ -307,10 +307,115 @@ class AdapterAndResultsTests(unittest.TestCase):
         self.assertTrue(window["snapped"])
 
     def test_window_snap_notes_shorter_history(self):
-        w = choose_window(date(2026, 6, 8), date(2026, 9, 4))
-        self.assertEqual(w["start"], "2026-06-08")
-        self.assertEqual(w["end"], "2026-09-04")
+        w = choose_window(date(2026, 8, 20), date(2026, 9, 10))
+        self.assertEqual(w["start"], "2026-08-20")
+        self.assertEqual(w["end"], "2026-09-10")
         self.assertTrue(w["snapped"])
+        self.assertEqual(w["target_start"], "2026-08-18")
+        self.assertEqual(w["target_end"], "2026-09-19")
+
+    def test_locked_short_window_not_eight_months(self):
+        w = choose_window(None, None)
+        self.assertEqual(w["start"], "2026-08-18")
+        self.assertEqual(w["end"], "2026-09-19")
+        self.assertEqual(IS_CUT_DEFAULT, date(2026, 9, 3))
+        self.assertFalse(w["snapped"])
+
+    def test_daily_index_tz_localize_naive_dates(self):
+        daily = pd.DataFrame({"date": ["2026-08-18", "2026-08-19"], "close": [10.0, 11.0]})
+        daily.index = pd.to_datetime(daily["date"], utc=False).dt.tz_localize(ET)
+        self.assertIsNotNone(daily.index.tz)
+
+    def test_grouped_days_items_needs_parentheses(self):
+        grouped = {"days": {"2026-08-18": [{"T": "AAA"}]}}
+        pairs = list((grouped.get("days") or {}).items())
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0][0], "2026-08-18")
+        self.assertEqual(pairs[0][1][0]["T"], "AAA")
+
+
+# Stubs for the vendor-path import test only. Not Track 100 math. Not used for P&L.
+_VENDOR_FEATURES_STUB = '''\
+"""Test-only sibling so paper_filter's `from features import ...` resolves."""
+
+def daily_feature_dict(*args, **kwargs):
+    return {}
+
+def enrich_features_1h(df):
+    return df
+
+def enrich_features_daily(df):
+    return df
+
+def row_to_feature_dict(*args, **kwargs):
+    return {}
+'''
+
+_VENDOR_FILTER_STUB = '''\
+from features import daily_feature_dict, enrich_features_1h, enrich_features_daily, row_to_feature_dict
+
+FILTER_VERSION = "paper_filter_winloss_v1"
+
+def evaluate_paper_filter(feats):
+    daily_feature_dict()
+    enrich_features_1h(None)
+    enrich_features_daily(None)
+    row_to_feature_dict()
+    return True
+'''
+
+
+class VendorFilterImportTests(unittest.TestCase):
+    """Modal path bug: paper_filter.py imports features from vendor_track100 only."""
+
+    def test_load_filter_module_with_only_vendor_on_path(self):
+        import track100_adapter as t100
+
+        repo_root = ROOT.resolve()
+        saved_path = sys.path[:]
+        saved_feat = sys.modules.get("features")
+        saved_filt = sys.modules.get("paper_filter")
+        saved_named = sys.modules.get("exp0026_paper_filter")
+        td = None
+        try:
+            from tempfile import TemporaryDirectory
+
+            td = TemporaryDirectory()
+            vendor = Path(td.name)
+            (vendor / "features.py").write_text(_VENDOR_FEATURES_STUB, encoding="utf-8")
+            (vendor / "paper_filter.py").write_text(_VENDOR_FILTER_STUB, encoding="utf-8")
+
+            # Only vendor_track100 on path — no Q-ALPHA repo, no Track 100 clone.
+            sys.path[:] = [str(vendor)]
+            for name in ("features", "paper_filter", "exp0026_paper_filter"):
+                sys.modules.pop(name, None)
+
+            with patch.object(t100, "VENDOR", vendor), patch.dict(os.environ, {"TRACK100_ROOT": ""}, clear=False):
+                # Search roots: vendor only (no sibling Track 100 repo).
+                with patch.object(t100, "track100_search_roots", lambda: [vendor]):
+                    mod = t100.load_filter_module()
+
+            self.assertTrue(hasattr(mod, "evaluate_paper_filter"))
+            self.assertTrue(bool(mod.evaluate_paper_filter({})))
+            feat_mod = sys.modules.get("features")
+            self.assertIsNotNone(feat_mod)
+            feat_file = Path(getattr(feat_mod, "__file__", "")).resolve()
+            self.assertEqual(feat_file.parent, vendor.resolve())
+            self.assertNotEqual(feat_file, (repo_root / "features.py").resolve())
+            self.assertTrue(str(vendor.resolve()) in [str(Path(p).resolve()) for p in sys.path if p])
+        finally:
+            sys.path[:] = saved_path
+            for name, prev in (
+                ("features", saved_feat),
+                ("paper_filter", saved_filt),
+                ("exp0026_paper_filter", saved_named),
+            ):
+                if prev is not None:
+                    sys.modules[name] = prev
+                else:
+                    sys.modules.pop(name, None)
+            if td is not None:
+                td.cleanup()
 
 
 if __name__ == "__main__":

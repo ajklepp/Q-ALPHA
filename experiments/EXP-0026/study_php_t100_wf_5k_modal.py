@@ -59,6 +59,12 @@ _image = _add_if_exists(
 )
 for vend in sorted(VENDOR.glob("*.py")):
     _image = _add_if_exists(_image, vend, f"/pkg/exp0026/vendor_track100/{vend.name}")
+# Explicit features.py mount: paper_filter.py does `from features import ...`.
+# If vendor_from_track100.py was not re-run, this no-ops (file missing) and
+# local_entrypoint fail-closes before the expensive scan.
+_image = _add_if_exists(
+    _image, VENDOR / "features.py", "/pkg/exp0026/vendor_track100/features.py",
+)
 _image = _add_if_exists(
     _image, VENDOR / "MANIFEST.json", "/pkg/exp0026/vendor_track100/MANIFEST.json",
 )
@@ -192,6 +198,9 @@ def run_walkforward() -> dict[str, Any]:
     t0 = time.time()
     sys.path.insert(0, "/pkg/candidates")
     sys.path.insert(0, "/pkg/exp0026")
+    # Vendor first so `from features import ...` inside paper_filter.py resolves
+    # even if a caller imports before load_filter_module.
+    sys.path.insert(0, "/pkg/exp0026/vendor_track100")
     os.environ.setdefault("PHP_EQUAL_SIGNAL", "1")
 
     import pandas as pd
@@ -210,7 +219,6 @@ def run_walkforward() -> dict[str, Any]:
     from track100_adapter import (
         Track100Missing,
         adapter_selftest,
-        frozen_is_cut,
         track100_available,
     )
     from universe_filter import EXCLUDE_SYMBOLS
@@ -218,11 +226,9 @@ def run_walkforward() -> dict[str, Any]:
     ET = pytz.timezone("America/New_York")
     key = os.environ.get("POLYGON_API_KEY") or ""
     avail = track100_available()
-    try:
-        is_cut_s = frozen_is_cut()
-        is_cut = date.fromisoformat(is_cut_s[:10])
-    except Exception:
-        is_cut = IS_CUT_DEFAULT
+    # Aaron-locked mid-window mini WF. Do not substitute Track 100's original
+    # 2026-07-20 IS median-cut (that would make 2026-08-18→09-19 100% OOS).
+    is_cut = IS_CUT_DEFAULT
 
     window_meta = choose_window(None, None)
     extra: dict[str, Any] = {
@@ -269,7 +275,7 @@ def run_walkforward() -> dict[str, Any]:
 
     # Pivot grouped → per-symbol daily frames (oldest→newest).
     by_sym: dict[str, list[dict[str, Any]]] = {}
-    for ds, rows in grouped.get("days") or {}.items():
+    for ds, rows in (grouped.get("days") or {}).items():
         for r in rows:
             sym = r["T"]
             if sym in EXCLUDE_SYMBOLS:
@@ -290,7 +296,7 @@ def run_walkforward() -> dict[str, Any]:
         if len(recs) < 60:
             continue
         daily = pd.DataFrame(recs)
-        daily.index = pd.to_datetime(daily["date"]).tz_localize(ET)
+        daily.index = pd.to_datetime(daily["date"], utc=False).dt.tz_localize(ET)
         if float(daily["close"].max()) < 5:
             continue
         daily_frames[sym] = daily
@@ -449,6 +455,7 @@ def run_walkforward() -> dict[str, Any]:
 def main() -> None:
     """Run the study on Modal and write experiments/EXP-0026/results.* locally."""
     sys.path.insert(0, str(EXP_DIR))
+    sys.path.insert(0, str(VENDOR))
     from php_t100_wf_engine import (
         BookResult,
         IS_CUT_DEFAULT,
@@ -460,9 +467,11 @@ def main() -> None:
 
     # Fail closed before paying for a Modal container if vendor snapshot is incomplete.
     avail = track100_available()
+    vend_py = sorted(p.name for p in VENDOR.glob("*.py"))
     print("EXP-0026 — Peak Hour × Track100 $5k WF", flush=True)
+    print(f"vendor_track100 py: {vend_py}", flush=True)
     print(f"track100 visible: {avail}", flush=True)
-    if not avail.get("ready"):
+    if "features.py" not in vend_py or not avail.get("ready"):
         window = choose_window(None, None)
         payload = build_results_payload(
             variants=None,
@@ -470,7 +479,7 @@ def main() -> None:
             is_cut=IS_CUT_DEFAULT,
             status="blocked",
             blocked_reason="track100_modules_missing_run_vendor_from_track100",
-            extra={"track100": avail},
+            extra={"track100": avail, "vendor_py": vend_py},
         )
         write_results(payload, None)
         print("BLOCKED track100_modules_missing_run_vendor_from_track100", flush=True)
