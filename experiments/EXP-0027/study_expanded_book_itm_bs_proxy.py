@@ -139,11 +139,58 @@ def _looks_like_summary(row: dict) -> bool:
     return bool(keys & _SUMMARY_KEYS)
 
 
+def _half_equity_name(raw: str | None) -> str | None:
+    """Half-equity seat book, or None when the cell is an exit model.
+
+    canonical_book returns the normalized text for unknown labels such as
+    C_ratchet_struct. Those are not seat books.
+    """
+    canon = canonical_book(raw)
+    if canon in {EXPANDED_BOOK, BASELINE_BOOK}:
+        return canon
+    return None
+
+
+def _explicit_seat_book(row: dict) -> str | None:
+    """Seat book on this row.
+
+    Modal rows put the seat book in comparison (expanded_half_equity_2) and
+    the exit book in book (C_ratchet_struct). comparison, book_name, variant,
+    and seat_book win. book is used only when it is itself a half-equity name.
+    """
+    for key in ("comparison", "book_name", "variant", "seat_book", "book"):
+        raw = tape._first(row, key)
+        if raw in (None, ""):
+            continue
+        named = _half_equity_name(str(raw))
+        if named:
+            return named
+    return None
+
+
 def _row_book(row: dict, inherited: str | None) -> str | None:
-    explicit = tape._first(row, "book", "book_name", "variant", "seat_book")
-    if explicit not in (None, ""):
-        return canonical_book(str(explicit)) or str(explicit)
-    return canonical_book(inherited) if inherited else None
+    """Seat book for filtering. An exit-only book column does not count."""
+    explicit = _explicit_seat_book(row)
+    if explicit:
+        return explicit
+    return _half_equity_name(inherited) if inherited else None
+
+
+def _stamp_inherited_book(row: dict, inherited_book: str | None) -> None:
+    """Copy a parent seat book onto a row that does not already name one.
+
+    Does not overwrite book when that column is the exit model.
+    """
+    if _explicit_seat_book(row):
+        return
+    inherited = _half_equity_name(inherited_book)
+    if not inherited:
+        return
+    existing = tape._first(row, "book")
+    if existing in (None, "") or _half_equity_name(str(existing)):
+        row["book"] = inherited
+    elif tape._first(row, "comparison") in (None, ""):
+        row["comparison"] = inherited
 
 
 def collect_trade_rows(obj: Any, inherited_book: str | None = None) -> list[dict]:
@@ -163,8 +210,7 @@ def collect_trade_rows(obj: Any, inherited_book: str | None = None) -> list[dict
                     found.extend(collect_trade_rows(item, inherited_book))
                     continue
                 row = dict(item)
-                if _row_book(row, inherited_book) and not tape._first(row, "book", "book_name", "variant", "seat_book"):
-                    row["book"] = _row_book(row, inherited_book)
+                _stamp_inherited_book(row, inherited_book)
                 found.append(row)
             return found
         for item in obj:
@@ -174,15 +220,11 @@ def collect_trade_rows(obj: Any, inherited_book: str | None = None) -> list[dict
         return found
     if _looks_like_trade(obj):
         row = dict(obj)
-        if _row_book(row, inherited_book) and not tape._first(row, "book", "book_name", "variant", "seat_book"):
-            row["book"] = _row_book(row, inherited_book)
+        _stamp_inherited_book(row, inherited_book)
         return [row]
     list_keys = [key for key in obj if str(key).lower() in _LIST_KEYS]
     if list_keys:
-        parent = inherited_book
-        named = tape._first(obj, "book", "book_name", "name", "id")
-        if named:
-            parent = canonical_book(str(named)) or str(named)
+        parent = _row_book(obj, inherited_book) or inherited_book
         # One list only. A file that stores the same fills under two keys
         # would otherwise be counted twice.
         order = ("trades", "fills", "closed_trades", "closed", "rows")
@@ -220,8 +262,7 @@ def collect_summaries(obj: Any, inherited_book: str | None = None) -> list[dict[
         book = _row_book(obj, inherited_book)
         found.append({"book": book, "summary": obj})
         return found
-    named = tape._first(obj, "book", "book_name", "name", "id")
-    parent = canonical_book(str(named)) if named else inherited_book
+    parent = _row_book(obj, inherited_book) or inherited_book
     for key, val in obj.items():
         canon = canonical_book(str(key))
         next_book = canon if canon in {EXPANDED_BOOK, BASELINE_BOOK} else parent

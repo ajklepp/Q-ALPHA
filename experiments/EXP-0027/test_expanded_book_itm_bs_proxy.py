@@ -9,9 +9,11 @@ from pathlib import Path
 from study_expanded_book_itm_bs_proxy import (
     BANNER,
     EXPANDED_BOOK,
+    _row_book,
     choose_tape,
     comparison_line,
     find_tape_files,
+    load_tape_file,
     parse_tape_payload,
     price_expanded_trades,
     summarize_expanded,
@@ -67,6 +69,56 @@ class ExpandedBookTests(unittest.TestCase):
         self.assertEqual(parsed["trades"][0]["traded"], "AMD")
         self.assertEqual(parsed["trades"][0]["pnl_usd"], -25.0)
         self.assertEqual(parsed["dropped"]["wrong_book"], 1)
+
+    def test_modal_csv_comparison_is_the_seat_book(self) -> None:
+        """Modal rows store the seat book in comparison and the exit in book."""
+        row = {
+            "comparison": "expanded_half_equity_2",
+            "book": "C_ratchet_struct",
+            "traded": "AMD",
+            "entry": 80,
+            "exit": 70,
+            "pnl_usd": -25.0,
+            "entry_date": "2026-03-02",
+            "exit_date": "2026-03-06",
+        }
+        self.assertEqual(_row_book(row, None), EXPANDED_BOOK)
+        self.assertIsNone(_row_book({"book": "C_ratchet_struct", "traded": "AMD"}, None))
+        parsed = parse_tape_payload(
+            [
+                row,
+                {
+                    "comparison": "baseline_half_equity_2",
+                    "book": "C_ratchet_struct",
+                    "traded": "NVDA",
+                    "entry": 100,
+                    "exit": 110,
+                    "pnl_usd": 400,
+                    "entry_date": "2026-02-02",
+                    "exit_date": "2026-02-06",
+                },
+            ],
+            "expanded",
+        )
+        self.assertTrue(parsed["ok"])
+        self.assertEqual(len(parsed["trades"]), 1)
+        self.assertEqual(parsed["trades"][0]["book"], EXPANDED_BOOK)
+        self.assertEqual(parsed["trades"][0]["traded"], "AMD")
+        self.assertEqual(parsed["trades"][0]["pnl_usd"], -25.0)
+        self.assertNotIn("option_pnl_usd", parsed["trades"][0])
+        self.assertEqual(parsed["dropped"]["wrong_book"], 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "universe_expand_movers_trades.csv"
+            path.write_text(
+                "comparison,book,traded,entry,exit,pnl_usd,entry_date,exit_date\n"
+                "expanded_half_equity_2,C_ratchet_struct,AMD,80,70,-25,2026-03-02,2026-03-06\n",
+                encoding="utf-8",
+            )
+            loaded = load_tape_file(path, "expanded")
+        self.assertTrue(loaded["ok"])
+        self.assertEqual(loaded["trades"][0]["book"], EXPANDED_BOOK)
+        self.assertEqual(loaded["trades"][0]["pnl_usd"], -25.0)
+        self.assertNotIn("option_pnl_usd", loaded["trades"][0])
 
     def test_book_key_stamps_rows_that_omit_the_field(self) -> None:
         payload = {
