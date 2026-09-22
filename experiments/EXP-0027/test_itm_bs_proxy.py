@@ -13,7 +13,11 @@ from study_itm_bs_proxy import (
     bull_regime,
     choose_model_expiry,
     choose_model_strike,
+    choose_spot,
     implied_vol,
+    iv_samples_from_bars,
+    last_hist_close,
+    quote_mark,
     simulate_bs_call,
     simulate_stock_100,
     sma_cross_up,
@@ -138,6 +142,35 @@ class RuleTests(unittest.TestCase):
         self.assertAlmostEqual(result["exit_px"], 90.0)
         # Gap loss is larger than 1R ($200) before the cost haircut.
         self.assertLess(result["pnl_gross_usd"], -200.0)
+
+    def test_null_after_hours_quote_uses_stock_hist_close(self) -> None:
+        quote = {"last": None, "mid": None, "close": None, "bid": None, "ask": None, "market_price": None}
+        self.assertIsNone(quote_mark(quote))
+        hist = {"data": {"bars": [
+            {"ts": "2026-09-18T20:00:00Z", "close": 740.0},
+            {"ts": "2026-09-21T20:00:00Z", "close": 754.0},
+        ]}}
+        self.assertEqual(last_hist_close(hist), 754.0)
+        spot, source = choose_spot(quote, [last_hist_close(hist)], 700.0)
+        self.assertEqual(spot, 754.0)
+        self.assertEqual(source, "ibkr_stock_hist_last_close")
+
+    def test_missing_hist_uses_study_last_close(self) -> None:
+        spot, source = choose_spot({"last": None, "mid": None}, [None], 184.5)
+        self.assertEqual(spot, 184.5)
+        self.assertEqual(source, "study_daily_last_close")
+
+    def test_option_quote_mid_from_bid_ask(self) -> None:
+        self.assertAlmostEqual(quote_mark({"bid": 1.2, "ask": 1.4, "last": None, "mid": None, "close": None}), 1.3)
+        self.assertEqual(quote_mark({"close": 19.5, "last": None, "mid": None}), 19.5)
+
+    def test_iv_samples_pair_on_session_date(self) -> None:
+        expiry = date(2026, 10, 16)
+        opt = [{"ts": "2026-09-21", "close": 20.0}]
+        und = [{"ts": "2026-09-21T13:30:00Z", "close": 184.0}]
+        samples = iv_samples_from_bars(opt, und, 170.0, expiry, 0.0, hourly=False)
+        self.assertEqual(len(samples), 1)
+        self.assertGreater(samples[0], 0.05)
 
     def test_banner_constant(self) -> None:
         self.assertIn("NOT FILLS", BANNER)

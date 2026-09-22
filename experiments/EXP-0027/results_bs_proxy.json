@@ -7,8 +7,8 @@
   "not_live_paper": true,
   "recommendation": "MODEL_PROXY_ONLY",
   "gates_informational": "FAIL",
-  "generated": "2026-09-22T02:03:22.901451+00:00",
-  "runtime_sec": 3.9,
+  "generated": "2026-09-22T02:08:10.509948+00:00",
+  "runtime_sec": 1.8,
   "window": {
     "entry_start": "2026-01-16",
     "entry_end": "2026-09-16",
@@ -41,7 +41,8 @@
     "expiry": "Friday closest to 32 calendar days, inside 21\u201345",
     "option_exit": "model value at the session close, not a tick and not a fill",
     "no_polygon_option_ohlc": true,
-    "early_exercise": "ignored"
+    "early_exercise": "ignored",
+    "after_hours_spot": "If the underlying quote last/mid is null, spot is the last stock-hist close, else the study's last daily close. Call marks are bridge hist, plus one option-quote mark when it prints."
   },
   "iv": {
     "SPY": {
@@ -903,5 +904,5 @@
       ]
     }
   ],
-  "laptop_powershell": "cd C:\\Users\\ajkle\\Documents\\Q-ALPHA\n.\\candidates\\start_options_bridge.ps1\n.\\venv\\Scripts\\python.exe experiments\\EXP-0027\\study_itm_bs_proxy.py"
+  "laptop_powershell": "cd C:\\Users\\ajkle\\Documents\\Q-ALPHA\n.\\experiments\\EXP-0027\\run_on_laptop.ps1"
 }

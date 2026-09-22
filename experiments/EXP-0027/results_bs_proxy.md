@@ -17,7 +17,7 @@ These dollars are Black–Scholes marks with a frozen volatility. They are not f
 - Stock bars: `yahoo_chart_daily_ohlc_not_polygon`.
 - Signals: 33. Allocated calls: 13.
 - Option headline is gross BS P&L. After a 0.15% debit haircut (not a spread): $-2,142.42.
-- Runtime: 3.9 seconds.
+- Runtime: 1.8 seconds.
 
 ## IV used
 
@@ -41,6 +41,9 @@ IV from the recent window is frozen and applied to every past entry. That is not
 - One contract. Debit above $5,000 is a skip (`premium_exceeds_book`), not a fraction.
 - Long calls only. No puts, no short calls.
 - No Polygon option OHLC was requested or invented.
+- After hours, a null underlying last/mid is ignored. Spot is the last stock-hist close, then this study's last daily close.
+- Call IV uses ~10 days of bridge hist (hourly mids, then daily). One live call quote mid/last/close is an extra sample.
+- Phase 9A put-credit mids are not call IV.
 
 ## Stock bars
 
@@ -116,8 +119,7 @@ The cloud VM has no IBKR. This file is whatever that VM could measure. On the la
 
 ```powershell
 cd C:\Users\ajkle\Documents\Q-ALPHA
-.\candidates\start_options_bridge.ps1
-.\venv\Scripts\python.exe experiments\EXP-0027\study_itm_bs_proxy.py
+.\experiments\EXP-0027\run_on_laptop.ps1
 ```
 
 One command after the pull: `.\experiments\EXP-0027\run_on_laptop.ps1`

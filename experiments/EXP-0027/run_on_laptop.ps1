@@ -2,6 +2,8 @@
 # Research only. No orders. Starts the read-only options bridge when it is down,
 # then runs the study. Polygon comes from POLYGON_API_KEY or the Modal secret
 # polygon-api-key. If the bridge stays down, IV falls back to 10-day realized vol.
+# After hours, a null underlying last/mid is expected. The study uses the last
+# stock-hist close (then the study's last daily close) and call hist/quote marks.
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

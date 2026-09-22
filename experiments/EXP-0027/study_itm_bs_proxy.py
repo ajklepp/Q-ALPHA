@@ -17,13 +17,12 @@ only. One contract or skip when the debit is above $5,000.
 
 Laptop (one command, from the repo root):
 
+    cd C:\\Users\\ajkle\\Documents\\Q-ALPHA
     .\\experiments\\EXP-0027\\run_on_laptop.ps1
 
-Or:
-
-    cd C:\\Users\\ajkle\\Documents\\Q-ALPHA
-    .\\candidates\\start_options_bridge.ps1
-    .\\venv\\Scripts\\python.exe experiments\\EXP-0027\\study_itm_bs_proxy.py
+After the cash close, /v1/underlying/quote often has no last or mid. The
+script then takes spot from stock hist last close, then from the study's
+last daily close, and reads call marks from hist plus one option quote.
 
 Stock bars: POLYGON_API_KEY, else a short Modal fetch using the
 polygon-api-key secret (q-alpha-secrets is attached and not read), else
@@ -125,8 +124,7 @@ LABEL = "model_proxy_pnl"
 
 LAPTOP_PS = (
     "cd C:\\Users\\ajkle\\Documents\\Q-ALPHA\n"
-    ".\\candidates\\start_options_bridge.ps1\n"
-    ".\\venv\\Scripts\\python.exe experiments\\EXP-0027\\study_itm_bs_proxy.py"
+    ".\\experiments\\EXP-0027\\run_on_laptop.ps1"
 )
 
 try:
@@ -825,12 +823,17 @@ def realized_vol(bars: list[dict], n: int = IV_LOOKBACK_SESSIONS) -> dict[str, A
     }
 
 
-def _http_json(url: str, params: dict | None = None, timeout: float = 45.0) -> dict[str, Any]:
+def _http_json(
+    url: str,
+    params: dict | None = None,
+    timeout: float = 45.0,
+    retries: int = 4,
+) -> dict[str, Any]:
     """GET JSON with a short retry on rate limit and server errors."""
     query = urllib.parse.urlencode(params or {})
     full = url + (("?" + query) if query else "")
     last: Exception | None = None
-    for i in range(4):
+    for i in range(max(1, retries)):
         req = urllib.request.Request(full, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -985,7 +988,12 @@ def _bridge_get(path: str, params: dict[str, Any]) -> dict[str, Any]:
     """Read-only GET against the laptop options bridge. No order routes."""
     if "order" in path.lower():
         return {"ok": False, "error": {"code": "refused", "message": "study does not call order routes"}}
-    return _http_json(BRIDGE_URL + path, {k: v for k, v in params.items() if v is not None}, timeout=BRIDGE_TIMEOUT_SEC)
+    return _http_json(
+        BRIDGE_URL + path,
+        {k: v for k, v in params.items() if v is not None},
+        timeout=BRIDGE_TIMEOUT_SEC,
+        retries=2,
+    )
 
 
 def _parse_yyyymmdd(raw: str) -> date | None:
@@ -1038,30 +1046,144 @@ def _hour_key(ts: str) -> str:
     return str(ts)[:13]
 
 
-def estimate_iv_from_bridge(symbol: str, asof: date | None = None) -> dict[str, Any]:
-    """Median IV of ~10 days of hourly mids on one ~8% ITM, 21–45 DTE call.
-
-    The bridge is read-only and loopback-only. A cloud VM will fail this and
-    the caller will use realized vol instead.
-    """
-    asof = asof or datetime.now(ET).date()
-    health = _bridge_get("/v1/health", {})
-    if not health.get("ok"):
-        return {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "health_failed"}
-    quote = _bridge_get("/v1/underlying/quote", {"symbol": symbol})
-    qdata = quote.get("data") or {}
-    spot = qdata.get("market_price") or qdata.get("mid") or qdata.get("last") or qdata.get("close")
+def _positive(val: Any) -> float | None:
+    """Finite price above zero. JSON null and NaN are missing."""
     try:
-        spot_f = float(spot)
+        num = float(val)
     except (TypeError, ValueError):
-        return {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "no_underlying_price"}
-    chain = _bridge_get("/v1/options/chain", {"symbol": symbol})
-    if not chain.get("ok"):
-        return {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "chain_failed"}
-    picked = _pick_bridge_call(chain.get("data") or {}, spot_f, asof)
-    if picked is None:
-        return {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "no_itm_call_in_band", "spot": spot_f}
-    opt_hist = _bridge_get(
+        return None
+    if not math.isfinite(num) or num <= 0:
+        return None
+    return num
+
+
+def quote_mark(data: dict | None) -> float | None:
+    """Best mark on a bridge quote: mid, last, close, then bid/ask.
+
+    After the cash close, last and mid are often null. Close, or a two-sided
+    quote, is still a usable mark. A one-sided bid or ask is kept only when
+    nothing else printed.
+    """
+    if not isinstance(data, dict):
+        return None
+    for key in ("mid", "last", "close", "market_price"):
+        px = _positive(data.get(key))
+        if px is not None:
+            return px
+    bid = _positive(data.get("bid"))
+    ask = _positive(data.get("ask"))
+    if bid is not None and ask is not None:
+        return (bid + ask) / 2.0
+    return bid if bid is not None else ask
+
+
+def last_hist_close(payload: dict | None) -> float | None:
+    """Last positive close on a bridge hist envelope."""
+    bars = ((payload or {}).get("data") or {}).get("bars") or []
+    for bar in reversed(bars):
+        if not isinstance(bar, dict):
+            continue
+        px = _positive(bar.get("close"))
+        if px is not None:
+            return px
+    return None
+
+
+def choose_spot(
+    quote_data: dict | None,
+    hist_closes: list[float | None],
+    fallback_spot: float | None,
+) -> tuple[float | None, str]:
+    """Spot for the live ITM contract when the cash quote is empty.
+
+    Order: underlying quote mark, then stock-hist last close, then the last
+    close already loaded for the study. Phase 9A is not a spot source: that
+    route needs und_px and returns put mids.
+    """
+    mark = quote_mark(quote_data)
+    if mark is not None:
+        return mark, "underlying_quote"
+    for close in hist_closes:
+        px = _positive(close)
+        if px is not None:
+            return px, "ibkr_stock_hist_last_close"
+    fb = _positive(fallback_spot)
+    if fb is not None:
+        return fb, "study_daily_last_close"
+    return None, "none"
+
+
+def _bar_day(ts: str) -> str:
+    """Session date from an ISO timestamp or a YYYYMMDD bar date."""
+    text = str(ts or "")
+    if len(text) >= 10 and text[4] == "-":
+        return text[:10]
+    if len(text) >= 8 and text[:8].isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return text[:10]
+
+
+def iv_samples_from_bars(
+    opt_bars: list[dict],
+    und_bars: list[dict],
+    strike: float,
+    expiry: date,
+    div: float,
+    hourly: bool,
+) -> list[float]:
+    """Invert IV on paired option and stock closes. Unusable pairs are dropped."""
+    und: dict[str, float] = {}
+    for bar in und_bars:
+        if not isinstance(bar, dict):
+            continue
+        px = _positive(bar.get("close"))
+        if px is None:
+            continue
+        ts = str(bar.get("ts") or "")
+        key = _hour_key(ts) if hourly else _bar_day(ts)
+        if key:
+            und[key] = px
+    samples: list[float] = []
+    for bar in opt_bars:
+        if not isinstance(bar, dict):
+            continue
+        opt_px = _positive(bar.get("close"))
+        if opt_px is None:
+            continue
+        ts = str(bar.get("ts") or "")
+        key = _hour_key(ts) if hourly else _bar_day(ts)
+        und_px = und.get(key)
+        if und_px is None:
+            continue
+        try:
+            bar_day = date.fromisoformat(_bar_day(ts))
+        except ValueError:
+            continue
+        t_years = (expiry - bar_day).days / YEAR_DAYS
+        iv = implied_vol(opt_px, und_px, strike, t_years, RISK_FREE_RATE, div)
+        if iv is not None:
+            samples.append(iv)
+    return samples
+
+
+def _stock_hist(symbol: str, bar_size: str, what: str) -> dict[str, Any]:
+    """Underlying history. secType=STK so a missing expiry is not read as an option."""
+    return _bridge_get(
+        "/v1/options/hist",
+        {
+            "symbol": symbol,
+            "secType": "STK",
+            "duration": "10 D",
+            "bar_size": bar_size,
+            "what": what,
+            "use_rth": "true",
+        },
+    )
+
+
+def _option_hist(symbol: str, picked: dict[str, Any], bar_size: str, what: str) -> dict[str, Any]:
+    """Call history for the contract chosen from the chain."""
+    return _bridge_get(
         "/v1/options/hist",
         {
             "symbol": symbol,
@@ -1070,50 +1192,116 @@ def estimate_iv_from_bridge(symbol: str, asof: date | None = None) -> dict[str, 
             "right": "C",
             "exchange": picked["exchange"],
             "duration": "10 D",
-            "bar_size": "1 hour",
-            "what": "MIDPOINT",
+            "bar_size": bar_size,
+            "what": what,
             "use_rth": "true",
         },
     )
-    und_hist = _bridge_get(
-        "/v1/options/hist",
-        {
-            "symbol": symbol,
-            "duration": "10 D",
-            "bar_size": "1 hour",
-            "what": "MIDPOINT",
-            "use_rth": "true",
-        },
-    )
-    if not opt_hist.get("ok") or not und_hist.get("ok"):
+
+
+def estimate_iv_from_bridge(
+    symbol: str,
+    asof: date | None = None,
+    fallback_spot: float | None = None,
+) -> dict[str, Any]:
+    """Median IV of ~10 days of marks on one ~8% ITM, 21–45 DTE call.
+
+    After the cash close, /v1/underlying/quote often has no last or mid.
+    Spot then comes from the last stock-hist close, then from fallback_spot
+    (the study's last daily close). Call marks prefer hourly mids, then daily
+    mids, then daily trades. One live call quote is an extra sample. Phase 9A
+    put-credit mids are not used as call IV.
+
+    The bridge is read-only and loopback-only. A cloud VM fails this and the
+    caller uses realized vol instead.
+    """
+    asof = asof or datetime.now(ET).date()
+    health = _bridge_get("/v1/health", {})
+    if not health.get("ok"):
+        return {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "health_failed"}
+    quote = _bridge_get("/v1/underlying/quote", {"symbol": symbol})
+    quote_data = quote.get("data") if isinstance(quote.get("data"), dict) else {}
+    hist_closes: list[float | None] = []
+    if quote_mark(quote_data) is None:
+        for bar_size, what in (("1 day", "TRADES"), ("1 day", "MIDPOINT"), ("1 hour", "TRADES")):
+            hist = _stock_hist(symbol, bar_size, what)
+            if hist.get("ok"):
+                hist_closes.append(last_hist_close(hist))
+            if _positive(hist_closes[-1] if hist_closes else None) is not None:
+                break
+    spot_f, spot_source = choose_spot(quote_data, hist_closes, fallback_spot)
+    if spot_f is None:
         return {
             "symbol": symbol,
             "iv": None,
             "source": "bridge_down",
-            "detail": "hist_failed",
-            "contract": picked,
+            "detail": "no_underlying_price",
+            "spot_source": spot_source,
         }
-    und_by_hour = {}
-    for bar in (und_hist.get("data") or {}).get("bars") or []:
-        try:
-            und_by_hour[_hour_key(bar["ts"])] = float(bar["close"])
-        except (KeyError, TypeError, ValueError):
-            continue
-    samples: list[float] = []
+    chain = _bridge_get("/v1/options/chain", {"symbol": symbol})
+    if not chain.get("ok"):
+        return {
+            "symbol": symbol,
+            "iv": None,
+            "source": "bridge_down",
+            "detail": "chain_failed",
+            "spot": spot_f,
+            "spot_source": spot_source,
+        }
+    picked = _pick_bridge_call(chain.get("data") or {}, spot_f, asof)
+    if picked is None:
+        return {
+            "symbol": symbol,
+            "iv": None,
+            "source": "bridge_down",
+            "detail": "no_itm_call_in_band",
+            "spot": spot_f,
+            "spot_source": spot_source,
+        }
     exp = date.fromisoformat(picked["expiry_iso"])
     div = DIVIDEND_YIELD.get(symbol, 0.0)
-    for bar in (opt_hist.get("data") or {}).get("bars") or []:
-        try:
-            key = _hour_key(bar["ts"])
-            opt_px = float(bar["close"])
-            und_px = und_by_hour[key]
-            bar_day = date.fromisoformat(key[:10])
-        except (KeyError, TypeError, ValueError):
+    samples: list[float] = []
+    hist_used = None
+    for bar_size, opt_what, und_what, hourly in (
+        ("1 hour", "MIDPOINT", "TRADES", True),
+        ("1 hour", "MIDPOINT", "MIDPOINT", True),
+        ("1 day", "MIDPOINT", "TRADES", False),
+        ("1 day", "TRADES", "TRADES", False),
+    ):
+        opt_hist = _option_hist(symbol, picked, bar_size, opt_what)
+        und_hist = _stock_hist(symbol, bar_size, und_what)
+        if not opt_hist.get("ok") or not und_hist.get("ok"):
             continue
-        t_years = (exp - bar_day).days / YEAR_DAYS
-        iv = implied_vol(opt_px, und_px, float(picked["strike"]), t_years, RISK_FREE_RATE, div)
-        if iv is not None:
-            samples.append(iv)
+        batch = iv_samples_from_bars(
+            (opt_hist.get("data") or {}).get("bars") or [],
+            (und_hist.get("data") or {}).get("bars") or [],
+            float(picked["strike"]),
+            exp,
+            div,
+            hourly,
+        )
+        if len(batch) > len(samples):
+            samples = batch
+            hist_used = f"{bar_size} {opt_what}"
+        if len(samples) >= MIN_IV_PRINTS:
+            break
+    opt_quote = _bridge_get(
+        "/v1/options/quote",
+        {
+            "symbol": symbol,
+            "expiry": picked["expiry"],
+            "strike": picked["strike"],
+            "right": "C",
+            "exchange": picked["exchange"],
+        },
+    )
+    quote_iv = None
+    opt_mark = quote_mark(opt_quote.get("data") if isinstance(opt_quote.get("data"), dict) else None)
+    if opt_mark is not None:
+        t_years = max((exp - asof).days, 0) / YEAR_DAYS
+        quote_iv = implied_vol(opt_mark, spot_f, float(picked["strike"]), t_years, RISK_FREE_RATE, div)
+        if quote_iv is not None:
+            samples.append(quote_iv)
     if len(samples) < MIN_IV_PRINTS:
         return {
             "symbol": symbol,
@@ -1122,6 +1310,10 @@ def estimate_iv_from_bridge(symbol: str, asof: date | None = None) -> dict[str, 
             "detail": f"prints={len(samples)}",
             "contract": picked,
             "spot": spot_f,
+            "spot_source": spot_source,
+            "hist_used": hist_used,
+            "quote_iv": quote_iv,
+            "option_quote_mark": opt_mark,
         }
     med = statistics.median(samples)
     return {
@@ -1133,6 +1325,9 @@ def estimate_iv_from_bridge(symbol: str, asof: date | None = None) -> dict[str, 
         "iv_p75": statistics.quantiles(samples, n=4)[2] if len(samples) >= 4 else med,
         "contract": picked,
         "spot": spot_f,
+        "spot_source": spot_source,
+        "hist_used": hist_used,
+        "quote_iv": quote_iv,
         "asof": asof.isoformat(),
     }
 
@@ -1191,7 +1386,9 @@ def measure_iv(bars_by_symbol: dict[str, list[dict]]) -> dict[str, Any]:
         bridged: dict[str, Any]
         if bridge_up:
             print(f"iv {symbol}: reading ~10D ITM call mids", flush=True)
-            bridged = estimate_iv_from_bridge(symbol)
+            bars = bars_by_symbol.get(symbol) or []
+            fallback = float(bars[-1]["c"]) if bars else None
+            bridged = estimate_iv_from_bridge(symbol, fallback_spot=fallback)
         else:
             bridged = {"symbol": symbol, "iv": None, "source": "bridge_down", "detail": "health_failed"}
         if bridged.get("iv"):
@@ -1434,6 +1631,11 @@ def score(
             "option_exit": "model value at the session close, not a tick and not a fill",
             "no_polygon_option_ohlc": True,
             "early_exercise": "ignored",
+            "after_hours_spot": (
+                "If the underlying quote last/mid is null, spot is the last "
+                "stock-hist close, else the study's last daily close. Call marks "
+                "are bridge hist, plus one option-quote mark when it prints."
+            ),
         },
         "iv": iv_by_symbol,
         "pnl_usd": pnl,
@@ -1532,6 +1734,9 @@ def render_results(result: dict) -> str:
                 f" Contract {contract.get('expiry_iso')} {contract.get('strike')}C "
                 f"ITM {_fmt_pct(contract.get('itm_pct'))}, prints {row.get('n_prints')}."
             )
+        spot_src = row.get("spot_source") or (row.get("bridge_attempt") or {}).get("spot_source")
+        if spot_src:
+            extra += f" Spot `{spot_src}`."
         lines.append(
             f"- **{symbol}**: IV {_fmt_num(row.get('iv'))} via `{row.get('used')}` "
             f"(source `{row.get('source')}`). "
@@ -1555,6 +1760,9 @@ def render_results(result: dict) -> str:
         "- One contract. Debit above $5,000 is a skip (`premium_exceeds_book`), not a fraction.",
         "- Long calls only. No puts, no short calls.",
         "- No Polygon option OHLC was requested or invented.",
+        "- After hours, a null underlying last/mid is ignored. Spot is the last stock-hist close, then this study's last daily close.",
+        "- Call IV uses ~10 days of bridge hist (hourly mids, then daily). One live call quote mid/last/close is an extra sample.",
+        "- Phase 9A put-credit mids are not call IV.",
         "",
         "## Stock bars",
         "",
