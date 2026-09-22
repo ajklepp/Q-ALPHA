@@ -1376,12 +1376,16 @@ def bridge_is_up() -> bool:
     return bool(health.get("ok"))
 
 
-def measure_iv(bars_by_symbol: dict[str, list[dict]]) -> dict[str, Any]:
+def measure_iv(
+    bars_by_symbol: dict[str, list[dict]],
+    symbols: list[str] | None = None,
+) -> dict[str, Any]:
     """Per-name IV. Bridge median when it has enough prints, else 10-day RV."""
     out: dict[str, Any] = {}
+    names = list(symbols) if symbols else list(UNIVERSE)
     bridge_up = bridge_is_up()
     print(f"options bridge {BRIDGE_URL}: {'up' if bridge_up else 'down'}", flush=True)
-    for symbol in UNIVERSE:
+    for symbol in names:
         rv = realized_vol(bars_by_symbol.get(symbol) or [])
         bridged: dict[str, Any]
         if bridge_up:
