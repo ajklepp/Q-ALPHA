@@ -12,6 +12,11 @@ Laptop (one command):
 
     cd C:\\Users\\ajkle\\Documents\\Q-ALPHA
     .\\experiments\\EXP-0027\\run_t100_fills_bs_proxy.ps1
+
+The expanded-universe half-equity book (expanded_half_equity_2, the ~33%
+win-rate tape) is a different entry list. Price that one with
+study_expanded_book_itm_bs_proxy.py / run_expanded_book_itm_bs_proxy.ps1.
+This file keeps the ops-stack tape.
 """
 from __future__ import annotations
 
