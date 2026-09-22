@@ -185,7 +185,8 @@
       "signal_ts": "2026-08-31T08:00:00-04:00",
       "qty": 0,
       "notional": 0.0,
-      "notes": "morning veto gap -3.03% <= -1.5% on SMCX"
+      "notes": "morning veto gap -3.03% <= -1.5% on SMCX",
+      "pnl_usd": 0.0
     },
     {
       "symbol": "AVGO",
@@ -711,6 +712,10 @@
     "n_closed": 20,
     "n_open": 1,
     "realized_pnl_usd": 89.842,
-    "closed_with_pnl_usd": 19
+    "closed_with_pnl_usd": 20,
+    "starting_cash": 5000.0,
+    "equity_usd": 5089.842,
+    "open_notional_usd": 1000.0,
+    "cash_usd": 4089.842
   }
 }

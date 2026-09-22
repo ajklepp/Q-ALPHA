@@ -136,7 +136,12 @@ def empty_track100_book(*, reason: str) -> dict[str, Any]:
         "armed": [],
         "open": [],
         "closed": [],
-        "totals": {"realized_pnl_pct": 0.0, "n_closed": 0, "n_open": 0},
+        "totals": {
+            "realized_pnl_pct": 0.0,
+            "realized_pnl_usd": 0.0,
+            "n_closed": 0,
+            "n_open": 0,
+        },
         "path": None,
         "reason": reason,
         "ok": False,
@@ -147,6 +152,104 @@ def _as_rows(val: Any) -> list[dict[str, Any]]:
     if not isinstance(val, list):
         return []
     return [r for r in val if isinstance(r, dict)]
+
+
+def row_pnl_usd(row: dict[str, Any]) -> float | None:
+    """Dollar P&L for one closed paper leg.
+
+    Uses ``pnl_usd`` when the writer stored it. Otherwise qty × (exit − entry),
+    then notional × pnl_pct / 100. Morning vetoes are $0. Does not invent a price.
+    """
+    if str(row.get("reason") or row.get("exit_reason") or "") == "morning_veto":
+        return 0.0
+    raw = row.get("pnl_usd")
+    if raw is not None and raw != "":
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    try:
+        qty = float(row.get("qty") if row.get("qty") is not None else row.get("shares") or 0.0)
+        entry = float(row.get("entry") if row.get("entry") is not None else row.get("entry_price") or 0.0)
+        exit_raw = row.get("exit") if row.get("exit") is not None else row.get("exit_price")
+        exit_px = float(exit_raw) if exit_raw is not None else None
+    except (TypeError, ValueError):
+        qty, entry, exit_px = 0.0, 0.0, None
+    if qty > 0 and entry > 0 and exit_px is not None:
+        return qty * (exit_px - entry)
+    notional = row.get("notional")
+    pct = row.get("pnl_pct")
+    if notional is not None and pct is not None:
+        try:
+            return float(notional) * float(pct) / 100.0
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _stamp_row_pnl_usd(closed: list[dict[str, Any]]) -> float | None:
+    """Fill missing ``pnl_usd`` on closed rows. None when nothing can be priced."""
+    if not closed:
+        return 0.0
+    total = 0.0
+    priced = False
+    for row in closed:
+        usd = row_pnl_usd(row)
+        if usd is None:
+            continue
+        priced = True
+        if row.get("pnl_usd") is None:
+            row["pnl_usd"] = round(usd, 4)
+        total += usd
+    if not priced:
+        return None
+    return total
+
+
+def _totals_for_display(
+    raw: dict[str, Any],
+    *,
+    realized_pct: float,
+    realized_usd: float | None,
+    n_closed: int,
+    n_open: int,
+    open_legs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Keep dollar fields the Track 100 writer stores. Do not drop them."""
+    out: dict[str, Any] = {
+        "realized_pnl_pct": realized_pct,
+        "n_closed": n_closed,
+        "n_open": n_open,
+    }
+    if realized_usd is not None:
+        out["realized_pnl_usd"] = round(float(realized_usd), 4)
+    for key in ("starting_cash", "equity_usd", "cash_usd", "open_notional_usd"):
+        if raw.get(key) is None:
+            continue
+        try:
+            out[key] = round(float(raw[key]), 4)
+        except (TypeError, ValueError):
+            continue
+    if "open_notional_usd" not in out:
+        notionals = []
+        for row in open_legs:
+            raw_n = row.get("notional")
+            if raw_n is None:
+                raw_n = row.get("target_notional")
+            if raw_n is None:
+                continue
+            try:
+                notionals.append(float(raw_n))
+            except (TypeError, ValueError):
+                continue
+        if notionals:
+            out["open_notional_usd"] = round(sum(notionals), 4)
+    if "equity_usd" not in out and out.get("starting_cash") is not None and realized_usd is not None:
+        equity = float(out["starting_cash"]) + float(realized_usd)
+        out["equity_usd"] = round(equity, 4)
+        if "cash_usd" not in out:
+            out["cash_usd"] = round(equity - float(out.get("open_notional_usd") or 0.0), 4)
+    return out
 
 
 def load_track100_paper_book() -> dict[str, Any]:
@@ -187,6 +290,10 @@ def load_track100_paper_book() -> dict[str, Any]:
     realized = totals.get("realized_pnl_pct")
     if realized is None:
         realized = sum(float(r.get("pnl_pct") or 0) for r in closed)
+    realized_usd = totals.get("realized_pnl_usd")
+    derived_usd = _stamp_row_pnl_usd(closed)
+    if realized_usd is None:
+        realized_usd = derived_usd
     last_scan = doc.get("last_scan")
     if not isinstance(last_scan, dict):
         last_scan = None
@@ -204,11 +311,14 @@ def load_track100_paper_book() -> dict[str, Any]:
         "armed": armed,
         "open": open_legs,
         "closed": closed,
-        "totals": {
-            "realized_pnl_pct": float(realized or 0),
-            "n_closed": n_closed,
-            "n_open": n_open,
-        },
+        "totals": _totals_for_display(
+            totals,
+            realized_pct=float(realized or 0),
+            realized_usd=None if realized_usd is None else float(realized_usd),
+            n_closed=n_closed,
+            n_open=n_open,
+            open_legs=open_legs,
+        ),
         "path": str(path),
         "reason": "ok",
         "ok": True,
@@ -222,6 +332,17 @@ def _fmt_px(val: Any) -> str:
     except (TypeError, ValueError):
         return "—"
     return f"{v:.4g}" if abs(v) < 1 else f"{v:.2f}"
+
+
+def _fmt_usd(val: Any) -> str:
+    """Signed dollars, e.g. +$89.84 or -$21.58."""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return "—"
+    if v < 0:
+        return f"-${abs(v):,.2f}"
+    return f"+${v:,.2f}"
 
 
 def _fmt_pct(val: Any) -> str:
@@ -257,30 +378,34 @@ def render_track100_tab() -> None:
     totals = book.get("totals") or {}
     last = book.get("last_scan") if isinstance(book.get("last_scan"), dict) else {}
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Open paper", str(int(totals.get("n_open") or 0)))
     c2.metric("Closed paper", str(int(totals.get("n_closed") or 0)))
     usd = totals.get("realized_pnl_usd")
     if usd is not None:
-        c3.metric("Realized $", f"")
+        c3.metric("Realized $", _fmt_usd(usd))
     else:
         c3.metric("Realized", _fmt_pct(totals.get("realized_pnl_pct")))
+    equity = totals.get("equity_usd")
+    c4.metric("Equity $", _fmt_usd(equity) if equity is not None else "—")
     ended = str((last or {}).get("ended") or book.get("updated_et") or "—")
-    c4.metric("Last scan", str((last or {}).get("date_et") or "—"))
+    c5.metric("Last scan", str((last or {}).get("date_et") or "—"))
     exit_code = (last or {}).get("exit_code")
     status = "ok" if exit_code in (0, "0", None) and book.get("ok") else (
         book.get("reason") or "—"
     )
     if exit_code not in (None, "") and book.get("ok"):
         status = f"exit {exit_code}"
-    c5.metric("Status", str(status)[:18])
+    c6.metric("Status", str(status)[:18])
 
     st.markdown(
         f"<p style='color:{MUTED};font-size:0.85rem'>"
         f"Strategy <code>{book.get('strategy')}</code> · "
         f"schema v{book.get('version')} · "
         f"updated {book.get('updated_et') or '—'} · "
-        f"scan ended {ended}"
+        f"scan ended {ended} · "
+        f"realized {_fmt_usd(totals.get('realized_pnl_usd'))} · "
+        f"equity {_fmt_usd(totals.get('equity_usd')) if totals.get('equity_usd') is not None else '—'}"
         f"</p>",
         unsafe_allow_html=True,
     )
@@ -355,7 +480,7 @@ def render_track100_tab() -> None:
             "Entry": r.get("entry") if r.get("entry") is not None else r.get("entry_price"),
             "Exit": r.get("exit") if r.get("exit") is not None else r.get("exit_price"),
             "P&L %": r.get("pnl_pct"),
-            "P&L $": r.get("pnl_usd"),
+            "P&L $": _fmt_usd(r.get("pnl_usd")) if r.get("pnl_usd") is not None else "—",
             "Reason": r.get("reason") or r.get("exit_reason"),
             "Closed": r.get("closed_et") or r.get("closed_at"),
         })
@@ -370,26 +495,27 @@ def render_track100_tab() -> None:
             """
 Track 100 **writes**; Q-ALPHA **reads**. Paper log only — **no IBKR**.
 
-Playbook v12: deepest OS → retest **signal-low** → next **1H open**.
-Exit book: **5% stop / 15% target**.
+Headline P&L is **dollars** (`totals.realized_pnl_usd`, `closed.pnl_usd`).
+Percent stays on the row as `pnl_pct`. Equity is `totals.equity_usd`
+($5,000 start + realized dollars, open legs at cost).
 
 ```json
 {
-  "version": 1,
-  "strategy": "Track100_v12",
-  "updated_et": "2026-09-16T12:00:00-04:00",
-  "last_scan": {"date_et": "2026-09-16", "ended": "12:00 ET", "exit_code": 0},
-  "waiting_retest": [{"symbol": "MU", "signal_low": 0, "notes": ""}],
-  "armed": [{"symbol": "LRCX", "signal_low": 0, "armed_et": "", "notes": ""}],
-  "open": [{
-    "symbol": "AMD", "entry": 0, "qty": 0,
-    "stop_pct": 5, "target_pct": 15, "opened_et": ""
-  }],
+  "version": 3,
+  "strategy": "Track100_v12A",
+  "updated_et": "2026-09-21T17:23:00-04:00",
+  "last_scan": {"date_et": "2026-09-21", "ended": "...", "exit_code": 0, "sizing": "half_equity", "max_open_seats": 2},
+  "open": [{"symbol": "TMUS", "entry": 166.6, "qty": 6.0, "notional": 1000.0, "opened_et": ""}],
   "closed": [{
-    "symbol": "NVDA", "entry": 0, "exit": 0,
-    "pnl_pct": 0, "reason": "target|stop|time", "closed_et": ""
+    "symbol": "PEP", "entry": 134.5, "exit": 128.7,
+    "pnl_pct": -4.32, "pnl_usd": -21.58,
+    "reason": "target|stop|time|ratchet|morning_veto", "closed_et": ""
   }],
-  "totals": {"realized_pnl_pct": 0, "n_closed": 0, "n_open": 0}
+  "totals": {
+    "realized_pnl_pct": 0, "realized_pnl_usd": 0,
+    "equity_usd": 5000, "cash_usd": 5000,
+    "n_closed": 0, "n_open": 0
+  }
 }
 ```
 """
