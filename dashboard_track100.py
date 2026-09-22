@@ -260,7 +260,11 @@ def render_track100_tab() -> None:
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Open paper", str(int(totals.get("n_open") or 0)))
     c2.metric("Closed paper", str(int(totals.get("n_closed") or 0)))
-    c3.metric("Realized", _fmt_pct(totals.get("realized_pnl_pct")))
+    usd = totals.get("realized_pnl_usd")
+    if usd is not None:
+        c3.metric("Realized $", f"")
+    else:
+        c3.metric("Realized", _fmt_pct(totals.get("realized_pnl_pct")))
     ended = str((last or {}).get("ended") or book.get("updated_et") or "—")
     c4.metric("Last scan", str((last or {}).get("date_et") or "—"))
     exit_code = (last or {}).get("exit_code")
@@ -333,6 +337,7 @@ def render_track100_tab() -> None:
             "Symbol": r.get("symbol"),
             "Entry": r.get("entry") if r.get("entry") is not None else r.get("entry_price"),
             "Qty": r.get("qty") if r.get("qty") is not None else r.get("shares"),
+            "Notional $": r.get("notional") or r.get("target_notional"),
             "Stop": r.get("stop_pct") if r.get("stop_pct") is not None else 5,
             "Target": r.get("target_pct") if r.get("target_pct") is not None else 15,
             "Opened": r.get("opened_et") or r.get("opened_at"),
@@ -349,7 +354,8 @@ def render_track100_tab() -> None:
             "Symbol": r.get("symbol"),
             "Entry": r.get("entry") if r.get("entry") is not None else r.get("entry_price"),
             "Exit": r.get("exit") if r.get("exit") is not None else r.get("exit_price"),
-            "P&L": r.get("pnl_pct"),
+            "P&L %": r.get("pnl_pct"),
+            "P&L $": r.get("pnl_usd"),
             "Reason": r.get("reason") or r.get("exit_reason"),
             "Closed": r.get("closed_et") or r.get("closed_at"),
         })
