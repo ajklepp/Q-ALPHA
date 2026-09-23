@@ -1,44 +1,33 @@
 {
-  "version": 2,
+  "version": 3,
   "strategy": "Track100_v12A",
   "playbook_entry": "next_open",
-  "updated_et": "2026-09-21T17:23:28.886496-04:00",
+  "updated_et": "2026-09-23T16:30:04.355842-04:00",
   "last_scan": {
-    "date_et": "2026-09-21",
-    "ended": "2026-09-21T17:23:28.886496-04:00",
+    "date_et": "2026-09-23",
+    "ended": "2026-09-23T16:30:04.355842-04:00",
     "exit_code": 0,
     "playbook_entry": "next_open",
-    "max_open_seats": 10,
+    "max_open_seats": 2,
     "max_new_opens_per_session": 0,
-    "target_notional": 500.0,
+    "sizing": "half_equity",
+    "seat_equity_fraction": 0.5,
+    "starting_cash": 5000.0,
+    "min_seat_notional": 50.0,
+    "target_notional": 2410.0774,
     "paper_filter": "paper_filter_winloss_v1",
     "paper_filter_enabled": true,
-    "paper_exit": "C_ratchet_struct"
+    "paper_exit": "C_ratchet_struct",
+    "equity_usd": 4820.1547,
+    "cash_usd": 4820.1547,
+    "realized_pnl_usd": -179.8453,
+    "next_seat_usd": 2410.0774,
+    "next_seat_binding": "half_equity"
   },
   "waiting_retest": [],
   "armed": [],
   "fill_ready": [],
-  "open": [
-    {
-      "symbol": "TMUS",
-      "underlying": "TMUS",
-      "traded": "TMUS",
-      "entry": 166.6,
-      "qty": 6.002401,
-      "notional": 1000.0,
-      "target_notional": 1000.0,
-      "stop_pct": 5.0,
-      "target_pct": 15.0,
-      "opened_et": "2026-09-17T18:00:00-04:00",
-      "stop_px": 158.27,
-      "target_px": 191.59,
-      "signal_ts": "2026-09-17T17:00:00-04:00",
-      "signal_low": 166.57,
-      "retest_ts": null,
-      "notes": "next 1H open after signal on TMUS (no 2x map \u2014 trade TMUS)",
-      "exit_book": "C_ratchet_struct"
-    }
-  ],
+  "open": [],
   "closed": [
     {
       "symbol": "FANG",
@@ -309,44 +298,57 @@
       "qty": 3.718025,
       "notional": 500.0,
       "pnl_usd": -21.5831
+    },
+    {
+      "symbol": "TMUS",
+      "underlying": "TMUS",
+      "traded": "TMUS",
+      "entry": 166.6,
+      "exit": 163.46,
+      "pnl_pct": -1.8848,
+      "pnl_usd": -18.8475,
+      "reason": "time",
+      "exit_book": "C_ratchet_struct",
+      "closed_et": "2026-09-22T12:00:00-04:00",
+      "opened_et": "2026-09-17T18:00:00-04:00",
+      "signal_ts": "2026-09-17T17:00:00-04:00",
+      "qty": 6.002401,
+      "notional": 1000.0
+    },
+    {
+      "symbol": "NFXL",
+      "underlying": "NFLX",
+      "traded": "NFXL",
+      "entry": 16.55,
+      "exit": 15.7225,
+      "pnl_pct": -5.0,
+      "pnl_usd": -127.2461,
+      "reason": "stop",
+      "exit_book": "C_ratchet_struct",
+      "closed_et": "2026-09-18T05:00:00-04:00",
+      "opened_et": "2026-09-17T18:00:00-04:00",
+      "signal_ts": "2026-09-17T17:00:00-04:00",
+      "qty": 153.771662,
+      "notional": 2544.921
+    },
+    {
+      "symbol": "TMUS",
+      "underlying": "TMUS",
+      "traded": "TMUS",
+      "entry": 176.14,
+      "exit": 167.333,
+      "pnl_pct": -5.0,
+      "pnl_usd": -123.5937,
+      "reason": "stop",
+      "exit_book": "C_ratchet_struct",
+      "closed_et": "2026-09-17T14:00:00-04:00",
+      "opened_et": "2026-09-16T18:00:00-04:00",
+      "signal_ts": "2026-09-16T17:00:00-04:00",
+      "qty": 14.033577,
+      "notional": 2471.8743
     }
   ],
   "skips": [
-    {
-      "symbol": "KLAG",
-      "underlying": "KLAC",
-      "reason": "paper_filter_winloss_v1",
-      "signal_ts": "2026-09-01T12:00:00-04:00",
-      "fill_ts": "2026-09-01T13:00:00-04:00",
-      "fill_px": 21.15,
-      "notes": "paper_filter_winloss_v1 skip: d_sma50_200_spread=0.244618358077 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.00883603239466 not <= 0.00412360491791 (washed_out_daily_htf/threshold)",
-      "paper_filter": "paper_filter_winloss_v1",
-      "failed_features": [
-        {
-          "feature": "d_sma50_200_spread",
-          "op": "<=",
-          "threshold": 0.040729272900518865,
-          "value": 0.2446183580767476,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        },
-        {
-          "feature": "d_sma200_chg_5",
-          "op": "<=",
-          "threshold": 0.004123604917914969,
-          "value": 0.008836032394659021,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        }
-      ],
-      "filter_features": {
-        "h1_ema50_chg_5": -0.007555184923744074,
-        "d_px_ema200": 0.0018887105494660439,
-        "d_sma50_200_spread": 0.2446183580767476,
-        "d_sma200_chg_5": 0.008836032394659021,
-        "d_ema200_chg_5": 0.0015302193695019284
-      }
-    },
     {
       "symbol": "PLTU",
       "underlying": "PLTR",
@@ -354,14 +356,14 @@
       "signal_ts": "2026-09-02T14:00:00-04:00",
       "fill_ts": "2026-09-02T15:00:00-04:00",
       "fill_px": 46.81,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0122014355075 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_px_ema200=0.192101282291 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0110900721613 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
+      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0122014355301 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_px_ema200=0.191724566365 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0110699654415 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
           "feature": "h1_ema50_chg_5",
           "op": ">",
           "threshold": -0.00787378067927591,
-          "value": -0.012201435507514624,
+          "value": -0.012201435530145632,
           "why": "threshold",
           "label": "dont_buy_while_falling_hard"
         },
@@ -369,7 +371,7 @@
           "feature": "d_px_ema200",
           "op": "<=",
           "threshold": 0.01757972839466393,
-          "value": 0.19210128229062118,
+          "value": 0.19172456636493762,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         },
@@ -377,17 +379,52 @@
           "feature": "d_ema200_chg_5",
           "op": "<=",
           "threshold": 0.002055368639828581,
-          "value": 0.01109007216131741,
+          "value": 0.011069965441470764,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.012201435507514624,
-        "d_px_ema200": 0.19210128229062118,
+        "h1_ema50_chg_5": -0.012201435530145632,
+        "d_px_ema200": 0.19172456636493762,
         "d_sma50_200_spread": -0.03446370879543881,
         "d_sma200_chg_5": -0.0001882980368111964,
-        "d_ema200_chg_5": 0.01109007216131741
+        "d_ema200_chg_5": 0.011069965441470764
+      }
+    },
+    {
+      "symbol": "CDNS",
+      "underlying": "CDNS",
+      "reason": "paper_filter_winloss_v1",
+      "signal_ts": "2026-09-04T15:00:00-04:00",
+      "fill_ts": "2026-09-04T16:00:00-04:00",
+      "fill_px": 292.7,
+      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0112187138271 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_sma50_200_spread=0.0486835839412 not <= 0.0407292729005 (washed_out_daily_htf/threshold)",
+      "paper_filter": "paper_filter_winloss_v1",
+      "failed_features": [
+        {
+          "feature": "h1_ema50_chg_5",
+          "op": ">",
+          "threshold": -0.00787378067927591,
+          "value": -0.0112187138271026,
+          "why": "threshold",
+          "label": "dont_buy_while_falling_hard"
+        },
+        {
+          "feature": "d_sma50_200_spread",
+          "op": "<=",
+          "threshold": 0.040729272900518865,
+          "value": 0.04868358394118255,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
+        }
+      ],
+      "filter_features": {
+        "h1_ema50_chg_5": -0.0112187138271026,
+        "d_px_ema200": -0.09924104322061722,
+        "d_sma50_200_spread": 0.04868358394118255,
+        "d_sma200_chg_5": 0.00015045533944513245,
+        "d_ema200_chg_5": -0.0027071700649295982
       }
     },
     {
@@ -397,14 +434,14 @@
       "signal_ts": "2026-09-08T14:00:00-04:00",
       "fill_ts": "2026-09-08T15:00:00-04:00",
       "fill_px": 180.88,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0122720804277 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_sma50_200_spread=0.0452641923647 not <= 0.0407292729005 (washed_out_daily_htf/threshold)",
+      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0122720804414 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_sma50_200_spread=0.0452641923647 not <= 0.0407292729005 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
           "feature": "h1_ema50_chg_5",
           "op": ">",
           "threshold": -0.00787378067927591,
-          "value": -0.012272080427678689,
+          "value": -0.012272080441371624,
           "why": "threshold",
           "label": "dont_buy_while_falling_hard"
         },
@@ -418,38 +455,54 @@
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.012272080427678689,
-        "d_px_ema200": 0.0164831020168954,
+        "h1_ema50_chg_5": -0.012272080441371624,
+        "d_px_ema200": 0.017345578307541132,
         "d_sma50_200_spread": 0.04526419236465973,
         "d_sma200_chg_5": -0.0006279578772402372,
-        "d_ema200_chg_5": 0.001723194663802996
+        "d_ema200_chg_5": 0.0017683148004215
       }
     },
     {
-      "symbol": "CMCSA",
-      "underlying": "CMCSA",
+      "symbol": "AMZU",
+      "underlying": "AMZN",
       "reason": "paper_filter_winloss_v1",
-      "signal_ts": "2026-09-09T16:00:00-04:00",
-      "fill_ts": "2026-09-09T17:00:00-04:00",
-      "fill_px": 24.58,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0121202976525 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold)",
+      "signal_ts": "2026-09-09T13:00:00-04:00",
+      "fill_ts": "2026-09-09T14:00:00-04:00",
+      "fill_px": 35.39,
+      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.053551252689 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.063269408736 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.00273232827661 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
-          "feature": "h1_ema50_chg_5",
-          "op": ">",
-          "threshold": -0.00787378067927591,
-          "value": -0.012120297652475132,
+          "feature": "d_px_ema200",
+          "op": "<=",
+          "threshold": 0.01757972839466393,
+          "value": 0.053551252689013173,
           "why": "threshold",
-          "label": "dont_buy_while_falling_hard"
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_sma50_200_spread",
+          "op": "<=",
+          "threshold": 0.040729272900518865,
+          "value": 0.06326940873595532,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_ema200_chg_5",
+          "op": "<=",
+          "threshold": 0.002055368639828581,
+          "value": 0.0027323282766056334,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.012120297652475132,
-        "d_px_ema200": -0.02538513381573959,
-        "d_sma50_200_spread": -0.0837296437758489,
-        "d_sma200_chg_5": -0.000986774103151955,
-        "d_ema200_chg_5": -0.0009486488525803916
+        "h1_ema50_chg_5": -0.0034314201389260557,
+        "d_px_ema200": 0.053551252689013173,
+        "d_sma50_200_spread": 0.06326940873595532,
+        "d_sma200_chg_5": 0.0023538848839499416,
+        "d_ema200_chg_5": 0.0027323282766056334
       }
     },
     {
@@ -459,14 +512,14 @@
       "signal_ts": "2026-09-10T13:00:00-04:00",
       "fill_ts": "2026-09-10T14:00:00-04:00",
       "fill_px": 33.875,
-      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.11306923751 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.0746743634348 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.00512822474328 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.006566064366 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
+      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.112216940451 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.0746743634348 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.00512822474328 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0065212288111 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
           "feature": "d_px_ema200",
           "op": "<=",
           "threshold": 0.01757972839466393,
-          "value": 0.11306923750981457,
+          "value": 0.11221694045073827,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         },
@@ -482,7 +535,7 @@
           "feature": "d_sma200_chg_5",
           "op": "<=",
           "threshold": 0.004123604917914969,
-          "value": 0.005128224743282672,
+          "value": 0.005128224743282894,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         },
@@ -490,44 +543,52 @@
           "feature": "d_ema200_chg_5",
           "op": "<=",
           "threshold": 0.002055368639828581,
-          "value": 0.006566064366000157,
+          "value": 0.006521228811096957,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.005557517698066339,
-        "d_px_ema200": 0.11306923750981457,
+        "h1_ema50_chg_5": -0.005557517698350112,
+        "d_px_ema200": 0.11221694045073827,
         "d_sma50_200_spread": 0.07467436343483747,
-        "d_sma200_chg_5": 0.005128224743282672,
-        "d_ema200_chg_5": 0.006566064366000157
+        "d_sma200_chg_5": 0.005128224743282894,
+        "d_ema200_chg_5": 0.006521228811096957
       }
     },
     {
-      "symbol": "ADBU",
-      "underlying": "ADBE",
+      "symbol": "SMCX",
+      "underlying": "SMCI",
       "reason": "paper_filter_winloss_v1",
-      "signal_ts": "2026-09-11T08:00:00-04:00",
-      "fill_ts": "2026-09-11T09:00:00-04:00",
-      "fill_px": 21.7,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0112931479248 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold)",
+      "signal_ts": "2026-09-11T04:00:00-04:00",
+      "fill_ts": "2026-09-11T05:00:00-04:00",
+      "fill_px": 12.27,
+      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.0690802006263 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.00565982812693 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
-          "feature": "h1_ema50_chg_5",
-          "op": ">",
-          "threshold": -0.00787378067927591,
-          "value": -0.011293147924839042,
+          "feature": "d_px_ema200",
+          "op": "<=",
+          "threshold": 0.01757972839466393,
+          "value": 0.06908020062629538,
           "why": "threshold",
-          "label": "dont_buy_while_falling_hard"
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_ema200_chg_5",
+          "op": "<=",
+          "threshold": 0.002055368639828581,
+          "value": 0.005659828126931998,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.011293147924839042,
-        "d_px_ema200": -0.075465948535277,
-        "d_sma50_200_spread": -0.05686645070164276,
-        "d_sma200_chg_5": -0.005549362177227457,
-        "d_ema200_chg_5": -0.001268954947496681
+        "h1_ema50_chg_5": -0.006442954675318191,
+        "d_px_ema200": 0.06908020062629538,
+        "d_sma50_200_spread": 0.026252656982558076,
+        "d_sma200_chg_5": 0.003721250863690795,
+        "d_ema200_chg_5": 0.005659828126931998
       }
     },
     {
@@ -537,14 +598,14 @@
       "signal_ts": "2026-09-14T10:00:00-04:00",
       "fill_ts": "2026-09-14T11:00:00-04:00",
       "fill_px": 27.546,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0124079897894 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_px_ema200=0.430351485187 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.492780623509 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.0322945498456 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0244521207044 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
+      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0124079897888 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold); d_px_ema200=0.429916116004 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.492780623509 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.0322945498456 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0244281180443 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
           "feature": "h1_ema50_chg_5",
           "op": ">",
           "threshold": -0.00787378067927591,
-          "value": -0.012407989789374851,
+          "value": -0.012407989788751905,
           "why": "threshold",
           "label": "dont_buy_while_falling_hard"
         },
@@ -552,7 +613,7 @@
           "feature": "d_px_ema200",
           "op": "<=",
           "threshold": 0.01757972839466393,
-          "value": 0.43035148518707156,
+          "value": 0.42991611600402857,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         },
@@ -576,44 +637,68 @@
           "feature": "d_ema200_chg_5",
           "op": "<=",
           "threshold": 0.002055368639828581,
-          "value": 0.024452120704445024,
+          "value": 0.024428118044286462,
           "why": "threshold",
           "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.012407989789374851,
-        "d_px_ema200": 0.43035148518707156,
+        "h1_ema50_chg_5": -0.012407989788751905,
+        "d_px_ema200": 0.42991611600402857,
         "d_sma50_200_spread": 0.4927806235089782,
         "d_sma200_chg_5": 0.03229454984562263,
-        "d_ema200_chg_5": 0.024452120704445024
+        "d_ema200_chg_5": 0.024428118044286462
       }
     },
     {
-      "symbol": "TMUS",
-      "underlying": "TMUS",
+      "symbol": "SPCX",
+      "underlying": "SPCX",
       "reason": "paper_filter_winloss_v1",
-      "signal_ts": "2026-09-17T17:00:00-04:00",
-      "fill_ts": "2026-09-17T18:00:00-04:00",
-      "fill_px": 166.6,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0116197070661 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold)",
+      "signal_ts": "2026-09-15T19:00:00-04:00",
+      "fill_ts": "2026-09-16T04:00:00-04:00",
+      "fill_px": 143.6,
+      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.874383935014 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=1.19225829556 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.0535702825444 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.0480370369939 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
-          "feature": "h1_ema50_chg_5",
-          "op": ">",
-          "threshold": -0.00787378067927591,
-          "value": -0.011619707066116147,
+          "feature": "d_px_ema200",
+          "op": "<=",
+          "threshold": 0.01757972839466393,
+          "value": 0.8743839350140659,
           "why": "threshold",
-          "label": "dont_buy_while_falling_hard"
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_sma50_200_spread",
+          "op": "<=",
+          "threshold": 0.040729272900518865,
+          "value": 1.1922582955603862,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_sma200_chg_5",
+          "op": "<=",
+          "threshold": 0.004123604917914969,
+          "value": 0.053570282544430636,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
+        },
+        {
+          "feature": "d_ema200_chg_5",
+          "op": "<=",
+          "threshold": 0.002055368639828581,
+          "value": 0.04803703699390227,
+          "why": "threshold",
+          "label": "washed_out_daily_htf"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.011619707066116147,
-        "d_px_ema200": -0.09402704029300957,
-        "d_sma50_200_spread": -0.06098518665476327,
-        "d_sma200_chg_5": -0.0036506946203216373,
-        "d_ema200_chg_5": -0.00386863486988831
+        "h1_ema50_chg_5": -0.006210189675820765,
+        "d_px_ema200": 0.8743839350140659,
+        "d_sma50_200_spread": 1.1922582955603862,
+        "d_sma200_chg_5": 0.053570282544430636,
+        "d_ema200_chg_5": 0.04803703699390227
       }
     },
     {
@@ -623,75 +708,24 @@
       "signal_ts": "2026-09-18T15:00:00-04:00",
       "fill_ts": "2026-09-18T16:00:00-04:00",
       "fill_px": 303.19,
-      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.0087785887681 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold)",
+      "notes": "paper_filter_winloss_v1 skip: h1_ema50_chg_5=-0.00877858876828 not > -0.00787378067928 (dont_buy_while_falling_hard/threshold)",
       "paper_filter": "paper_filter_winloss_v1",
       "failed_features": [
         {
           "feature": "h1_ema50_chg_5",
           "op": ">",
           "threshold": -0.00787378067927591,
-          "value": -0.00877858876809856,
+          "value": -0.008778588768283524,
           "why": "threshold",
           "label": "dont_buy_while_falling_hard"
         }
       ],
       "filter_features": {
-        "h1_ema50_chg_5": -0.00877858876809856,
-        "d_px_ema200": -0.24285075737672435,
-        "d_sma50_200_spread": -0.21847734897556925,
+        "h1_ema50_chg_5": -0.008778588768283524,
+        "d_px_ema200": -0.24374970338357382,
+        "d_sma50_200_spread": -0.21847734897556936,
         "d_sma200_chg_5": -0.019019610536116782,
-        "d_ema200_chg_5": -0.010960717717083512
-      }
-    },
-    {
-      "symbol": "FANG",
-      "underlying": "FANG",
-      "reason": "paper_filter_winloss_v1",
-      "signal_ts": "2026-09-21T13:00:00-04:00",
-      "fill_ts": "2026-09-21T14:00:00-04:00",
-      "fill_px": 188.9,
-      "notes": "paper_filter_winloss_v1 skip: d_px_ema200=0.0405066224626 not <= 0.0175797283947 (washed_out_daily_htf/threshold); d_sma50_200_spread=0.0881553029249 not <= 0.0407292729005 (washed_out_daily_htf/threshold); d_sma200_chg_5=0.00682574117026 not <= 0.00412360491791 (washed_out_daily_htf/threshold); d_ema200_chg_5=0.00423691506663 not <= 0.00205536863983 (washed_out_daily_htf/threshold)",
-      "paper_filter": "paper_filter_winloss_v1",
-      "failed_features": [
-        {
-          "feature": "d_px_ema200",
-          "op": "<=",
-          "threshold": 0.01757972839466393,
-          "value": 0.040506622462618935,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        },
-        {
-          "feature": "d_sma50_200_spread",
-          "op": "<=",
-          "threshold": 0.040729272900518865,
-          "value": 0.0881553029248654,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        },
-        {
-          "feature": "d_sma200_chg_5",
-          "op": "<=",
-          "threshold": 0.004123604917914969,
-          "value": 0.006825741170257471,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        },
-        {
-          "feature": "d_ema200_chg_5",
-          "op": "<=",
-          "threshold": 0.002055368639828581,
-          "value": 0.004236915066627711,
-          "why": "threshold",
-          "label": "washed_out_daily_htf"
-        }
-      ],
-      "filter_features": {
-        "h1_ema50_chg_5": -0.006919130240750193,
-        "d_px_ema200": 0.040506622462618935,
-        "d_sma50_200_spread": 0.0881553029248654,
-        "d_sma200_chg_5": 0.006825741170257471,
-        "d_ema200_chg_5": 0.004236915066627711
+        "d_ema200_chg_5": -0.01100739114113658
       }
     },
     {
@@ -708,14 +742,13 @@
     "SNPS: waiting_retest cleared; retest gate removed and this row is not the current session pick. No price invented."
   ],
   "totals": {
-    "realized_pnl_pct": 9.8361,
-    "n_closed": 20,
-    "n_open": 1,
-    "realized_pnl_usd": 89.842,
-    "closed_with_pnl_usd": 20,
+    "realized_pnl_pct": -2.0487,
+    "realized_pnl_usd": -179.8453,
+    "n_closed": 23,
+    "n_open": 0,
     "starting_cash": 5000.0,
-    "equity_usd": 5089.842,
-    "open_notional_usd": 1000.0,
-    "cash_usd": 4089.842
+    "equity_usd": 4820.1547,
+    "cash_usd": 4820.1547,
+    "open_notional_usd": 0.0
   }
 }
