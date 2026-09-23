@@ -504,3 +504,92 @@ def scoreboard_pnl(
         "full_slots": full_slots,
         "trailing_positions": trailing,
     }
+
+
+def open_cost_basis(open_rows: list[dict[str, Any]]) -> float:
+    """Entry cost of shares still open. Independent of the mark."""
+    total = 0.0
+    for row in open_rows:
+        entry = _sf(row.get("entry_price"), 0.0)
+        shares = remaining_open_shares(row)
+        if entry > 0 and shares > 0:
+            total += entry * shares
+    return round(total, 2)
+
+
+def marked_open_value(open_rows: list[dict[str, Any]]) -> float:
+    """
+    Market value of remaining shares.
+
+    Uses current_price when it is a positive mark. Otherwise uses entry, so an
+    unmarked open stays in equity at cost (unrealized 0) instead of vanishing.
+    """
+    total = 0.0
+    for row in open_rows:
+        shares = remaining_open_shares(row)
+        if shares <= 0:
+            continue
+        mark = _sf(row.get("current_price"), 0.0)
+        entry = _sf(row.get("entry_price"), 0.0)
+        price = mark if mark > 0 else entry
+        if price > 0:
+            total += price * shares
+    return round(total, 2)
+
+
+def live_paper_scoreboard(
+    open_rows: list[dict[str, Any]],
+    closed_rows: list[dict[str, Any]],
+    *,
+    starting: float,
+    snapshot_cash: float | None = None,
+) -> dict[str, Any]:
+    """
+    Live Paper Live Status tiles on one identity.
+
+    P&L $ = realized (closed legs + open partials) + unrealized (open marks).
+    P&L % = that P&L $ / starting pool — the book's reference bankroll
+            (Peak Hour default $3,000). Not P&L / current equity, and not
+            P&L / cash.
+    Equity = starting pool + P&L $.
+    Cash = Equity − marked open value
+         = starting + realized − open cost.
+    Therefore Equity = Cash + marked open value.
+
+    ``snapshot_cash`` is ``tsd_pool_snapshots.pool``. That field is residual
+    cash only when every fill updated the pool. If it still contains capital
+    that is also marked in open positions, cash + marks inflates equity
+    (Equity $3,504.03 beside P&L −$165.28 / −5.5% of the $3,000 start).
+    When the trade ledger is non-empty, this identity wins and snapshot cash
+    is not added on top of marks. An empty ledger has nothing to mark, so
+    snapshot cash is equity.
+    """
+    board = scoreboard_pnl(open_rows, closed_rows)
+    start = round(_sf(starting, 0.0), 2)
+    open_mtm = marked_open_value(open_rows)
+    open_cost = open_cost_basis(open_rows)
+    has_ledger = bool(open_rows or closed_rows)
+    snap = None if snapshot_cash is None else round(_sf(snapshot_cash, 0.0), 2)
+
+    if not has_ledger:
+        cash = start if snap is None else snap
+        equity = round(cash, 2)
+        pnl = round(equity - start, 2)
+    else:
+        pnl = round(_sf(board["total_pnl"], 0.0), 2)
+        equity = round(start + pnl, 2)
+        cash = round(equity - open_mtm, 2)
+
+    pnl_pct = (pnl / start * 100.0) if start > 0 else 0.0
+    out = dict(board)
+    out.update({
+        "starting": start,
+        "open_cost": open_cost,
+        "open_mtm": open_mtm,
+        "cash": round(cash, 2),
+        "equity": equity,
+        "total_pnl": pnl,
+        "pnl_pct": pnl_pct,
+        "snapshot_cash": snap,
+    })
+    return out
