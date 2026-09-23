@@ -36,6 +36,27 @@ def test_t1_banks_at_2pct_then_kill_tightens():
     )
 
 
+def test_t1_hard_bank_off_trails_instead_of_banking():
+    """LIVE default: touching +2% must not emit reason=t1_bank."""
+    entry = 10.0
+    trail = init_php_trail_state(entry, 20, kill_pct=0.05)
+    trail, exits = php_process_bar(
+        trail,
+        high=10.25,
+        low=10.05,
+        close=10.20,
+        when="t1-trail",
+        be_lock_after_t1=False,
+        kill_tighten_after_t1=0.025,
+        t1_hard_bank=False,
+    )
+    assert not any(e["reason"] == "t1_bank" for e in exits)
+    assert abs(float(trail["kill_price"]) - entry * 0.95) < 1e-6
+    t1 = next(t for t in trail["tranches"] if t["id"] == "T1")
+    assert t1["closed"] is False
+    assert t1["trailing"] is True
+
+
 def test_t1_bank_without_be_preserves_runner_room():
     entry = 10.0
     trail = init_php_trail_state(entry, 20, kill_pct=0.05)

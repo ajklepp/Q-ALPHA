@@ -4,10 +4,13 @@ Q-ALPHA TSD pipeline — Phase 4 software trail monitor.
 LIVE exits (default): trail + emergency kill ratchet only.
   L1 broker kill (always on, ratchets UP only)
   L2 structure_stop / be_lock_1r — OFF unless TSD_LIVE_STRUCTURE_STOP=1
-  L3 T1–T4 software trail (keep-profit; lock-profit = tighter trail after ~+3–4% MFE)
+  L3 T1–T4 software trail (lock-profit = tighter trail after ~+3–4% MFE)
+  T1 hard bank (reason=t1_bank) — OFF unless TSD_LIVE_T1_HARD_BANK=1
+  Software kill/trail low = last/close or current-interval low.
+  Never IB ticker.low (session day low). Broker STP sells stay in place.
 
-Paper 3R shadow ticks alongside LIVE fills and is unchanged.
-See candidates/tsd_scan_pipeline/REVERT.md to restore BE dumps.
+Paper 3R shadow ticks alongside LIVE fills and still uses the session range.
+See candidates/tsd_scan_pipeline/REVERT.md to restore BE dumps or the T1 bank.
 
 Usage (TWS paper open, port 7497):
   py -3 candidates/tsd_scan_pipeline/tsd_trail_monitor.py --once
@@ -159,6 +162,7 @@ from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
     should_fire_live_structure_stop,
     should_idle_no_1r,
 )
+from tsd_scan_pipeline.tsd_keep_profit import live_t1_hard_bank_enabled  # noqa: E402
 from tsd_scan_pipeline.tsd_trail import (  # noqa: E402
     at_time_cap,
     evaluate_trail_tick,
@@ -177,8 +181,66 @@ ET = pytz.timezone("America/New_York")
 RESULTS_DIR = PIPELINE_DIR / "results"
 
 
+def _positive_price(value: Any) -> float:
+    """Finite price > 0, else 0. Used to ignore blank IB fields."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return parsed if parsed > 0 else 0.0
+
+
+def live_software_stop_low(quote: dict[str, Any]) -> float:
+    """
+    Price for LIVE software kill and trail-stop tests.
+
+    IB ``ticker.low`` is the session day low. After lock-profit raises the
+    software kill toward breakeven, that day low can sit under the new kill
+    while last is still near the high (NUAI 2026-09-23). It must not be the
+    stop-hit price.
+
+    Precedence:
+      1. ``interval_low`` / ``bar_low`` — low of the current interval only
+      2. ``last``, then ``close``, when ``low`` is tagged as the session day low
+      3. ``low`` when it is not the session day low (sanitized quote, or a
+         true bar low from tests / replay)
+      4. ``last`` / ``close``
+    """
+    interval = _positive_price(quote.get("interval_low")) or _positive_price(
+        quote.get("bar_low")
+    )
+    if interval > 0:
+        return interval
+
+    last = _positive_price(quote.get("last")) or _positive_price(quote.get("close"))
+    session_low = _positive_price(quote.get("session_low"))
+    raw_low = _positive_price(quote.get("low"))
+    same_as_session = (
+        session_low > 0
+        and raw_low > 0
+        and abs(raw_low - session_low) <= max(1e-6, session_low * 1e-8)
+    )
+    if same_as_session and last > 0:
+        return last
+    if session_low > 0 and raw_low <= 0 and last > 0:
+        return last
+    if raw_low > 0 and not same_as_session:
+        return raw_low
+    return last
+
+
 def _fetch_quote(ib: IB, symbol: str) -> dict[str, float] | None:
-    """Snapshot high/low/last for trail evaluation."""
+    """
+    Snapshot for trail evaluation.
+
+    ``high`` may be the IB session high (MFE / trigger touch).
+    ``session_low`` is IB ``ticker.low`` (the session day low). It is kept
+    so paper 3R can still see the day's range. LIVE software kill and trail
+    checks use ``low``, which is last/close — never that day low.
+
+    A true current-interval low may be supplied later as ``interval_low`` or
+    ``bar_low``; ``live_software_stop_low`` prefers those over last.
+    """
     contract = Stock(symbol.upper(), "SMART", "USD")
     ib.qualifyContracts(contract)
     t = ib.reqMktData(contract, "", False, False)
@@ -192,20 +254,26 @@ def _fetch_quote(ib: IB, symbol: str) -> dict[str, float] | None:
             return None
 
     last = _f("last") or _f("close") or _f("bid")
-    high = _f("high") or last
-    low = _f("low") or last
+    session_high = _f("high")
+    # ticker.low is the session day low. Do not copy it into stop-check ``low``.
+    session_low = _f("low")
     try:
         ib.cancelMktData(contract)
     except Exception:
         pass
     if last is None:
         return None
-    return {
+    quote: dict[str, float] = {
         "last": float(last),
-        "high": float(high or last),
-        "low": float(low or last),
+        "high": float(session_high or last),
+        "low": float(last),
         "close": float(last),
     }
+    if session_high:
+        quote["session_high"] = float(session_high)
+    if session_low:
+        quote["session_low"] = float(session_low)
+    return quote
 
 
 def _ensure_trail_on_leg(leg: dict[str, Any], symbol: str) -> dict[str, Any]:
@@ -447,8 +515,10 @@ def _process_leg(
     except Exception as exc:
         print(f"  {sym} base_break check skipped: {exc}")
 
+    # Never feed IB session day low into a software stop test.
+    stop_low = live_software_stop_low(quote)
     structure_stop = leg.get("structure_stop") or trail.get("structure_stop")
-    if should_fire_live_structure_stop(quote["low"], structure_stop):
+    if should_fire_live_structure_stop(stop_low, structure_stop):
         results.extend(
             _exit_all_remaining(
                 ib, pos, leg_index, leg, sym,
@@ -484,10 +554,11 @@ def _process_leg(
     trail, exits = evaluate_trail_tick(
         trail,
         high=quote["high"],
-        low=quote["low"],
+        low=stop_low,
         close=quote["close"],
         when=when,
         force_time_cap=force_cap,
+        t1_hard_bank=live_t1_hard_bank_enabled(),
     )
     leg["trail"] = trail
 
@@ -838,6 +909,20 @@ def run_monitor(*, dry_run: bool = False) -> dict[str, Any]:
             "LIVE exits: all-trailing "
             "(structure_stop/be_lock_1r OFF; kill ratchet UP + trail only)"
         )
+    if live_t1_hard_bank_enabled():
+        print(
+            "LIVE T1 hard bank ON "
+            "(TSD_LIVE_T1_HARD_BANK=1 — reason=t1_bank at the +2% trigger)"
+        )
+    else:
+        print(
+            "LIVE T1 hard bank OFF "
+            "(trail-only; TSD_LIVE_T1_HARD_BANK=1 restores reason=t1_bank)"
+        )
+    print(
+        "Software kill/trail low = last/close or current-interval low "
+        "(never IB ticker.low session day low); broker STP unchanged"
+    )
     print(
         f"ET={now.strftime('%Y-%m-%d %H:%M:%S')} session={session} "
         f"clientIds={list(TWS_CLIENT_ID_FALLBACKS)}"

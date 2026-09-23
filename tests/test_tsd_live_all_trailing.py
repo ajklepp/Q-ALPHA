@@ -13,7 +13,10 @@ sys.path.insert(0, str(ROOT / "strategy_lab"))
 
 from tsd_scan_pipeline.tsd_exit import kill_stop_needs_ratchet  # noqa: E402
 from tsd_scan_pipeline.tsd_keep_profit import (  # noqa: E402
+    LIVE_T1_HARD_BANK_ALIAS_ENV,
+    LIVE_T1_HARD_BANK_ENV,
     init_php_trail_state,
+    live_t1_hard_bank_enabled,
     php_process_bar,
 )
 from tsd_scan_pipeline.tsd_structure import (  # noqa: E402
@@ -37,6 +40,8 @@ from tsd_scan_pipeline import tsd_trail_monitor  # noqa: E402
 def _clear_flag() -> None:
     os.environ.pop(LIVE_STRUCTURE_STOP_ENV, None)
     os.environ.pop("PHP_STRUCTURE_STOP_EXITS", None)
+    os.environ.pop(LIVE_T1_HARD_BANK_ENV, None)
+    os.environ.pop(LIVE_T1_HARD_BANK_ALIAS_ENV, None)
 
 
 class TestLiveStructureFlag(unittest.TestCase):
@@ -371,6 +376,199 @@ class TestAliasAndLockProfit(unittest.TestCase):
         )
         self.assertFalse(changed)
         self.assertAlmostEqual(float(trail["kill_price"]), 9.5)
+
+
+class TestLiveT1HardBankFlag(unittest.TestCase):
+    def tearDown(self) -> None:
+        _clear_flag()
+
+    def test_default_off(self):
+        _clear_flag()
+        self.assertFalse(live_t1_hard_bank_enabled())
+
+    def test_explicit_zero_off(self):
+        os.environ[LIVE_T1_HARD_BANK_ENV] = "0"
+        self.assertFalse(live_t1_hard_bank_enabled())
+
+    def test_either_name_opts_in(self):
+        _clear_flag()
+        os.environ[LIVE_T1_HARD_BANK_ENV] = "1"
+        self.assertTrue(live_t1_hard_bank_enabled())
+        _clear_flag()
+        os.environ[LIVE_T1_HARD_BANK_ALIAS_ENV] = "yes"
+        self.assertTrue(live_t1_hard_bank_enabled())
+
+
+class TestNuaiSessionLowDoesNotSoftwareKill(unittest.TestCase):
+    """
+    2026-09-23 NUAI: lock-profit raised the software kill to ~BE, then the
+    monitor treated IB ticker.low (session day low) as a kill hit and
+    market-sold while last was still near the high.
+    """
+
+    def tearDown(self) -> None:
+        _clear_flag()
+
+    def _open_pos(self):
+        trail = init_php_trail_state(10.0, 20, kill_pct=0.05)
+        trail["kill_pct"] = 0.05
+        trail["rth_armed"] = True
+        trail["structure_stop"] = None
+        trail["one_r_locked"] = False
+        trail["last_session_date"] = "2026-09-23"
+        trail["trading_day"] = 1
+        leg = {
+            "price": 10.0,
+            "shares": 20,
+            "status": "OPEN",
+            "rth_armed": True,
+            "structure_stop": None,
+            "one_r_locked": False,
+            "breakeven_locked": False,
+            "kill_pct": 0.05,
+            "kill_price": trail["kill_price"],
+            "trail": trail,
+            "exits": [],
+        }
+        pos = {"symbol": "NUAI", "status": "OPEN", "legs": [leg]}
+        return pos
+
+    def _nuai_quote(self, *, interval_low: float | None = None) -> dict:
+        # Session day low is under the raised BE kill (~9.97) and above the
+        # original 5% kill (9.50), so only the post-lock kill + day-low
+        # combination false-fires. Last stays well above that kill.
+        quote = {
+            "high": 10.50,
+            "last": 10.40,
+            "close": 10.40,
+            "low": 9.80,
+            "session_low": 9.80,
+        }
+        if interval_low is not None:
+            quote["interval_low"] = interval_low
+        return quote
+
+    def test_fetch_quote_does_not_copy_session_day_low_into_stop_low(self):
+        class _Tick:
+            last = 10.40
+            close = 10.40
+            high = 10.50
+            low = 9.80
+            bid = 10.39
+
+        ib = MagicMock()
+        ib.reqMktData.return_value = _Tick()
+        quote = tsd_trail_monitor._fetch_quote(ib, "NUAI")
+        self.assertIsNotNone(quote)
+        assert quote is not None
+        self.assertAlmostEqual(quote["session_low"], 9.80)
+        self.assertAlmostEqual(quote["low"], 10.40)
+        self.assertAlmostEqual(quote["last"], 10.40)
+        self.assertGreater(quote["low"], be_lock_price(10.0))
+
+    def test_stop_low_helper_ignores_session_day_low(self):
+        quote = self._nuai_quote()
+        stop_low = tsd_trail_monitor.live_software_stop_low(quote)
+        self.assertAlmostEqual(stop_low, 10.40)
+        self.assertGreater(stop_low, be_lock_price(10.0))
+
+    def test_process_leg_after_lock_profit_ignores_session_day_low(self):
+        _clear_flag()
+        pos = self._open_pos()
+        quote = self._nuai_quote()
+        prior_kill = float(pos["legs"][0]["trail"]["kill_price"])
+        with patch.object(
+            tsd_trail_monitor, "fetch_3h_bars", side_effect=RuntimeError("skip")
+        ):
+            results = tsd_trail_monitor._process_leg(
+                MagicMock(),
+                pos,
+                0,
+                pos["legs"][0],
+                "NUAI",
+                quote,
+                dry_run=True,
+                when="2026-09-23T11:05:00-04:00",
+            )
+        trail = pos["legs"][0]["trail"]
+        raised = float(trail["kill_price"])
+        be = be_lock_price(10.0)
+        self.assertGreater(raised, prior_kill)
+        self.assertAlmostEqual(raised, be, places=2)
+        # The day low would have hit the raised kill. Last must not.
+        self.assertLess(quote["session_low"], raised)
+        self.assertGreater(quote["last"], raised)
+        reasons = [str(r.get("reason") or "") for r in results]
+        self.assertFalse(any(r == "t1_bank" or r.startswith("kill") for r in reasons))
+        self.assertGreater(remaining_shares(trail), 0)
+        self.assertEqual(pos["legs"][0].get("status"), "OPEN")
+        t1 = next(t for t in trail["tranches"] if t["id"] == "T1")
+        self.assertFalse(t1["closed"])
+        self.assertNotEqual(t1.get("exit_reason"), "t1_bank")
+
+    def test_true_interval_low_still_kills_after_lock_profit(self):
+        """A current-interval low through the raised kill still exits."""
+        _clear_flag()
+        pos = self._open_pos()
+        quote = self._nuai_quote(interval_low=9.90)
+        with patch.object(
+            tsd_trail_monitor, "fetch_3h_bars", side_effect=RuntimeError("skip")
+        ):
+            results = tsd_trail_monitor._process_leg(
+                MagicMock(),
+                pos,
+                0,
+                pos["legs"][0],
+                "NUAI",
+                quote,
+                dry_run=True,
+                when="2026-09-23T11:06:00-04:00",
+            )
+        self.assertTrue(any(str(r.get("reason") or "") == "kill" for r in results))
+        self.assertEqual(remaining_shares(pos["legs"][0]["trail"]), 0)
+
+    def test_process_leg_opt_in_still_emits_t1_bank(self):
+        _clear_flag()
+        os.environ[LIVE_T1_HARD_BANK_ENV] = "1"
+        pos = self._open_pos()
+        # +2.5% touches T1 and stays under the lock-profit MFE gate.
+        quote = {"high": 10.25, "low": 10.05, "close": 10.20, "last": 10.20}
+        with patch.object(
+            tsd_trail_monitor, "fetch_3h_bars", side_effect=RuntimeError("skip")
+        ):
+            results = tsd_trail_monitor._process_leg(
+                MagicMock(),
+                pos,
+                0,
+                pos["legs"][0],
+                "NUAI",
+                quote,
+                dry_run=True,
+                when="2026-09-23T11:07:00-04:00",
+            )
+        self.assertTrue(any(r.get("reason") == "t1_bank" for r in results))
+        self.assertFalse(any(str(r.get("reason") or "").startswith("kill") for r in results))
+
+    def test_process_leg_default_does_not_hard_bank_t1(self):
+        _clear_flag()
+        pos = self._open_pos()
+        quote = {"high": 10.25, "low": 10.05, "close": 10.20, "last": 10.20}
+        with patch.object(
+            tsd_trail_monitor, "fetch_3h_bars", side_effect=RuntimeError("skip")
+        ):
+            results = tsd_trail_monitor._process_leg(
+                MagicMock(),
+                pos,
+                0,
+                pos["legs"][0],
+                "NUAI",
+                quote,
+                dry_run=True,
+                when="2026-09-23T11:08:00-04:00",
+            )
+        self.assertFalse(any(r.get("reason") == "t1_bank" for r in results))
+        t1 = next(t for t in pos["legs"][0]["trail"]["tranches"] if t["id"] == "T1")
+        self.assertFalse(t1["closed"])
 
 
 if __name__ == "__main__":

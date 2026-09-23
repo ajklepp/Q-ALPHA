@@ -189,7 +189,7 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 ## Exit strategies
 
 ### Three-layer protection (Kill / BE / Trail)
-**Definition:** Peak Hour LIVE keeps a broker kill stop active while shares remain and manages T1–T4 with software trailing logic. Hard software sells at `structure_stop` / `be_lock_1r` are **off** unless `TSD_LIVE_STRUCTURE_STOP=1` (alias `PHP_STRUCTURE_STOP_EXITS=1`; see `candidates/tsd_scan_pipeline/REVERT.md`). Paper 3R shadow still banks at fixed R-multiples and is not this live path.  
+**Definition:** Peak Hour LIVE keeps a broker kill stop active while shares remain and manages T1–T4 with software trailing logic. Hard software sells at `structure_stop` / `be_lock_1r` are **off** unless `TSD_LIVE_STRUCTURE_STOP=1` (alias `PHP_STRUCTURE_STOP_EXITS=1`). The live T1 hard bank (`reason=t1_bank`) is **off** unless `TSD_LIVE_T1_HARD_BANK=1` (alias `PHP_LIVE_T1_HARD_BANK`). Software kill/trail checks use last/close or a current-interval low, never the IB session day low. See `candidates/tsd_scan_pipeline/REVERT.md`. Paper 3R shadow still banks at fixed R-multiples and is not this live path.  
 **Plain English:** First survive with a hard emergency stop that only ratchets up; then let profit-taking trails manage the run. Live no longer dumps the runner at a fixed breakeven/structure print.
 
 ### Breakeven (BE) lock

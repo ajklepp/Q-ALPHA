@@ -8,16 +8,22 @@ Autopsy (2026-08-31..09-10):
   - Root cause: fallback triggers 3/5/8/10% with 4% trail means T1 cannot
     trail-exit until ~+7% — so early open profit is never kept
 
-Rules (Peak Hour only):
+Rules (Peak Hour paper / opt-in):
   1) T1 hard-banks at its trigger (default +2%) — no trail on T1
   2) After T1 banks green, raise shared kill to −2.5% (ratchet UP only)
   3) T2–T4 trail as before, with earlier triggers + tighter trail
      (lock-profit ≈ trail after ~+3–4% MFE — not a hard BE / structure dump)
   4) Hybrid kill at entry: if structure risk in [1%, 2.5%], use structure+0.5%
      (floor 2%); else MAE/fallback 5%. Wide structure keeps 5% (Chat A lesson).
+
+LIVE trail monitor (2026-09-23 NUAI): T1 hard bank is OFF unless
+TSD_LIVE_T1_HARD_BANK=1 (alias PHP_LIVE_T1_HARD_BANK). Default live path
+trails T1 with T2–T4. Paper sims keep the hard bank via php_process_bar's
+default. Paper 3R shadow is a different module and is not this flag.
 """
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from typing import Any
 
@@ -48,6 +54,27 @@ STRUCTURE_KILL_MIN = 0.01
 STRUCTURE_KILL_MAX = 0.025
 STRUCTURE_KILL_BUFFER = 0.005
 STRUCTURE_KILL_FLOOR = 0.02
+
+# LIVE hard T1 slice (reason=t1_bank). Default OFF — all-trailing.
+# Paper/research php_process_bar still banks unless the caller passes False.
+# Either env =1 restores the live +2% hard sell. Launcher pins both to 0.
+LIVE_T1_HARD_BANK_ENV = "TSD_LIVE_T1_HARD_BANK"
+LIVE_T1_HARD_BANK_ALIAS_ENV = "PHP_LIVE_T1_HARD_BANK"
+_LIVE_T1_HARD_BANK_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def live_t1_hard_bank_enabled() -> bool:
+    """
+    True when the LIVE trail monitor may hard-sell T1 at its trigger.
+
+    Default OFF. Unset, blank, or 0 keeps T1 on the trail (no reason=t1_bank).
+    Opt in with TSD_LIVE_T1_HARD_BANK=1 or PHP_LIVE_T1_HARD_BANK=1.
+    Either value in {1, true, yes, on} turns the live hard slice ON.
+    Does not affect paper 3R shadow or php_process_bar's default.
+    """
+    primary = (os.environ.get(LIVE_T1_HARD_BANK_ENV) or "0").strip().lower()
+    alias = (os.environ.get(LIVE_T1_HARD_BANK_ALIAS_ENV) or "0").strip().lower()
+    return primary in _LIVE_T1_HARD_BANK_TRUE or alias in _LIVE_T1_HARD_BANK_TRUE
 
 
 def resolve_php_kill_pct(
@@ -150,13 +177,19 @@ def php_process_bar(
     force_time_cap: bool = False,
     be_lock_after_t1: bool = False,
     kill_tighten_after_t1: float | None = 0.025,
+    t1_hard_bank: bool = True,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Peak Hour bar step.
 
-    T1 hard-banks at trigger (+2%). Remaining T2–T4 keep trailing.
-    Default: do NOT full BE-lock after T1 (that caps runners). Optionally
-    tighten kill to kill_tighten_after_t1 (e.g. 2.5%) to cut give-back risk.
+    t1_hard_bank True (paper / research default): T1 hard-banks at its trigger
+    (+2%, reason=t1_bank) and the shared kill may tighten. T2–T4 keep trailing.
+    t1_hard_bank False (LIVE default via the trail monitor): T1 trails with
+    the other tranches — no fixed +2% sell and no post-bank kill tighten.
+    Default: do NOT full BE-lock after T1 (that caps runners).
+
+    ``low`` is the stop-hit price for this bar. LIVE must pass last/close or
+    a current-interval low, never the IB session day low.
     """
     before = sim_state_from_dict(trail_doc)
     prior_closed = {t.id: t.closed for t in before.tranches}
@@ -172,7 +205,7 @@ def php_process_bar(
     else:
         t1 = next((t for t in state.tranches if t.id == "T1" and not t.closed), None)
         t1_banked_now = False
-        if t1 is not None and high >= t1.trigger_price:
+        if t1_hard_bank and t1 is not None and high >= t1.trigger_price:
             _close_tranche_at(t1, t1.trigger_price, when, "t1_bank")
             t1_banked_now = True
             if be_lock_after_t1:

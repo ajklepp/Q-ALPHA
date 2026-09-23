@@ -74,8 +74,9 @@ Pacing: **~2.5s/symbol** for historical pulls.
 
 `tsd_trail_monitor.py` (clientId **95**): Peak Hour **keep-profit v1** (autopsy 2026-09-10).
 
-- **T1** hard-banks at **+2%** (not a 4% trail that only frees after ~+7%).
-- After T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet **UP only** via `sync_kill_quantity`).
+- **LIVE T1 hard bank is OFF** (`TSD_LIVE_T1_HARD_BANK` default `0`; alias `PHP_LIVE_T1_HARD_BANK`). T1 trails. Paper/research `php_process_bar` still hard-banks at **+2%** (`reason=t1_bank`) unless the caller passes `t1_hard_bank=False`. Set the env to `1` to restore the live slice.
+- After a paper/opt-in T1 bank, shared kill **tightens to 2.5%** (broker stop ratchet **UP only** via `sync_kill_quantity`). Live trail-only does not do that tighten.
+- **Software kill / trail low** is last/close or a current-interval low (`interval_low` / `bar_low`). Never IB `ticker.low` (session day low), including after lock-profit raises the software kill. Broker STP is the protective sell.
 - **T2–T4** trail with earlier triggers `(2 / 3.5 / 6 / 10)%` — lock-profit is the tighter trail after ~+3–4% MFE, not a hard BE dump.
 - **LIVE structure_stop / be_lock_1r dumps are OFF** (`TSD_LIVE_STRUCTURE_STOP` default `0`; `PHP_STRUCTURE_STOP_EXITS` is the same gate). Emergency kill remains the single protective SELL. Restore dumps: see `REVERT.md`.
 - After ~+3–4% MFE, `maybe_lock_profit_via_trail` tightens remaining tranche trail widths and may ratchet kill **UP** (capped under last). Not a second broker BE sell.

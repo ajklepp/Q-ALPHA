@@ -15,10 +15,15 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = $Root
 
-# Live locks: all-trailing ON (structure/BE dumps OFF). Pin both so a stale
-# User env =1 cannot silently restore Phase 2.5 dumps. Revert: see REVERT.md.
+# Live locks: all-trailing ON.
+# structure/BE dumps OFF, T1 hard bank OFF. Pin both pairs so a stale User
+# env =1 cannot restore hard sells. Revert: see REVERT.md.
+# Software kill/trail checks use last/close or a current-interval low.
+# They must not use IB ticker.low (session day low). Broker STP is unchanged.
 $env:TSD_LIVE_STRUCTURE_STOP = "0"
 $env:PHP_STRUCTURE_STOP_EXITS = "0"
+$env:TSD_LIVE_T1_HARD_BANK = "0"
+$env:PHP_LIVE_T1_HARD_BANK = "0"
 
 $Python = Join-Path $Root "venv\Scripts\python.exe"
 $Runner = Join-Path $CandDir "tsd_scan_pipeline\tsd_trail_monitor.py"
@@ -62,6 +67,7 @@ if ($otherStarters.Count -gt 0) {
     exit 2
 }
 Add-Content -LiteralPath $LogFile -Value "prestart: venv owner=$Python (no cross-kill; lock guards duplicates; starter singleton OK)"
+Add-Content -LiteralPath $LogFile -Value "prestart: all-trailing; T1 hard bank OFF; kill/trail low=last or interval (never session day low)"
 Add-Content -LiteralPath $LogFile -Value "prestart: prefer clientId 95; fallback 85 only on connect fail (inside monitor)"
 
 # 60s loop with adaptive RTH 30s / extended 5m polling (TWS must be open)
