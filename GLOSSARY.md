@@ -27,8 +27,8 @@ Plain-English guide to the specialized terms used in the Peak Hour Performers da
 **Plain English:** A ruler for trades of different sizes. “+2R” means “made twice my planned risk,” whether the account risked $30 or $300.
 
 ### P&L (Profit & Loss) — realized vs unrealized
-**Definition:** *Realized* P&L is locked in after exits; *unrealized* is mark-to-market while the position is still open.  
-**Plain English:** Realized = money already booked. Unrealized = what you’d get if you closed *right now* (it can still change).
+**Definition:** *Realized* P&L is locked in after exits; *unrealized* is mark-to-market while the position is still open. On the Live Paper scoreboard, headline P&L dollars are realized plus unrealized. The percent beside that figure is those dollars divided by the book's **starting pool** (Peak Hour's $3,000 reference bankroll).  
+**Plain English:** Realized = money already booked. Unrealized = what you’d get if you closed *right now* (it can still change). −$165 on a $3,000 start is −5.5%, and equity is then about $2,835. The percent is the return on the bankroll you began with.
 
 ### Drawdown / Max drawdown
 **Definition:** Peak-to-trough decline in equity (or pool value); max drawdown is the worst such decline over the period.  
@@ -39,8 +39,8 @@ Plain-English guide to the specialized terms used in the Peak Hour Performers da
 **Plain English:** What you expect to make *on average* each time you take a setup. Positive expectancy is the long-run engine; win rate alone is not.
 
 ### Equity / mark-to-market (MTM)
-**Definition:** Equity is current cash plus the market value of open positions. MTM P&L reprices open shares at the latest available quote; it is unrealized until the shares are sold.  
-**Plain English:** What the paper account is worth right now, including trades that are still moving.
+**Definition:** Equity is current cash plus the market value of open positions. On Live Paper that equals the starting pool plus headline P&L (realized + unrealized). MTM P&L reprices open shares at the latest available quote; it is unrealized until the shares are sold. Displayed cash is book cash: starting pool + realized − the cost of shares still open.  
+**Plain English:** What the paper account is worth right now, including trades that are still moving. It matches “what you started with, plus what you’ve made or lost.”
 
 ### Hit 1R / hit 2R
 **Definition:** A trade hits 1R or 2R when its favorable move reaches one or two times its initial stop risk. Peak Hour uses +1R to change stop behavior; Option D research labels success at +2R before the stop. EXP-0021’s research-only `hit_1r` label specifically tests +5% before −5% from the signal close and is not the dashboard win rate.  

@@ -25,6 +25,7 @@ from dashboard_theme import (
 )
 from dashboard_tsd_helpers import (
     hold_time_display,
+    live_paper_scoreboard,
     mark_age_minutes,
 )
 
@@ -689,24 +690,26 @@ def render_live_status_tab(
                 "in Supabase, then tws_intraday_sync --repair"
             )
 
-    cash = _safe_float(tsd_pool.get("pool"), TSD_STARTING_POOL)
     starting = _safe_float(tsd_pool.get("starting_pool"), TSD_STARTING_POOL)
-
-    from dashboard_tsd_helpers import scoreboard_pnl
-
-    board = scoreboard_pnl(tsd_rows, tsd_closed)
+    snapshot_cash = _safe_float(tsd_pool.get("pool"), starting)
+    # One identity: P&L $ = realized + unrealized, P&L % vs starting pool,
+    # Equity = start + P&L = cash + marked open value.
+    board = live_paper_scoreboard(
+        tsd_rows,
+        tsd_closed,
+        starting=starting,
+        snapshot_cash=snapshot_cash,
+    )
     # Open = full slots (T1/T2 intact). Prefer cloud open_positions when present.
     open_full = int(
         tsd_pool.get("open_positions")
         if tsd_pool.get("open_positions") is not None
         else board["full_slots"]
     )
-    total_equity = cash + board["open_mtm"]
-    # Prefer identity P&L (realized+unrealized). Fall back to equity-start if marks missing.
+    total_equity = board["equity"]
     total_pnl = board["total_pnl"]
-    if not tsd_rows and not tsd_closed:
-        total_pnl = total_equity - starting
-    total_pnl_pct = (total_pnl / starting * 100.0) if starting > 0 else 0.0
+    total_pnl_pct = board["pnl_pct"]
+    cash = board["cash"]
     closed_stats = {
         "total": board["decisive"],
         "winners": board["winners"],
@@ -744,6 +747,7 @@ def render_live_status_tab(
             st.metric("Cash", f"${cash:,.2f}")
         st.caption(
             f"Unrealized ${unrealized_pnl:+,.2f} · realized ${realized_pnl:+,.2f}"
+            f" · P&L % vs starting pool ${board['starting']:,.0f}"
             f" · score {_continuation_score_version()}"
             f" · Open = T1/T2 intact · Trailing = T3/T4 only"
         )
