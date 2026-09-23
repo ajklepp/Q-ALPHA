@@ -193,7 +193,7 @@ trail `--once` so `sync_kill_quantity` ratchets the working stop UP if needed.
 | Path | Status |
 |------|--------|
 | Broker emergency kill | Always on; qty sync; ratchet **UP** only |
-| Keep-profit T1 bank + T2–T4 trail | Unchanged |
+| Keep-profit T1–T4 trail | LIVE T1 hard bank OFF unless `TSD_LIVE_T1_HARD_BANK=1` (alias `PHP_LIVE_T1_HARD_BANK`). Paper keep-profit sims still bank. |
 | Paper **3R** multi-target shadow | Unchanged (not this flag) |
 | Strategy B / any paper `B_arm4_lock` shadow | Paper-only; not 3R; not this flag |
 | Track 100 | Untouched |
@@ -201,3 +201,19 @@ trail `--once` so `sync_kill_quantity` ratchets the working stop UP if needed.
 ## Default
 
 `TSD_LIVE_STRUCTURE_STOP` / `PHP_STRUCTURE_STOP_EXITS` default **OFF** (`0` / unset).
+
+## LIVE T1 hard bank (NUAI 2026-09-23)
+
+`TSD_LIVE_T1_HARD_BANK` — default **OFF**. Alias `PHP_LIVE_T1_HARD_BANK`.
+The scheduled launcher pins both to `0`.
+
+Unset or `0`: live does not emit `reason=t1_bank`. T1 trails with T2–T4.
+`1` / `true` / `yes` / `on` on either name restores the live +2% hard slice.
+
+Paper `php_process_bar` / research sims keep the hard bank (function default).
+Paper 3R shadow is not this flag.
+
+Software kill and trail-stop tests use last/close, or `interval_low` /
+`bar_low` for the current interval only. IB `ticker.low` (session day low)
+is stored as `session_low` and cannot by itself fire a software kill.
+Broker STP protective sells are unchanged.

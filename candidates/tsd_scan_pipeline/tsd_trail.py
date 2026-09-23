@@ -144,7 +144,9 @@ def init_trail_state(
     """
     Peak Hour trail state — keep-profit v1 (autopsy 2026-08-31..09-10).
 
-    T1 hard-banks at +2%; kill then tightens to 2.5%; T2–T4 trail.
+    Levels still use the +2% T1 trigger. LIVE does not hard-bank that slice
+    unless TSD_LIVE_T1_HARD_BANK=1; otherwise T1 trails. Paper sims that call
+    php_process_bar / evaluate_trail_tick with the default still hard-bank.
     Blanket structure kill stays OFF (Chat A + autopsy: net negative).
     """
     from tsd_scan_pipeline.tsd_keep_profit import init_php_trail_state
@@ -203,9 +205,15 @@ def evaluate_trail_tick(
     close: float,
     when: str,
     force_time_cap: bool = False,
+    t1_hard_bank: bool = True,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Advance trail one tick. Default = Peak Hour keep-profit (T1 bank + tighten).
+    Advance trail one tick. Default = Peak Hour keep-profit.
+
+    t1_hard_bank defaults True so paper and research keep-profit paths still
+    emit reason=t1_bank. The live trail monitor passes
+    live_t1_hard_bank_enabled(), which is OFF unless explicitly opted in.
+    ``low`` must be this bar's low or last — never an IB session day low.
     """
     if trail_doc.get("php_keep_profit", True):
         from tsd_scan_pipeline.tsd_keep_profit import php_process_bar
@@ -219,6 +227,7 @@ def evaluate_trail_tick(
             force_time_cap=force_time_cap,
             be_lock_after_t1=False,
             kill_tighten_after_t1=0.025,
+            t1_hard_bank=t1_hard_bank,
         )
 
     before = sim_state_from_dict(trail_doc)

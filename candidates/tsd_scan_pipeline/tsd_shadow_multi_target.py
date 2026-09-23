@@ -2,7 +2,8 @@
 """
 Shadow Peak Hour paper book — 3R multi-target exits alongside live 4T.
 
-Live IBKR path stays on php_keep_profit 4-tranche ratchet.
+Live IBKR path stays on the php_keep_profit 4-tranche trail
+(T1 hard bank off unless TSD_LIVE_T1_HARD_BANK=1).
 This book mirrors the same fills and banks slices in software only
 (no second broker SELLs, no capacity/pool impact).
 
@@ -280,6 +281,8 @@ def tick_open_shadows(
     Quote every open shadow symbol and advance ladders.
 
     fetch_quote(symbol) -> {high, low, last/close} or None.
+    When the live snapshot includes session_high/session_low, paper uses
+    that day's range. Live software stops do not.
     """
     book = load_shadow_book()
     open_syms = sorted({
@@ -294,8 +297,14 @@ def tick_open_shadows(
         if not q:
             continue
         try:
-            high = float(q.get("high") or q.get("last") or q.get("close") or 0)
-            low = float(q.get("low") or q.get("last") or q.get("close") or 0)
+            # Paper 3R still marks the session range. Live software stops use
+            # last/interval low and must not read session_low (NUAI 2026-09-23).
+            high = float(
+                q.get("session_high") or q.get("high") or q.get("last") or q.get("close") or 0
+            )
+            low = float(
+                q.get("session_low") or q.get("low") or q.get("last") or q.get("close") or 0
+            )
             last = float(q.get("last") or q.get("close") or 0)
         except (TypeError, ValueError):
             continue
