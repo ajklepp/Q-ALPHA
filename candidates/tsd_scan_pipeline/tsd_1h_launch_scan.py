@@ -311,6 +311,8 @@ def _write_launch_artifact(
     attention: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Persist today's Peak Hour 1H board for dashboard / Supabase watchlist SoT."""
+    from tsd_scan_pipeline.tsd_social import social_audit_fields
+
     q_by_sym = {
         str(r.get("symbol", "")).upper(): r for r in (queue_results or [])
     }
@@ -374,6 +376,7 @@ def _write_launch_artifact(
             "micro_dead_tape": ar.get("micro_dead_tape"),
             "options_call_share": ar.get("options_call_share"),
             "options_score_lite": ar.get("options_score_lite"),
+            **social_audit_fields(r),
         })
     payload = {
         "updated_at": now_et.isoformat(),

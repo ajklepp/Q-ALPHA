@@ -1,0 +1,7 @@
+symbol,signal_day,role,source,public_high_vs_open_pct,public_close_vs_open_pct,outcome,social_at_decision,filter_applied,note
+NUAI,2026-09-23,live paper long; T1 bank then rest sold near the high,PR 36,5.3,2.3,mover,not_saved,no,Peak Hour +2% bank plus daily high. Yahoo daily bars are not the 1H path.
+GENB,2026-09-17,open 16 shares near 17.11 by 2026-09-18 15:36 ET,PR 30,11.2,6.7,mover,not_saved,no,Entry day inferred because 9/18 book price matches 9/17 close. Not a saved scan row.
+MLYS,2026-09-17,open 8 shares near 27.91,PR 30,5.6,0.1,flat,not_saved,no,Day high was a mild rip; close was flat.
+GOLD,2026-09-18,closed by t1_bank before the 15:36 ET snapshot,PR 30,,,mover,not_saved,no,Entry day not in the notes. 9/18 itself was about flat.
+ATRC,2026-09-18,still open; older entry (kill near 53 price near 58),PR 30,,,older_winner,not_saved,no,Not a fresh entry this window.
+MMED,2026-09-18,still open 2 shares after qty drift,PR 30,-1.4,-1.4,likely_dud,not_saved,no,9/18 close vs open. 9/21 close vs open was about -4.6%. Entry time not saved.
