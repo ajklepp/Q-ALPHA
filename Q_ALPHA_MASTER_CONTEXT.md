@@ -1,7 +1,7 @@
 # Q-ALPHA MASTER CONTEXT
 ## Durable architecture & decisions — read before changing the system
 
-*Last updated: 2026-08-24. Companion ops doc: `Q_ALPHA_HANDOFF.md`.*
+*Last updated: 2026-08-24. Companion ops doc: `Q_ALPHA_HANDOFF.md`. Conversation map (2026-09-12): `LUCA_BRIEF.md`.*
 
 ---
 
