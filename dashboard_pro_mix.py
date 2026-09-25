@@ -26,9 +26,10 @@ ENV_VAR = "PRO_MIX_PAPER_BOOK"
 REPO_RELATIVE = Path("results") / "pro_mix" / "paper_book.json"
 
 # Separate Cursor Origin project. Q-ALPHA does not clone it and does not run it.
+PROMIX_ORIGIN_URL = "https://cursor.com/codebase/aaron-klepp-alderson/PROMIX"
 SOURCE_NOTE = (
-    "Source of truth: the **PRO MIX / LUCA'S STRATEGY** Cursor Origin repo "
-    "(separate project, scaffolded on `main` — not this repository). "
+    "Source of truth: PRO MIX / LUCA'S STRATEGY Cursor Origin "
+    f"[PROMIX]({PROMIX_ORIGIN_URL}). "
     "Q-ALPHA does not run the heat filter, entries, or risk engine, and it does not clone that repo. "
     "Publish paper state to `results/pro_mix/paper_book.json`, or set `PRO_MIX_PAPER_BOOK`."
 )
@@ -54,9 +55,10 @@ OPEN_FIELDS = [
 ]
 
 SCHEMA_MD = """
-The PRO MIX Origin repo writes this file. Q-ALPHA reads it.
+PROMIX writes this file. Q-ALPHA only displays it.
 
 `results/pro_mix/paper_book.json`, or `PRO_MIX_PAPER_BOOK`.
+Origin: https://cursor.com/codebase/aaron-klepp-alderson/PROMIX
 
 ```json
 {

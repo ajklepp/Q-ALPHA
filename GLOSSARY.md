@@ -385,7 +385,7 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Plain English:** A separate paper journal. If the 3R tab is empty, that is Peak Hour’s shadow book — look at Track 100’s own tab for this study.
 
 ### PRO MIX (Luca's strategy)
-**Definition:** Viewer tab for the long-only PRO MIX paper book (subtitle: LUCA'S STRATEGY). The strategy — Camillo-style heat/universe filter, pullback or break-retest entries, Seykota risk card ($5,000, 1% risk, 20% heat) — runs in its own Cursor Origin repo. This dashboard only reads `results/pro_mix/paper_book.json` (or `PRO_MIX_PAPER_BOOK`), including a `universe` list when that repo writes one. Live Peak Hour is unchanged. No TWS orders.  
+**Definition:** Viewer tab for the long-only PRO MIX paper book (subtitle: LUCA'S STRATEGY). The strategy — Camillo-style heat/universe filter, pullback or break-retest entries, Seykota risk card ($5,000, 1% risk, 20% heat) — runs in the Cursor Origin repo [PROMIX](https://cursor.com/codebase/aaron-klepp-alderson/PROMIX). This dashboard only reads `results/pro_mix/paper_book.json` (or `PRO_MIX_PAPER_BOOK`), including a `universe` list when that repo writes one. Live Peak Hour is unchanged. No TWS orders.  
 **Plain English:** Luca’s mix, shown from a paper file. The trading rules live in the other project.
 
 ### SEYKOTA

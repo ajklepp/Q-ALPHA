@@ -13,7 +13,12 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from dashboard_pro_mix import ALIAS, SOURCE_NOTE as PRO_MIX_SOURCE, load_pro_mix_book  # noqa: E402
+from dashboard_pro_mix import (  # noqa: E402
+    ALIAS,
+    PROMIX_ORIGIN_URL,
+    SOURCE_NOTE as PRO_MIX_SOURCE,
+    load_pro_mix_book,
+)
 from dashboard_seykota import SEYKOTA_ORIGIN_URL, load_seykota_book  # noqa: E402
 from dashboard_strategy_paper import (  # noqa: E402
     equity_points,
@@ -142,6 +147,7 @@ class TestPaperBookViewer(unittest.TestCase):
             self.assertNotIn("MarketOrder", src)
         self.assertIn(SEYKOTA_ORIGIN_URL, (ROOT / "dashboard_seykota.py").read_text(encoding="utf-8"))
         self.assertIn("LUCA'S STRATEGY", PRO_MIX_SOURCE)
+        self.assertIn(PROMIX_ORIGIN_URL, PRO_MIX_SOURCE)
 
 
 class TestStrategyTabRender(unittest.TestCase):
@@ -158,6 +164,7 @@ class TestStrategyTabRender(unittest.TestCase):
         self.assertIn("LUCA'S STRATEGY", pro_text)
         self.assertIn("Heat shortlist pending", pro_text)
         self.assertIn("Cursor Origin", pro_text)
+        self.assertIn(PROMIX_ORIGIN_URL, pro_text)
         self.assertIn("Live Peak Hour", pro_text)
 
         sey_text = _visible_text(sey)

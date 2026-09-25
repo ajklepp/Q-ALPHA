@@ -30,6 +30,6 @@
     "n_closed": 0
   },
   "universe": [],
-  "source_project": "Cursor Origin · PRO MIX / LUCA'S STRATEGY (separate repo, not Q-ALPHA)",
+  "source_project": "https://cursor.com/codebase/aaron-klepp-alderson/PROMIX",
   "notes": "Empty viewer scaffold. The PRO MIX Origin repo writes this file. Q-ALPHA does not run the strategy."
 }
