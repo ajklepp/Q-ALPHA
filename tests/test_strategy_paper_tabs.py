@@ -40,13 +40,11 @@ class TestPaperBookViewer(unittest.TestCase):
             {
                 "PRO_MIX_PAPER_BOOK": "",
                 "SEYKOTA_PAPER_BOOK": "",
-                "LUCA_STRATEGY_PAPER_BOOK": "",
             },
             clear=False,
         ):
             pro = load_pro_mix_book()
             sey = load_seykota_book()
-            luca = load_luca_strategy_book()
         self.assertTrue(pro["ok"])
         self.assertEqual(pro["mode"], "PAPER")
         self.assertEqual(pro["alias"], ALIAS)
@@ -59,12 +57,28 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertEqual(sey["strategy"], "seykota")
         self.assertTrue(str(sey["path"]).endswith("results/seykota/paper_book.json"))
         self.assertIn("seykota-lab", str(sey.get("source_project")))
+
+    def test_luca_repo_book_is_exp001_spy_snapshot(self) -> None:
+        with patch.dict(os.environ, {"LUCA_STRATEGY_PAPER_BOOK": ""}, clear=False):
+            luca = load_luca_strategy_book()
         self.assertTrue(luca["ok"])
         self.assertEqual(luca["mode"], "PAPER")
         self.assertEqual(luca["strategy"], "luca_strategy")
         self.assertEqual(luca["alias"], "LUCA'S STRATEGY")
-        self.assertEqual(luca["open"], [])
+        self.assertFalse(luca["scaffold"])
         self.assertEqual(luca["closed"], [])
+        self.assertEqual(len(luca["open"]), 1)
+        leg = luca["open"][0]
+        self.assertEqual(leg["symbol"], "SPY")
+        self.assertEqual(leg["qty"], 6)
+        self.assertAlmostEqual(leg["entry"], 767.18)
+        self.assertEqual(leg["setup"], "exp001_cash_fit")
+        self.assertEqual(luca["totals"]["n_open"], 1)
+        self.assertEqual(luca["totals"]["n_closed"], 0)
+        self.assertAlmostEqual(luca["totals"]["equity_usd"], 5000.0)
+        self.assertAlmostEqual(luca["totals"]["heat_pct"], 0.01)
+        self.assertEqual(luca["rules"].get("exp"), "exp-001")
+        self.assertEqual(luca["rules"].get("symbol"), "SPY")
         self.assertTrue(str(luca["path"]).endswith("results/luca_strategy/paper_book.json"))
         self.assertNotIn("PROMIX", str(luca.get("source_project")))
         self.assertEqual(luca.get("source_project"), LUCA_ORIGIN_URL)
@@ -244,13 +258,21 @@ class TestStrategyTabRender(unittest.TestCase):
         luca_text = _visible_text(luca)
         self.assertIn("PAPER", luca_text)
         self.assertIn("LUCA'S STRATEGY", luca_text)
-        self.assertIn("Paper book is empty", luca_text)
+        self.assertNotIn("Paper book is empty", luca_text)
         self.assertIn(LUCA_ORIGIN_URL, luca_text)
         self.assertIn("LUCAS-STRATEGY", luca_text)
         self.assertNotIn("Origin link pending", luca_text)
         self.assertIn("Live Peak Hour", luca_text)
         self.assertNotIn(PROMIX_ORIGIN_URL, luca_text)
         self.assertIn("does not send TWS orders", luca_text)
+        frames = list(getattr(luca, "dataframe", []) or [])
+        self.assertTrue(frames)
+        shown = frames[0].value.to_string()
+        self.assertIn("SPY", shown)
+        self.assertIn("exp001_cash_fit", shown)
+        metrics = {m.label: m.value for m in (getattr(luca, "metric", []) or [])}
+        self.assertEqual(metrics.get("Open"), "1")
+        self.assertEqual(metrics.get("Closed"), "0")
 
 
 def _run_tab(app_test: object, module: str, fn: str) -> object:
