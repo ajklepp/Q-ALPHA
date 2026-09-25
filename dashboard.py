@@ -2217,9 +2217,23 @@ def main() -> None:
     trades, pool_history, health = _safe_load()
     render_header()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    (
+        tab_live,
+        tab_track100,
+        tab_pro_mix,
+        tab_seykota,
+        tab_3r,
+        tab_log,
+        tab_perf,
+        tab_health,
+        tab_daily,
+        tab_weekly,
+        tab_glossary_tab,
+    ) = st.tabs([
         "Live Status",
         "Track 100",
+        "PRO MIX",
+        "SEYKOTA",
         "3R Paper",
         "Trade Log",
         "Performance",
@@ -2229,29 +2243,37 @@ def main() -> None:
         "Glossary",
     ])
 
-    with tab1:
+    with tab_live:
         tab_live_status(trades, pool_history)
-    with tab2:
+    with tab_track100:
         from dashboard_track100 import render_track100_tab
 
         render_track100_tab()
-    with tab3:
+    with tab_pro_mix:
+        from dashboard_pro_mix import render_pro_mix_tab
+
+        render_pro_mix_tab()
+    with tab_seykota:
+        from dashboard_seykota import render_seykota_tab
+
+        render_seykota_tab()
+    with tab_3r:
         from dashboard_3r_paper import render_3r_paper_tab
 
         render_3r_paper_tab(get_sync)
-    with tab4:
+    with tab_log:
         tab_trade_log(trades)
-    with tab5:
+    with tab_perf:
         tab_performance(trades, pool_history)
-    with tab6:
+    with tab_health:
         tab_system_health(health)
-    with tab7:
+    with tab_daily:
         tab_daily_reviews()
-    with tab8:
+    with tab_weekly:
         from dashboard_weekly_research import tab_weekly_research
 
         tab_weekly_research(get_sync)
-    with tab9:
+    with tab_glossary_tab:
         tab_glossary()
 
     render_footer()

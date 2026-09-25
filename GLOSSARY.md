@@ -384,6 +384,14 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Definition:** Sibling study (`Documents\\Track 100`, GitHub `ajklepp/track-100`) with its own playbook (v12: deepest OS → retest signal-low → next 1H open; 5% stop / 15% target). Q-ALPHA’s Track 100 tab **displays** `results/paper_book.json` only. It does not place IBKR orders.  
 **Plain English:** A separate paper journal. If the 3R tab is empty, that is Peak Hour’s shadow book — look at Track 100’s own tab for this study.
 
+### PRO MIX (Luca's strategy)
+**Definition:** Viewer tab for the long-only PRO MIX paper book (subtitle: LUCA'S STRATEGY). The strategy — Camillo-style heat/universe filter, pullback or break-retest entries, Seykota risk card ($5,000, 1% risk, 20% heat) — runs in the Cursor Origin repo [PROMIX](https://cursor.com/codebase/aaron-klepp-alderson/PROMIX). This dashboard only reads `results/pro_mix/paper_book.json` (or `PRO_MIX_PAPER_BOOK`), including a `universe` list when that repo writes one. Live Peak Hour is unchanged. No TWS orders.  
+**Plain English:** Luca’s mix, shown from a paper file. The trading rules live in the other project.
+
+### SEYKOTA
+**Definition:** Viewer tab for the long-only daily trend paper book (EMA20/200, ADX, ATR size, 20% heat, $5,000). The engine is the Cursor Origin repo [seykota-lab](https://cursor.com/codebase/aaron-klepp-alderson/seykota-lab). This dashboard only reads `results/seykota/paper_book.json` (or `SEYKOTA_PAPER_BOOK`).  
+**Plain English:** Seykota’s trend book, displayed from a paper file. Q-ALPHA does not run it.
+
 ---
 
 *Informational only. Peak Hour Performers currently runs in IBKR paper; Strategy Lab is archived SIM; neither uses real money.*
