@@ -56,3 +56,7 @@ experiments/EXP-0021/social_day_cache.json
 # Research microstructure logger (runtime JSONL + starter PID)
 logs/microstructure/
 candidates/logs/*.pid
+
+# EXP-0026 vendored Track 100 snapshot (run vendor_from_track100.py; do not invent medians)
+experiments/EXP-0026/vendor_track100/*.py
+experiments/EXP-0026/vendor_track100/MANIFEST.json
