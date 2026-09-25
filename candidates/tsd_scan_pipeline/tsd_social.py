@@ -346,6 +346,55 @@ def fetch_social_bundle(
     return out
 
 
+# Fields the live ranker actually reads. Persist these on scan JSON so a
+# later audit can tell "fetched and zero" from "never attached".
+SOCIAL_AUDIT_KEYS: tuple[str, ...] = (
+    "news_velocity_24h",
+    "news_velocity_72h",
+    "news_headline_count_48h",
+    "dilution_flag",
+    "distress_flag",
+    "catalyst_type",
+    "st_msg_24h",
+    "st_bull_ratio",
+    "st_ok",
+    "x_posts_24h",
+    "x_sent_lex",
+    "x_ok",
+    "social_missing",
+    "tws_ok",
+    "tws_headline_count",
+    "sentiment_score",
+)
+
+
+def social_audit_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """Copy decision-time social fields for scan JSON. Absent key → None."""
+    return {k: row.get(k) if k in row else None for k in SOCIAL_AUDIT_KEYS}
+
+
+def social_audit_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts so a scan file shows whether social was attached at all."""
+    n = len(rows)
+    attached = sum(1 for r in rows if "social_missing" in r or "news_velocity_24h" in r)
+    news_gt0 = sum(1 for r in rows if float(r.get("news_velocity_24h") or 0) > 0)
+    st_ok = sum(1 for r in rows if int(r.get("st_ok") or 0) == 1)
+    tws_ok = sum(1 for r in rows if int(r.get("tws_ok") or 0) == 1)
+    missing = sum(1 for r in rows if int(r.get("social_missing") or 0) == 1)
+    dilution = sum(1 for r in rows if int(r.get("dilution_flag") or 0) == 1)
+    distress = sum(1 for r in rows if int(r.get("distress_flag") or 0) == 1)
+    return {
+        "ranked_n": n,
+        "rows_with_social_fields": attached,
+        "news_gt0": news_gt0,
+        "st_ok": st_ok,
+        "tws_ok": tws_ok,
+        "social_missing": missing,
+        "dilution_flag": dilution,
+        "distress_flag": distress,
+    }
+
+
 def attach_social_to_rows(
     rows: list[dict[str, Any]],
     *,

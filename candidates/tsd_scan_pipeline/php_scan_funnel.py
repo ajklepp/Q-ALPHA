@@ -112,6 +112,8 @@ def build_scan_funnel_doc(
         if str(r.get("status") or "").upper() == "FILLED"
     ]
 
+    from tsd_scan_pipeline.tsd_social import social_audit_fields, social_audit_summary
+
     launches = []
     for i, r in enumerate(ranked, 1):
         launches.append({
@@ -139,6 +141,8 @@ def build_scan_funnel_doc(
             "options_score_lite": r.get("options_score_lite"),
             "vol_ratio_20": r.get("vol_ratio_20"),
             "bar_state": r.get("bar_state"),
+            # Social/news at rank time. Null means the ranker never attached it.
+            **social_audit_fields(r),
         })
 
     bar_hour = None
@@ -172,6 +176,7 @@ def build_scan_funnel_doc(
         ),
         "reject_summary": reject_summary,
         "reject_samples": reject_samples,
+        "social_audit": social_audit_summary(ranked),
         "runtime_sec": round(float(runtime_sec), 1),
     }
 
