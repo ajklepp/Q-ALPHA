@@ -1,0 +1,2415 @@
+{
+  "paper_only": true,
+  "asof": "2026-09-16",
+  "universe_source": "fixture",
+  "bar_source": "fixture",
+  "n_entries": 6,
+  "n_tickers": 6,
+  "n_recommendable": 6,
+  "recommendation_sample": "n_bars>=3 (6/6)",
+  "symbols": [
+    "CHOPKILL",
+    "FADE4",
+    "GRINDER",
+    "GTL",
+    "LOCKDEMO",
+    "RIPPER"
+  ],
+  "recent_php_ticker_hints": [
+    "ARQQ",
+    "ATRC",
+    "BETA",
+    "CAI",
+    "CBLL",
+    "CLYM",
+    "CNH",
+    "FGI",
+    "FWDI",
+    "METC",
+    "NX",
+    "OCUL",
+    "PURR",
+    "QMCO",
+    "RDW",
+    "SLS"
+  ],
+  "modes_run": [
+    "A",
+    "B_arm3",
+    "B_arm4",
+    "B_arm3_lock",
+    "B_arm4_lock",
+    "C"
+  ],
+  "cost_per_trade": 0.0015,
+  "language": {
+    "units": "pct_of_entry_and_pct_off_high",
+    "plus_1r_means": "+kill_pct of entry (fallback 5.00% of entry)",
+    "live_t1_bank_pct_of_entry": 0.02,
+    "live_trail_pct_off_high": 0.025,
+    "lock_width_frac_of_mae_p50": 0.7,
+    "lock_width_floor": 0.01,
+    "ripper_mfe_pct_of_entry": 0.04,
+    "arm_after_mfe_grid": [
+      0.03,
+      0.04
+    ]
+  },
+  "widths": [
+    {
+      "symbol": "CHOPKILL",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    },
+    {
+      "symbol": "FADE4",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    },
+    {
+      "symbol": "GRINDER",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    },
+    {
+      "symbol": "GTL",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    },
+    {
+      "symbol": "LOCKDEMO",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    },
+    {
+      "symbol": "RIPPER",
+      "n_analogs": 8,
+      "mae_p50": 0.022,
+      "mae_p75": 0.0255,
+      "mfe_p50": 0.0425,
+      "trail_pct_off_high": 0.022,
+      "lock_trail_pct_off_high": 0.0154,
+      "emergency_kill_pct": 0.0255,
+      "kill_source": "analog_mae_p75",
+      "status": "OK"
+    }
+  ],
+  "modes": {
+    "A": {
+      "mode": "A",
+      "label": "live php_keep_profit_v1 (T1 bank +2% of entry)",
+      "book_pnl": 1.68,
+      "book_pnl_pct_of_entry_mean": 0.0035,
+      "book_pnl_pct_of_entry_median": -0.002437,
+      "capture_frac_of_mfe_mean": -2.015879,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.155946,
+      "left_on_table_pct_of_entry_mean": 0.038833,
+      "green_then_lost_rate": 0.333333,
+      "score": 0.000167,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": 0.0035,
+          "median_pnl_pct_of_entry": -0.002437,
+          "mean_capture_frac_of_mfe": -2.015879,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.155946,
+          "mean_left_on_table_pct_of_entry": 0.038833,
+          "green_then_lost_rate": 0.333333,
+          "score": 0.000167
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.025792,
+          "median_pnl_pct_of_entry": 0.0235,
+          "mean_capture_frac_of_mfe": 0.299272,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.299272,
+          "mean_left_on_table_pct_of_entry": 0.038208,
+          "green_then_lost_rate": 0.333333,
+          "score": 0.022458
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.018792,
+          "median_pnl_pct_of_entry": -0.009625,
+          "mean_capture_frac_of_mfe": -4.33103,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.059045,
+          "mean_left_on_table_pct_of_entry": 0.039458,
+          "green_then_lost_rate": 0.333333,
+          "score": -0.022125
+        },
+        "green_then_lost": {
+          "n": 2,
+          "mean_pnl_pct_of_entry": -0.009625,
+          "median_pnl_pct_of_entry": -0.009625,
+          "mean_capture_frac_of_mfe": -0.264974,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.264974,
+          "mean_left_on_table_pct_of_entry": 0.046625,
+          "green_then_lost_rate": 1.0,
+          "score": -0.019625
+        }
+      },
+      "runtime_s": 0.012,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 5.2,
+          "cost": 0.12,
+          "pnl": 5.08,
+          "pnl_pct_of_entry": 0.0635,
+          "mfe_peak_pct": 0.105,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": 0.604762,
+          "left_on_table_pct_of_entry": 0.0415,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "t1_bank",
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T13:00:00"
+            },
+            {
+              "tranche_id": "REMAINING",
+              "shares": 5,
+              "exit_price": 10.92,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.65,
+          "cost": 0.12,
+          "pnl": -0.77,
+          "pnl_pct_of_entry": -0.009625,
+          "mfe_peak_pct": 0.042,
+          "mae_peak_pct": 0.04,
+          "capture_frac_of_mfe": -0.229167,
+          "left_on_table_pct_of_entry": 0.051625,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "t1_bank",
+            "kill",
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T13:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T4",
+              "shares": 1,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 0.5,
+          "cost": 0.12,
+          "pnl": 0.38,
+          "pnl_pct_of_entry": 0.00475,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": 0.182692,
+          "left_on_table_pct_of_entry": 0.02125,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "t1_bank",
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "REMAINING",
+              "shares": 5,
+              "exit_price": 9.98,
+              "reason": "hold_end",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.65,
+          "cost": 0.12,
+          "pnl": -0.77,
+          "pnl_pct_of_entry": -0.009625,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": -0.300781,
+          "left_on_table_pct_of_entry": 0.041625,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "t1_bank",
+            "kill",
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            },
+            {
+              "tranche_id": "T4",
+              "shares": 1,
+              "exit_price": 9.75,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.0,
+          "cost": 0.12,
+          "pnl": 1.88,
+          "pnl_pct_of_entry": 0.0235,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.522222,
+          "left_on_table_pct_of_entry": 0.0215,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "t1_bank",
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 10.2,
+              "reason": "t1_bank",
+              "when": "2026-09-08T13:00:00"
+            },
+            {
+              "tranche_id": "REMAINING",
+              "shares": 5,
+              "exit_price": 10.28,
+              "reason": "hold_end",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.025,
+          "trail_armed": true,
+          "mode": "A"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -4.0,
+          "cost": 0.12,
+          "pnl": -4.12,
+          "pnl_pct_of_entry": -0.0515,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.052,
+          "capture_frac_of_mfe": -12.875,
+          "left_on_table_pct_of_entry": 0.0555,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill",
+            "kill",
+            "kill",
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "T1",
+              "shares": 3,
+              "exit_price": 9.5,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T2",
+              "shares": 2,
+              "exit_price": 9.5,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T3",
+              "shares": 2,
+              "exit_price": 9.5,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            },
+            {
+              "tranche_id": "T4",
+              "shares": 1,
+              "exit_price": 9.5,
+              "reason": "kill",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.05,
+          "trail_armed": true,
+          "mode": "A"
+        }
+      ]
+    },
+    "B_arm3": {
+      "mode": "B_arm3",
+      "label": "arm-after-MFE +3% of entry \u00b7 MAE-p50 trail \u00b7 kill follows trail",
+      "book_pnl": 8.4706,
+      "book_pnl_pct_of_entry_mean": 0.017647,
+      "book_pnl_pct_of_entry_median": 0.012686,
+      "capture_frac_of_mfe_mean": -0.817472,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.369034,
+      "left_on_table_pct_of_entry_mean": 0.024686,
+      "green_then_lost_rate": 0.166667,
+      "score": 0.01598,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": 0.017647,
+          "median_pnl_pct_of_entry": 0.012686,
+          "mean_capture_frac_of_mfe": -0.817472,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.369034,
+          "mean_left_on_table_pct_of_entry": 0.024686,
+          "green_then_lost_rate": 0.166667,
+          "score": 0.01598
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.042862,
+          "median_pnl_pct_of_entry": 0.02051,
+          "mean_capture_frac_of_mfe": 0.57872,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.57872,
+          "mean_left_on_table_pct_of_entry": 0.021138,
+          "green_then_lost_rate": 0.0,
+          "score": 0.042862
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.007568,
+          "median_pnl_pct_of_entry": -0.0035,
+          "mean_capture_frac_of_mfe": -2.213663,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.054505,
+          "mean_left_on_table_pct_of_entry": 0.028235,
+          "green_then_lost_rate": 0.333333,
+          "score": -0.010901
+        },
+        "green_then_lost": {
+          "n": 1,
+          "mean_pnl_pct_of_entry": -0.0035,
+          "median_pnl_pct_of_entry": -0.0035,
+          "mean_capture_frac_of_mfe": -0.134615,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.134615,
+          "mean_left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost_rate": 1.0,
+          "score": -0.0135
+        }
+      },
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 7.36,
+          "cost": 0.12,
+          "pnl": 7.24,
+          "pnl_pct_of_entry": 0.0905,
+          "mfe_peak_pct": 0.105,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": 0.861905,
+          "left_on_table_pct_of_entry": 0.0145,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.92,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "B_arm3"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.52608,
+          "cost": 0.12,
+          "pnl": 1.4061,
+          "pnl_pct_of_entry": 0.017576,
+          "mfe_peak_pct": 0.042,
+          "mae_peak_pct": 0.04,
+          "capture_frac_of_mfe": 0.418476,
+          "left_on_table_pct_of_entry": 0.024424,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.19076,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.019075999999999916,
+          "trail_armed": true,
+          "mode": "B_arm3"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.16,
+          "cost": 0.12,
+          "pnl": -0.28,
+          "pnl_pct_of_entry": -0.0035,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": -0.134615,
+          "left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.98,
+              "reason": "hold_end",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm3"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 0.74368,
+          "cost": 0.12,
+          "pnl": 0.6237,
+          "pnl_pct_of_entry": 0.007796,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": 0.243625,
+          "left_on_table_pct_of_entry": 0.024204,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.09296,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.009295999999999971,
+          "trail_armed": true,
+          "mode": "B_arm3"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.7608,
+          "cost": 0.12,
+          "pnl": 1.6408,
+          "pnl_pct_of_entry": 0.02051,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.455778,
+          "left_on_table_pct_of_entry": 0.02449,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.2201,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "B_arm3"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.03,
+          "capture_frac_of_mfe": -6.75,
+          "left_on_table_pct_of_entry": 0.031,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-08T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm3"
+        }
+      ]
+    },
+    "B_arm4": {
+      "mode": "B_arm4",
+      "label": "arm-after-MFE +4% of entry \u00b7 MAE-p50 trail \u00b7 kill follows trail",
+      "book_pnl": 5.6869,
+      "book_pnl_pct_of_entry_mean": 0.011848,
+      "book_pnl_pct_of_entry_median": 0.007038,
+      "capture_frac_of_mfe_mean": -0.998701,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.151559,
+      "left_on_table_pct_of_entry_mean": 0.030486,
+      "green_then_lost_rate": 0.333333,
+      "score": 0.008514,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": 0.011848,
+          "median_pnl_pct_of_entry": 0.007038,
+          "mean_capture_frac_of_mfe": -0.998701,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.151559,
+          "mean_left_on_table_pct_of_entry": 0.030486,
+          "green_then_lost_rate": 0.333333,
+          "score": 0.008514
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.042862,
+          "median_pnl_pct_of_entry": 0.02051,
+          "mean_capture_frac_of_mfe": 0.57872,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.57872,
+          "mean_left_on_table_pct_of_entry": 0.021138,
+          "green_then_lost_rate": 0.0,
+          "score": 0.042862
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.019167,
+          "median_pnl_pct_of_entry": -0.027,
+          "mean_capture_frac_of_mfe": -2.576122,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.489183,
+          "mean_left_on_table_pct_of_entry": 0.039833,
+          "green_then_lost_rate": 0.666667,
+          "score": -0.025833
+        },
+        "green_then_lost": {
+          "n": 2,
+          "mean_pnl_pct_of_entry": -0.01525,
+          "median_pnl_pct_of_entry": -0.01525,
+          "mean_capture_frac_of_mfe": -0.489183,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.489183,
+          "mean_left_on_table_pct_of_entry": 0.04425,
+          "green_then_lost_rate": 1.0,
+          "score": -0.02525
+        }
+      },
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 7.36,
+          "cost": 0.12,
+          "pnl": 7.24,
+          "pnl_pct_of_entry": 0.0905,
+          "mfe_peak_pct": 0.105,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": 0.861905,
+          "left_on_table_pct_of_entry": 0.0145,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.92,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "B_arm4"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.52608,
+          "cost": 0.12,
+          "pnl": 1.4061,
+          "pnl_pct_of_entry": 0.017576,
+          "mfe_peak_pct": 0.042,
+          "mae_peak_pct": 0.04,
+          "capture_frac_of_mfe": 0.418476,
+          "left_on_table_pct_of_entry": 0.024424,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.19076,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.019075999999999916,
+          "trail_armed": true,
+          "mode": "B_arm4"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.16,
+          "cost": 0.12,
+          "pnl": -0.28,
+          "pnl_pct_of_entry": -0.0035,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": -0.134615,
+          "left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.98,
+              "reason": "hold_end",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": -0.84375,
+          "left_on_table_pct_of_entry": 0.059,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.7608,
+          "cost": 0.12,
+          "pnl": 1.6408,
+          "pnl_pct_of_entry": 0.02051,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.455778,
+          "left_on_table_pct_of_entry": 0.02449,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.2201,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "B_arm4"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.03,
+          "capture_frac_of_mfe": -6.75,
+          "left_on_table_pct_of_entry": 0.031,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-08T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4"
+        }
+      ]
+    },
+    "B_arm3_lock": {
+      "mode": "B_arm3_lock",
+      "label": "arm-after-MFE +3% \u00b7 lock width (70% of MAE-p50)",
+      "book_pnl": 10.1175,
+      "book_pnl_pct_of_entry_mean": 0.021078,
+      "book_pnl_pct_of_entry_median": 0.01953,
+      "capture_frac_of_mfe_mean": -0.729162,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.475006,
+      "left_on_table_pct_of_entry_mean": 0.021256,
+      "green_then_lost_rate": 0.166667,
+      "score": 0.019411,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": 0.021078,
+          "median_pnl_pct_of_entry": 0.01953,
+          "mean_capture_frac_of_mfe": -0.729162,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.475006,
+          "mean_left_on_table_pct_of_entry": 0.021256,
+          "green_then_lost_rate": 0.166667,
+          "score": 0.019411
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.047453,
+          "median_pnl_pct_of_entry": 0.027407,
+          "mean_capture_frac_of_mfe": 0.684389,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.684389,
+          "mean_left_on_table_pct_of_entry": 0.016547,
+          "green_then_lost_rate": 0.0,
+          "score": 0.047453
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.005298,
+          "median_pnl_pct_of_entry": -0.0035,
+          "mean_capture_frac_of_mfe": -2.142713,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.16093,
+          "mean_left_on_table_pct_of_entry": 0.025964,
+          "green_then_lost_rate": 0.333333,
+          "score": -0.008631
+        },
+        "green_then_lost": {
+          "n": 1,
+          "mean_pnl_pct_of_entry": -0.0035,
+          "median_pnl_pct_of_entry": -0.0035,
+          "mean_capture_frac_of_mfe": -0.134615,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.134615,
+          "mean_left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost_rate": 1.0,
+          "score": -0.0135
+        }
+      },
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 7.36,
+          "cost": 0.12,
+          "pnl": 7.24,
+          "pnl_pct_of_entry": 0.0905,
+          "mfe_peak_pct": 0.105,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": 0.861905,
+          "left_on_table_pct_of_entry": 0.0145,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.92,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": -0.08798300000000019,
+          "trail_armed": true,
+          "mode": "B_arm3_lock"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.076256,
+          "cost": 0.12,
+          "pnl": 1.9563,
+          "pnl_pct_of_entry": 0.024453,
+          "mfe_peak_pct": 0.042,
+          "mae_peak_pct": 0.04,
+          "capture_frac_of_mfe": 0.582219,
+          "left_on_table_pct_of_entry": 0.017547,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.259532,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.02595320000000001,
+          "trail_armed": true,
+          "mode": "B_arm3_lock"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.16,
+          "cost": 0.12,
+          "pnl": -0.28,
+          "pnl_pct_of_entry": -0.0035,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": -0.134615,
+          "left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.98,
+              "reason": "hold_end",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm3_lock"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.288576,
+          "cost": 0.12,
+          "pnl": 1.1686,
+          "pnl_pct_of_entry": 0.014607,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": 0.456475,
+          "left_on_table_pct_of_entry": 0.017393,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.161072,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.01610720000000008,
+          "trail_armed": true,
+          "mode": "B_arm3_lock"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.31256,
+          "cost": 0.12,
+          "pnl": 2.1926,
+          "pnl_pct_of_entry": 0.027407,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.609044,
+          "left_on_table_pct_of_entry": 0.017593,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.28907,
+              "reason": "trail",
+              "when": "2026-09-08T14:00:00"
+            }
+          ],
+          "kill_pct_final": -0.028906999999999884,
+          "trail_armed": true,
+          "mode": "B_arm3_lock"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.03,
+          "capture_frac_of_mfe": -6.75,
+          "left_on_table_pct_of_entry": 0.031,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-08T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm3_lock"
+        }
+      ]
+    },
+    "B_arm4_lock": {
+      "mode": "B_arm4_lock",
+      "label": "arm-after-MFE +4% \u00b7 lock width (70% of MAE-p50)",
+      "book_pnl": 6.7889,
+      "book_pnl_pct_of_entry_mean": 0.014143,
+      "book_pnl_pct_of_entry_median": 0.010476,
+      "capture_frac_of_mfe_mean": -0.945866,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.214961,
+      "left_on_table_pct_of_entry_mean": 0.02819,
+      "green_then_lost_rate": 0.333333,
+      "score": 0.01081,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": 0.014143,
+          "median_pnl_pct_of_entry": 0.010476,
+          "mean_capture_frac_of_mfe": -0.945866,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.214961,
+          "mean_left_on_table_pct_of_entry": 0.02819,
+          "green_then_lost_rate": 0.333333,
+          "score": 0.01081
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.047453,
+          "median_pnl_pct_of_entry": 0.027407,
+          "mean_capture_frac_of_mfe": 0.684389,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.684389,
+          "mean_left_on_table_pct_of_entry": 0.016547,
+          "green_then_lost_rate": 0.0,
+          "score": 0.047453
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.019167,
+          "median_pnl_pct_of_entry": -0.027,
+          "mean_capture_frac_of_mfe": -2.576122,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.489183,
+          "mean_left_on_table_pct_of_entry": 0.039833,
+          "green_then_lost_rate": 0.666667,
+          "score": -0.025833
+        },
+        "green_then_lost": {
+          "n": 2,
+          "mean_pnl_pct_of_entry": -0.01525,
+          "median_pnl_pct_of_entry": -0.01525,
+          "mean_capture_frac_of_mfe": -0.489183,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.489183,
+          "mean_left_on_table_pct_of_entry": 0.04425,
+          "green_then_lost_rate": 1.0,
+          "score": -0.02525
+        }
+      },
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 7.36,
+          "cost": 0.12,
+          "pnl": 7.24,
+          "pnl_pct_of_entry": 0.0905,
+          "mfe_peak_pct": 0.105,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": 0.861905,
+          "left_on_table_pct_of_entry": 0.0145,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.92,
+              "reason": "hold_end",
+              "when": "2026-09-09T11:00:00"
+            }
+          ],
+          "kill_pct_final": -0.08798300000000019,
+          "trail_armed": true,
+          "mode": "B_arm4_lock"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.076256,
+          "cost": 0.12,
+          "pnl": 1.9563,
+          "pnl_pct_of_entry": 0.024453,
+          "mfe_peak_pct": 0.042,
+          "mae_peak_pct": 0.04,
+          "capture_frac_of_mfe": 0.582219,
+          "left_on_table_pct_of_entry": 0.017547,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.259532,
+              "reason": "trail",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": -0.02595320000000001,
+          "trail_armed": true,
+          "mode": "B_arm4_lock"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.16,
+          "cost": 0.12,
+          "pnl": -0.28,
+          "pnl_pct_of_entry": -0.0035,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": -0.134615,
+          "left_on_table_pct_of_entry": 0.0295,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "hold_end"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.98,
+              "reason": "hold_end",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4_lock"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.05,
+          "capture_frac_of_mfe": -0.84375,
+          "left_on_table_pct_of_entry": 0.059,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-09T10:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4_lock"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 2.31256,
+          "cost": 0.12,
+          "pnl": 2.1926,
+          "pnl_pct_of_entry": 0.027407,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.609044,
+          "left_on_table_pct_of_entry": 0.017593,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.28907,
+              "reason": "trail",
+              "when": "2026-09-08T14:00:00"
+            }
+          ],
+          "kill_pct_final": -0.028906999999999884,
+          "trail_armed": true,
+          "mode": "B_arm4_lock"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.03,
+          "capture_frac_of_mfe": -6.75,
+          "left_on_table_pct_of_entry": 0.031,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-08T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": false,
+          "mode": "B_arm4_lock"
+        }
+      ]
+    },
+    "C": {
+      "mode": "C",
+      "label": "PR #16 Mode B contrast: trail-from-entry MAE-p50 (arm=0)",
+      "book_pnl": -0.2935,
+      "book_pnl_pct_of_entry_mean": -0.000611,
+      "book_pnl_pct_of_entry_median": 0.001439,
+      "capture_frac_of_mfe_mean": -1.071532,
+      "capture_frac_when_mfe_ge_1pct_mean": 0.064161,
+      "left_on_table_pct_of_entry_mean": 0.025278,
+      "green_then_lost_rate": 0.166667,
+      "score": -0.002278,
+      "n": 6,
+      "n_no_bars": 0,
+      "slices": {
+        "all": {
+          "n": 6,
+          "mean_pnl_pct_of_entry": -0.000611,
+          "median_pnl_pct_of_entry": 0.001439,
+          "mean_capture_frac_of_mfe": -1.071532,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.064161,
+          "mean_left_on_table_pct_of_entry": 0.025278,
+          "green_then_lost_rate": 0.166667,
+          "score": -0.002278
+        },
+        "rippers": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": 0.004536,
+          "median_pnl_pct_of_entry": 0.00095,
+          "mean_capture_frac_of_mfe": 0.001009,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.001009,
+          "mean_left_on_table_pct_of_entry": 0.024131,
+          "green_then_lost_rate": 0.333333,
+          "score": 0.001203
+        },
+        "grinders": {
+          "n": 3,
+          "mean_pnl_pct_of_entry": -0.005759,
+          "median_pnl_pct_of_entry": 0.001928,
+          "mean_capture_frac_of_mfe": -2.144074,
+          "mean_capture_frac_when_mfe_ge_1pct": 0.15889,
+          "mean_left_on_table_pct_of_entry": 0.026425,
+          "green_then_lost_rate": 0.0,
+          "score": -0.005759
+        },
+        "green_then_lost": {
+          "n": 1,
+          "mean_pnl_pct_of_entry": -0.007852,
+          "median_pnl_pct_of_entry": -0.007852,
+          "mean_capture_frac_of_mfe": -0.49075,
+          "mean_capture_frac_when_mfe_ge_1pct": -0.49075,
+          "mean_left_on_table_pct_of_entry": 0.023852,
+          "green_then_lost_rate": 1.0,
+          "score": -0.017852
+        }
+      },
+      "runtime_s": 0.0,
+      "trades": [
+        {
+          "symbol": "RIPPER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 5,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.105,
+            "mae_peak_pct": 0.012,
+            "giveback_from_high_pct": 0.027559,
+            "giveback_after_3pct_off_high": 0.021947,
+            "giveback_after_4pct_off_high": 0.021947,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": 0.092,
+            "n_bars": 5,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -0.50816,
+          "cost": 0.12,
+          "pnl": -0.6282,
+          "pnl_pct_of_entry": -0.007852,
+          "mfe_peak_pct": 0.016,
+          "mae_peak_pct": 0.012,
+          "capture_frac_of_mfe": -0.49075,
+          "left_on_table_pct_of_entry": 0.023852,
+          "green_then_lost": true,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.93648,
+              "reason": "trail",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "FADE4",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.042,
+            "mae_peak_pct": 0.04,
+            "giveback_from_high_pct": 0.078695,
+            "giveback_after_3pct_off_high": 0.078695,
+            "giveback_after_4pct_off_high": 0.078695,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": true,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": -0.035,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 0.196,
+          "cost": 0.12,
+          "pnl": 0.076,
+          "pnl_pct_of_entry": 0.00095,
+          "mfe_peak_pct": 0.025,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.038,
+          "left_on_table_pct_of_entry": 0.02405,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.0245,
+              "reason": "trail",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "GRINDER",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.026,
+            "mae_peak_pct": 0.006,
+            "giveback_from_high_pct": 0.031189,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.002,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 0.27424,
+          "cost": 0.12,
+          "pnl": 0.1542,
+          "pnl_pct_of_entry": 0.001928,
+          "mfe_peak_pct": 0.026,
+          "mae_peak_pct": 0.006,
+          "capture_frac_of_mfe": 0.074154,
+          "left_on_table_pct_of_entry": 0.024072,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.034279999999999,
+              "reason": "trail",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "GTL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 11,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.032,
+            "mae_peak_pct": 0.05,
+            "giveback_from_high_pct": 0.079457,
+            "giveback_after_3pct_off_high": 0.079457,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": true,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.045,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 0.74368,
+          "cost": 0.12,
+          "pnl": 0.6237,
+          "pnl_pct_of_entry": 0.007796,
+          "mfe_peak_pct": 0.032,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.243625,
+          "left_on_table_pct_of_entry": 0.024204,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.09296,
+              "reason": "trail",
+              "when": "2026-09-08T12:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "LOCKDEMO",
+          "entry_date": "2026-09-08",
+          "entry_hour": 12,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.045,
+            "mae_peak_pct": 0.0,
+            "giveback_from_high_pct": 0.023923,
+            "giveback_after_3pct_off_high": 0.023923,
+            "giveback_after_4pct_off_high": 0.023923,
+            "touched_plus_3pct": true,
+            "touched_plus_4pct": true,
+            "faded_after_3pct": false,
+            "faded_after_4pct": true,
+            "final_pct_of_entry": 0.028,
+            "n_bars": 3,
+            "is_ripper": true,
+            "is_grinder": false
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": 1.7608,
+          "cost": 0.12,
+          "pnl": 1.6408,
+          "pnl_pct_of_entry": 0.02051,
+          "mfe_peak_pct": 0.045,
+          "mae_peak_pct": 0.0,
+          "capture_frac_of_mfe": 0.455778,
+          "left_on_table_pct_of_entry": 0.02449,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "trail"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 10.220099999999999,
+              "reason": "trail",
+              "when": "2026-09-08T13:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        },
+        {
+          "symbol": "CHOPKILL",
+          "entry_date": "2026-09-08",
+          "entry_hour": 10,
+          "source": "fixture",
+          "n_bars": 3,
+          "recommendable": true,
+          "path": {
+            "mfe_peak_pct": 0.004,
+            "mae_peak_pct": 0.052,
+            "giveback_from_high_pct": 0.055777,
+            "giveback_after_3pct_off_high": 0.0,
+            "giveback_after_4pct_off_high": 0.0,
+            "touched_plus_3pct": false,
+            "touched_plus_4pct": false,
+            "faded_after_3pct": false,
+            "faded_after_4pct": false,
+            "final_pct_of_entry": -0.05,
+            "n_bars": 3,
+            "is_ripper": false,
+            "is_grinder": true
+          },
+          "entry_price": 10.0,
+          "shares": 8,
+          "realized_gross": -2.04,
+          "cost": 0.12,
+          "pnl": -2.16,
+          "pnl_pct_of_entry": -0.027,
+          "mfe_peak_pct": 0.004,
+          "mae_peak_pct": 0.03,
+          "capture_frac_of_mfe": -6.75,
+          "left_on_table_pct_of_entry": 0.031,
+          "green_then_lost": false,
+          "exit_reasons": [
+            "kill"
+          ],
+          "exits": [
+            {
+              "tranche_id": "ALL",
+              "shares": 8,
+              "exit_price": 9.745,
+              "reason": "kill",
+              "when": "2026-09-08T11:00:00"
+            }
+          ],
+          "kill_pct_final": 0.0255,
+          "trail_armed": true,
+          "mode": "C"
+        }
+      ]
+    }
+  },
+  "recommendation": {
+    "prefer_b_for_live_later": false,
+    "verdict": "MECHANISM_ONLY",
+    "reason": "Designed fixture (not live 1H): arm-after-MFE keeps the ripper that from-entry loses. Least-bad B on rippers = B_arm3_lock at 4.75% of entry vs A 2.58%. Do **not** prefer B for live until a book / h1_bar_cache / Polygon replay confirms the same gate.",
+    "best_b_on_rippers": {
+      "mode": "B_arm3_lock",
+      "label": "arm-after-MFE +3% \u00b7 lock width (70% of MAE-p50)",
+      "all_mean": 0.021078,
+      "all_median": 0.01953,
+      "ripper_mean": 0.047453,
+      "ripper_left_on_table": 0.016547,
+      "ripper_n": 3,
+      "gtl": 0.166667
+    },
+    "a_all_mean_pct_of_entry": 0.0035,
+    "a_ripper_mean_pct_of_entry": 0.025792,
+    "a_green_then_lost_rate": 0.333333,
+    "ranked_b_on_rippers": [
+      {
+        "mode": "B_arm3_lock",
+        "label": "arm-after-MFE +3% \u00b7 lock width (70% of MAE-p50)",
+        "all_mean": 0.021078,
+        "all_median": 0.01953,
+        "ripper_mean": 0.047453,
+        "ripper_left_on_table": 0.016547,
+        "ripper_n": 3,
+        "gtl": 0.166667
+      },
+      {
+        "mode": "B_arm4_lock",
+        "label": "arm-after-MFE +4% \u00b7 lock width (70% of MAE-p50)",
+        "all_mean": 0.014143,
+        "all_median": 0.010476,
+        "ripper_mean": 0.047453,
+        "ripper_left_on_table": 0.016547,
+        "ripper_n": 3,
+        "gtl": 0.333333
+      },
+      {
+        "mode": "B_arm3",
+        "label": "arm-after-MFE +3% of entry \u00b7 MAE-p50 trail \u00b7 kill follows trail",
+        "all_mean": 0.017647,
+        "all_median": 0.012686,
+        "ripper_mean": 0.042862,
+        "ripper_left_on_table": 0.021138,
+        "ripper_n": 3,
+        "gtl": 0.166667
+      },
+      {
+        "mode": "B_arm4",
+        "label": "arm-after-MFE +4% of entry \u00b7 MAE-p50 trail \u00b7 kill follows trail",
+        "all_mean": 0.011848,
+        "all_median": 0.007038,
+        "ripper_mean": 0.042862,
+        "ripper_left_on_table": 0.021138,
+        "ripper_n": 3,
+        "gtl": 0.333333
+      }
+    ],
+    "sample": "n_bars>=3 (6/6)",
+    "invite_human_review": true,
+    "live_patch_authorized": false
+  },
+  "degrade_notes": "dry-run fixture (no Polygon)",
+  "runtime_s": 0.014,
+  "live_files_edited": [],
+  "note": "PAPER-ONLY. Mode A calls live php_process_bar read-only. B/C use php_early_trail_kill_paper.paper_process_bar. Do not change live Peak Hour gates from these numbers."
+}
