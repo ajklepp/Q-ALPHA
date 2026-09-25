@@ -392,6 +392,10 @@ The entry models below are primarily Strategy Lab/research terminology, not the 
 **Definition:** Viewer tab for the long-only daily trend paper book (EMA20/200, ADX, ATR size, 20% heat, $5,000). The engine is the Cursor Origin repo [seykota-lab](https://cursor.com/codebase/aaron-klepp-alderson/seykota-lab). This dashboard only reads `results/seykota/paper_book.json` (or `SEYKOTA_PAPER_BOOK`).  
 **Plain English:** Seykota’s trend book, displayed from a paper file. Q-ALPHA does not run it.
 
+### LUCA'S STRATEGY
+**Definition:** Viewer tab for a separate long-only paper book (`strategy`: `luca_strategy`). Status is PAPER. Q-ALPHA only reads `results/luca_strategy/paper_book.json` (or `LUCA_STRATEGY_PAPER_BOOK`). The Origin repo is not published yet; the tab shows placeholder link text until that URL exists. It does not read the PROMIX book and it does not send TWS orders. Live Peak Hour is unchanged.  
+**Plain English:** Luca’s own paper file, shown on its own tab. PRO MIX stays a different strategy.
+
 ---
 
 *Informational only. Peak Hour Performers currently runs in IBKR paper; Strategy Lab is archived SIM; neither uses real money.*

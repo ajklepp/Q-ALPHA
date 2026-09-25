@@ -1,4 +1,4 @@
-"""Viewers for the PRO MIX and SEYKOTA paper files. No strategy engine."""
+"""Viewers for the PRO MIX, SEYKOTA, and LUCA'S STRATEGY paper files. No strategy engine."""
 from __future__ import annotations
 
 import json
@@ -13,6 +13,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from dashboard_luca_strategy import (  # noqa: E402
+    LUCA_ORIGIN_PLACEHOLDER,
+    SOURCE_NOTE as LUCA_SOURCE,
+    load_luca_strategy_book,
+)
 from dashboard_pro_mix import (  # noqa: E402
     ALIAS,
     PROMIX_ORIGIN_URL,
@@ -30,9 +35,18 @@ from dashboard_strategy_paper import (  # noqa: E402
 
 class TestPaperBookViewer(unittest.TestCase):
     def test_repo_scaffolds_are_empty_paper_books(self) -> None:
-        with patch.dict(os.environ, {"PRO_MIX_PAPER_BOOK": "", "SEYKOTA_PAPER_BOOK": ""}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "PRO_MIX_PAPER_BOOK": "",
+                "SEYKOTA_PAPER_BOOK": "",
+                "LUCA_STRATEGY_PAPER_BOOK": "",
+            },
+            clear=False,
+        ):
             pro = load_pro_mix_book()
             sey = load_seykota_book()
+            luca = load_luca_strategy_book()
         self.assertTrue(pro["ok"])
         self.assertEqual(pro["mode"], "PAPER")
         self.assertEqual(pro["alias"], ALIAS)
@@ -45,6 +59,15 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertEqual(sey["strategy"], "seykota")
         self.assertTrue(str(sey["path"]).endswith("results/seykota/paper_book.json"))
         self.assertIn("seykota-lab", str(sey.get("source_project")))
+        self.assertTrue(luca["ok"])
+        self.assertEqual(luca["mode"], "PAPER")
+        self.assertEqual(luca["strategy"], "luca_strategy")
+        self.assertEqual(luca["alias"], "LUCA'S STRATEGY")
+        self.assertEqual(luca["open"], [])
+        self.assertEqual(luca["closed"], [])
+        self.assertTrue(str(luca["path"]).endswith("results/luca_strategy/paper_book.json"))
+        self.assertNotIn("PROMIX", str(luca.get("source_project")))
+        self.assertIn("not published", str(luca.get("source_project")))
 
     def test_env_file_wins_over_scaffold(self) -> None:
         payload = {
@@ -97,6 +120,35 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertTrue(str(book["reason"]).startswith("unreadable:"))
         self.assertEqual(book["open"], [])
 
+    def test_luca_env_file_wins_over_scaffold(self) -> None:
+        payload = {
+            "strategy": "luca_strategy",
+            "alias": "LUCA'S STRATEGY",
+            "mode": "PAPER",
+            "updated_et": "2026-09-25T16:00:00-04:00",
+            "open": [{
+                "symbol": "XYZ",
+                "entry": 20.0,
+                "qty": 10,
+                "stop": 19.0,
+                "risk_usd": 10.0,
+            }],
+            "closed": [],
+            "totals": {"equity_usd": 5000, "heat_pct": 0.0},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper_book.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with patch.dict(os.environ, {"LUCA_STRATEGY_PAPER_BOOK": str(path)}, clear=False):
+                book = load_luca_strategy_book()
+        self.assertTrue(book["ok"])
+        self.assertEqual(book["strategy"], "luca_strategy")
+        self.assertEqual(book["alias"], "LUCA'S STRATEGY")
+        self.assertEqual(book["mode"], "PAPER")
+        self.assertEqual(book["path"], str(path))
+        self.assertEqual(book["open"][0]["symbol"], "XYZ")
+        self.assertEqual(book["totals"]["n_open"], 1)
+
     def test_missing_env_path_uses_repo_scaffold(self) -> None:
         missing = "/tmp/qalpha-missing-pro-mix-paper-book.json"
         with patch.dict(os.environ, {"PRO_MIX_PAPER_BOOK": missing}, clear=False):
@@ -130,6 +182,7 @@ class TestPaperBookViewer(unittest.TestCase):
                 "Track 100",
                 "PRO MIX",
                 "SEYKOTA",
+                "LUCA'S STRATEGY",
                 "3R Paper",
                 "Trade Log",
                 "Performance",
@@ -141,13 +194,24 @@ class TestPaperBookViewer(unittest.TestCase):
         )
         self.assertNotIn("Camillo", labels)
         self.assertFalse((ROOT / "dashboard_camillo.py").exists())
-        for name in ("dashboard_pro_mix.py", "dashboard_seykota.py", "dashboard_strategy_paper.py"):
+        for name in (
+            "dashboard_pro_mix.py",
+            "dashboard_seykota.py",
+            "dashboard_luca_strategy.py",
+            "dashboard_strategy_paper.py",
+        ):
             src = (ROOT / name).read_text(encoding="utf-8")
             self.assertNotIn("ib_insync", src)
             self.assertNotIn("MarketOrder", src)
         self.assertIn(SEYKOTA_ORIGIN_URL, (ROOT / "dashboard_seykota.py").read_text(encoding="utf-8"))
         self.assertIn("LUCA'S STRATEGY", PRO_MIX_SOURCE)
         self.assertIn(PROMIX_ORIGIN_URL, PRO_MIX_SOURCE)
+        luca_src = (ROOT / "dashboard_luca_strategy.py").read_text(encoding="utf-8")
+        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, luca_src)
+        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, LUCA_SOURCE)
+        self.assertNotIn(PROMIX_ORIGIN_URL, luca_src)
+        self.assertNotIn("aaron-klepp-alderson/PROMIX", luca_src)
+        self.assertNotIn(SEYKOTA_ORIGIN_URL, luca_src)
 
 
 class TestStrategyTabRender(unittest.TestCase):
@@ -156,8 +220,10 @@ class TestStrategyTabRender(unittest.TestCase):
 
         pro = _run_tab(AppTest, "dashboard_pro_mix", "render_pro_mix_tab")
         sey = _run_tab(AppTest, "dashboard_seykota", "render_seykota_tab")
+        luca = _run_tab(AppTest, "dashboard_luca_strategy", "render_luca_strategy_tab")
         self.assertFalse(list(pro.exception))
         self.assertFalse(list(sey.exception))
+        self.assertFalse(list(luca.exception))
 
         pro_text = _visible_text(pro)
         self.assertIn("PAPER", pro_text)
@@ -172,6 +238,15 @@ class TestStrategyTabRender(unittest.TestCase):
         self.assertIn("seykota-lab", sey_text)
         self.assertIn(SEYKOTA_ORIGIN_URL, sey_text)
         self.assertIn("Live Peak Hour", sey_text)
+
+        luca_text = _visible_text(luca)
+        self.assertIn("PAPER", luca_text)
+        self.assertIn("LUCA'S STRATEGY", luca_text)
+        self.assertIn("Paper book is empty", luca_text)
+        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, luca_text)
+        self.assertIn("Live Peak Hour", luca_text)
+        self.assertNotIn(PROMIX_ORIGIN_URL, luca_text)
+        self.assertIn("does not send TWS orders", luca_text)
 
 
 def _run_tab(app_test: object, module: str, fn: str) -> object:
