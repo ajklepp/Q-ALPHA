@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dashboard_luca_strategy import (  # noqa: E402
-    LUCA_ORIGIN_PLACEHOLDER,
+    LUCA_ORIGIN_URL,
     SOURCE_NOTE as LUCA_SOURCE,
     load_luca_strategy_book,
 )
@@ -67,7 +67,7 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertEqual(luca["closed"], [])
         self.assertTrue(str(luca["path"]).endswith("results/luca_strategy/paper_book.json"))
         self.assertNotIn("PROMIX", str(luca.get("source_project")))
-        self.assertIn("not published", str(luca.get("source_project")))
+        self.assertEqual(luca.get("source_project"), LUCA_ORIGIN_URL)
 
     def test_env_file_wins_over_scaffold(self) -> None:
         payload = {
@@ -207,8 +207,10 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertIn("LUCA'S STRATEGY", PRO_MIX_SOURCE)
         self.assertIn(PROMIX_ORIGIN_URL, PRO_MIX_SOURCE)
         luca_src = (ROOT / "dashboard_luca_strategy.py").read_text(encoding="utf-8")
-        self.assertIn("Origin link pending", luca_src)
-        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, LUCA_SOURCE)
+        self.assertIn(LUCA_ORIGIN_URL, luca_src)
+        self.assertIn(LUCA_ORIGIN_URL, LUCA_SOURCE)
+        self.assertIn("LUCAS-STRATEGY", LUCA_SOURCE)
+        self.assertNotIn("Origin link pending", luca_src)
         self.assertNotIn(PROMIX_ORIGIN_URL, luca_src)
         self.assertNotIn("aaron-klepp-alderson/PROMIX", luca_src)
         self.assertNotIn(SEYKOTA_ORIGIN_URL, luca_src)
@@ -243,7 +245,9 @@ class TestStrategyTabRender(unittest.TestCase):
         self.assertIn("PAPER", luca_text)
         self.assertIn("LUCA'S STRATEGY", luca_text)
         self.assertIn("Paper book is empty", luca_text)
-        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, luca_text)
+        self.assertIn(LUCA_ORIGIN_URL, luca_text)
+        self.assertIn("LUCAS-STRATEGY", luca_text)
+        self.assertNotIn("Origin link pending", luca_text)
         self.assertIn("Live Peak Hour", luca_text)
         self.assertNotIn(PROMIX_ORIGIN_URL, luca_text)
         self.assertIn("does not send TWS orders", luca_text)

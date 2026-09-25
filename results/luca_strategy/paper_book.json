@@ -25,6 +25,6 @@
     "n_open": 0,
     "n_closed": 0
   },
-  "source_project": "pending: LUCA'S STRATEGY Origin repo (not published)",
-  "notes": "Empty viewer scaffold. The LUCA'S STRATEGY Origin repo writes this file once it is published. Q-ALPHA does not run the strategy and does not point this book at PROMIX."
+  "source_project": "https://cursor.com/codebase/aaron-klepp-alderson/LUCAS-STRATEGY",
+  "notes": "Empty viewer scaffold. LUCAS-STRATEGY writes this file. Q-ALPHA does not run the strategy and does not point this book at PROMIX."
 }

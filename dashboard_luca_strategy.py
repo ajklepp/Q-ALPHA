@@ -1,8 +1,8 @@
 """
 Dashboard viewer — LUCA'S STRATEGY paper book.
 
-The strategy engine will live in its own Cursor Origin repo. This module only
-reads JSON under ``results/luca_strategy/`` and draws it. It does not place
+The strategy engine lives in the LUCAS-STRATEGY Cursor Origin repo. This module
+only reads JSON under ``results/luca_strategy/`` and draws it. It does not place
 TWS orders and it does not run PRO MIX or SEYKOTA.
 """
 from __future__ import annotations
@@ -22,22 +22,20 @@ ALIAS = "LUCA'S STRATEGY"
 ENV_VAR = "LUCA_STRATEGY_PAPER_BOOK"
 REPO_RELATIVE = Path("results") / "luca_strategy" / "paper_book.json"
 
-# Placeholder until that Origin repo is published. Not the PROMIX project.
-LUCA_ORIGIN_PLACEHOLDER = (
-    "Origin link pending — the LUCA'S STRATEGY repo is not published yet. "
-    "Replace this text with the Cursor Origin URL when it is."
-)
+# Separate Cursor Origin project. Q-ALPHA does not clone it and does not run it.
+# Not PROMIX and not seykota-lab.
+LUCA_ORIGIN_URL = "https://cursor.com/codebase/aaron-klepp-alderson/LUCAS-STRATEGY"
 SOURCE_NOTE = (
-    "Source of truth: LUCA'S STRATEGY Cursor Origin repo. "
-    f"{LUCA_ORIGIN_PLACEHOLDER} "
+    "Source of truth: LUCA'S STRATEGY Cursor Origin "
+    f"[LUCAS-STRATEGY]({LUCA_ORIGIN_URL}). "
     "Q-ALPHA does not run this strategy and does not clone that repo. "
     "Publish paper state to `results/luca_strategy/paper_book.json`, "
     "or set `LUCA_STRATEGY_PAPER_BOOK`."
 )
 
 RULE = (
-    "LUCA'S STRATEGY is a long-only paper book owned by its Cursor Origin repo. "
-    "That repo is not published yet. When the writer omits a risk card, this "
+    "LUCA'S STRATEGY is a long-only paper book owned by LUCAS-STRATEGY. "
+    "When the writer omits a risk card, this "
     f"viewer uses ${PAPER_STARTING_EQUITY_USD:,.0f} starting equity, "
     f"{PAPER_RISK_PER_TRADE_PCT:.0%} of equity at risk on each new long, "
     f"and open heat capped at {PAPER_MAX_HEAT_PCT:.0%} of equity. "
@@ -59,8 +57,8 @@ The LUCA'S STRATEGY Origin repo writes this file. Q-ALPHA only displays it.
 This is not the PRO MIX book and it is not `results/pro_mix/paper_book.json`.
 
 `results/luca_strategy/paper_book.json`, or `LUCA_STRATEGY_PAPER_BOOK`.
-Origin: not published yet. Update the placeholder in `dashboard_luca_strategy.py`
-when the new repo URL exists. Do not point this tab at PROMIX.
+Origin: https://cursor.com/codebase/aaron-klepp-alderson/LUCAS-STRATEGY
+This tab does not point at PROMIX.
 
 ```json
 {
