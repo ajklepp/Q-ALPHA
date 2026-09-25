@@ -2222,6 +2222,7 @@ def main() -> None:
         tab_track100,
         tab_pro_mix,
         tab_seykota,
+        tab_luca,
         tab_3r,
         tab_log,
         tab_perf,
@@ -2234,6 +2235,7 @@ def main() -> None:
         "Track 100",
         "PRO MIX",
         "SEYKOTA",
+        "LUCA'S STRATEGY",
         "3R Paper",
         "Trade Log",
         "Performance",
@@ -2257,6 +2259,10 @@ def main() -> None:
         from dashboard_seykota import render_seykota_tab
 
         render_seykota_tab()
+    with tab_luca:
+        from dashboard_luca_strategy import render_luca_strategy_tab
+
+        render_luca_strategy_tab()
     with tab_3r:
         from dashboard_3r_paper import render_3r_paper_tab
 
