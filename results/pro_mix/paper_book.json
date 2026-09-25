@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "strategy": "pro_mix",
+  "alias": "LUCA'S STRATEGY",
+  "mode": "PAPER",
+  "side": "long_only",
+  "scaffold": true,
+  "updated_et": null,
+  "risk_card": {
+    "starting_equity_usd": 5000,
+    "risk_per_trade_pct": 0.01,
+    "max_heat_pct": 0.20
+  },
+  "rules": {
+    "universe": "camillo_heat",
+    "entry": "pullback_or_break_retest",
+    "chase_breakouts": false
+  },
+  "equity_curve": [],
+  "open": [],
+  "closed": [],
+  "totals": {
+    "starting_cash": 5000.0,
+    "equity_usd": 5000.0,
+    "cash_usd": 5000.0,
+    "open_risk_usd": 0.0,
+    "heat_pct": 0.0,
+    "realized_pnl_usd": 0.0,
+    "n_open": 0,
+    "n_closed": 0
+  },
+  "universe": [],
+  "source_project": "Cursor Origin · PRO MIX / LUCA'S STRATEGY (separate repo, not Q-ALPHA)",
+  "notes": "Empty viewer scaffold. The PRO MIX Origin repo writes this file. Q-ALPHA does not run the strategy."
+}
