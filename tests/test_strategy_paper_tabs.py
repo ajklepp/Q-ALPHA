@@ -207,7 +207,7 @@ class TestPaperBookViewer(unittest.TestCase):
         self.assertIn("LUCA'S STRATEGY", PRO_MIX_SOURCE)
         self.assertIn(PROMIX_ORIGIN_URL, PRO_MIX_SOURCE)
         luca_src = (ROOT / "dashboard_luca_strategy.py").read_text(encoding="utf-8")
-        self.assertIn(LUCA_ORIGIN_PLACEHOLDER, luca_src)
+        self.assertIn("Origin link pending", luca_src)
         self.assertIn(LUCA_ORIGIN_PLACEHOLDER, LUCA_SOURCE)
         self.assertNotIn(PROMIX_ORIGIN_URL, luca_src)
         self.assertNotIn("aaron-klepp-alderson/PROMIX", luca_src)
